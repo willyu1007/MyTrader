@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "updatedAt": "2025-12-25T14:14:14Z",
+  "artifacts": [
+    {
+      "id": "api-openapi",
+      "type": "openapi",
+      "path": "docs/context/api/openapi.yaml",
+      "mode": "contract",
+      "format": "openapi-3.1",
+      "tags": [
+        "api"
+      ],
+      "checksumSha256": "52acc7009fb7b589902683847c529b985a6a855d7150a42364858e8209383316",
+      "lastUpdated": "2025-12-25T14:14:14Z",
+      "source": {
+        "kind": "manual",
+        "notes": "Edit the contract file; then run contextctl touch."
+      }
+    },
+    {
+      "id": "db-schema",
+      "type": "db-schema",
+      "path": "docs/context/db/schema.json",
+      "mode": "contract",
+      "format": "normalized-db-schema-v1",
+      "tags": [
+        "db"
+      ],
+      "checksumSha256": "1bf87ead7dfdb1d5d3b9a2bbfd61731924a2127a511345dc42603a0056f0cb7e",
+      "lastUpdated": "2025-12-25T14:14:14Z",
+      "source": {
+        "kind": "manual",
+        "notes": "Keep this mapping consistent with migrations/ORM; then run contextctl touch."
+      }
+    },
+    {
+      "id": "bpmn-example",
+      "type": "bpmn",
+      "path": "docs/context/process/example.bpmn",
+      "mode": "contract",
+      "format": "bpmn-2.0",
+      "tags": [
+        "bpmn",
+        "process"
+      ],
+      "checksumSha256": "1276230573853c3e20487671a11679169426ecd61bff59cb8f73e44b130d6f82",
+      "lastUpdated": "2025-12-25T14:14:14Z",
+      "source": {
+        "kind": "manual",
+        "notes": "Replace with real processes or add more .bpmn files; then run contextctl touch."
+      }
+    }
+  ]
+}

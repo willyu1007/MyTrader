@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "database": {
+    "kind": "relational",
+    "dialect": "generic",
+    "name": ""
+  },
+  "tables": [],
+  "notes": "This file is a normalized, tool-agnostic mapping of the database schema for LLM consumption. Keep it updated via `node .ai/scripts/contextctl.js`."
+}
