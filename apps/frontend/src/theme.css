@@ -1,0 +1,150 @@
+:root {
+  color-scheme: light dark;
+
+  --mt-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+    "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --mt-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  --mt-bg: #0b0f14;
+  --mt-bg-1: #0f1620;
+  --mt-surface: rgba(14, 19, 26, 0.72);
+  --mt-surface-2: rgba(17, 25, 36, 0.78);
+  --mt-field: rgba(11, 15, 20, 0.92);
+
+  --mt-border: rgba(232, 234, 237, 0.12);
+  --mt-border-strong: rgba(232, 234, 237, 0.18);
+
+  --mt-text: #e8eaed;
+  --mt-text-2: rgba(232, 234, 237, 0.8);
+  --mt-text-3: rgba(232, 234, 237, 0.7);
+
+  --mt-accent: #0891b2;
+  --mt-accent-2: #2a8cff;
+  --mt-success: #2bd970;
+  --mt-danger: #ff6b6b;
+  --mt-warning: #ffb020;
+
+  --mt-radius-sm: 10px;
+  --mt-radius-md: 12px;
+
+  --mt-shadow-md: 0 10px 35px rgba(0, 0, 0, 0.35);
+  --mt-shadow-sm: 0 4px 18px rgba(0, 0, 0, 0.22);
+  --mt-shadow-glow: 0 0 26px rgba(8, 145, 178, 0.16);
+
+  --mt-ring: 0 0 0 3px rgba(8, 145, 178, 0.25);
+
+  --mt-topbar-bg: rgba(14, 19, 26, 0.62);
+
+  --mt-body-bg:
+    radial-gradient(1200px 800px at 18% -10%, rgba(42, 140, 255, 0.18), transparent 55%),
+    radial-gradient(900px 700px at 100% 0%, rgba(8, 145, 178, 0.14), transparent 60%),
+    var(--mt-bg);
+
+  --mt-btn-bg: linear-gradient(
+    180deg,
+    rgba(232, 234, 237, 0.1),
+    rgba(232, 234, 237, 0.06)
+  );
+  --mt-btn-bg-hover: linear-gradient(
+    180deg,
+    rgba(232, 234, 237, 0.14),
+    rgba(232, 234, 237, 0.08)
+  );
+  --mt-btn-border: var(--mt-border-strong);
+  --mt-btn-border-hover: rgba(8, 145, 178, 0.35);
+
+  --mt-btn-primary-bg: linear-gradient(
+    180deg,
+    rgba(8, 145, 178, 0.34),
+    rgba(8, 145, 178, 0.18)
+  );
+  --mt-btn-primary-bg-hover: linear-gradient(
+    180deg,
+    rgba(8, 145, 178, 0.42),
+    rgba(8, 145, 178, 0.22)
+  );
+  --mt-btn-primary-border: rgba(8, 145, 178, 0.55);
+  --mt-btn-primary-border-hover: rgba(8, 145, 178, 0.75);
+
+  --mt-btn-secondary-bg: rgba(232, 234, 237, 0.08);
+  --mt-btn-secondary-bg-hover: rgba(232, 234, 237, 0.12);
+  --mt-btn-secondary-border: rgba(232, 234, 237, 0.12);
+  --mt-btn-secondary-border-hover: rgba(232, 234, 237, 0.18);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --mt-bg: #f5f7fb;
+    --mt-bg-1: #eef2f7;
+    --mt-surface: rgba(255, 255, 255, 0.76);
+    --mt-surface-2: rgba(255, 255, 255, 0.92);
+    --mt-field: rgba(255, 255, 255, 0.92);
+
+    --mt-border: rgba(15, 23, 42, 0.12);
+    --mt-border-strong: rgba(15, 23, 42, 0.16);
+
+    --mt-text: #0f172a;
+    --mt-text-2: rgba(15, 23, 42, 0.78);
+    --mt-text-3: rgba(15, 23, 42, 0.6);
+
+    --mt-shadow-md: 0 14px 40px rgba(2, 8, 23, 0.14);
+    --mt-shadow-sm: 0 6px 18px rgba(2, 8, 23, 0.1);
+    --mt-shadow-glow: 0 0 0 rgba(0, 0, 0, 0);
+
+    --mt-topbar-bg: rgba(255, 255, 255, 0.7);
+
+    --mt-body-bg:
+      radial-gradient(1200px 800px at 18% -10%, rgba(42, 140, 255, 0.12), transparent 55%),
+      radial-gradient(900px 700px at 100% 0%, rgba(8, 145, 178, 0.1), transparent 60%),
+      var(--mt-bg);
+
+    --mt-btn-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.92));
+    --mt-btn-bg-hover: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 1),
+      rgba(226, 232, 240, 0.9)
+    );
+    --mt-btn-border: var(--mt-border-strong);
+    --mt-btn-border-hover: rgba(8, 145, 178, 0.55);
+
+    --mt-btn-primary-bg: linear-gradient(
+      180deg,
+      rgba(8, 145, 178, 0.28),
+      rgba(8, 145, 178, 0.14)
+    );
+    --mt-btn-primary-bg-hover: linear-gradient(
+      180deg,
+      rgba(8, 145, 178, 0.36),
+      rgba(8, 145, 178, 0.18)
+    );
+    --mt-btn-primary-border: rgba(8, 145, 178, 0.6);
+    --mt-btn-primary-border-hover: rgba(8, 145, 178, 0.8);
+
+    --mt-btn-secondary-bg: rgba(15, 23, 42, 0.06);
+    --mt-btn-secondary-bg-hover: rgba(15, 23, 42, 0.1);
+    --mt-btn-secondary-border: rgba(15, 23, 42, 0.12);
+    --mt-btn-secondary-border-hover: rgba(15, 23, 42, 0.16);
+  }
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--mt-font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--mt-text);
+  background: var(--mt-body-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}

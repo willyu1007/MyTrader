@@ -9,14 +9,15 @@
   },
   "packageManager": "pnpm@9.0.0",
   "scripts": {
-    "build": "echo \"Add build script\"",
-    "dev": "echo \"Add dev script\"",
+    "build": "pnpm -C packages/shared build && pnpm -C apps/frontend build && pnpm -C apps/backend build",
+    "dev": "pnpm -C apps/backend dev",
+    "start": "pnpm build && pnpm -C apps/backend start",
     "lint": "echo \"Add lint script\"",
     "test": "echo \"Add test script\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "pnpm -C packages/shared build && pnpm exec tsc --noEmit -p apps/backend/tsconfig.json && pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
   }
 }
-

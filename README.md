@@ -37,6 +37,7 @@
 ## Getting Started
 
 - Install: `pnpm install`
-- Dev: `pnpm dev` (placeholder until Electron/Vite scaffolding is added)
+- Dev: `pnpm dev`
+- Start (production build): `pnpm start`
 - Test: `pnpm test` (placeholder)
 - Typecheck: `pnpm typecheck`

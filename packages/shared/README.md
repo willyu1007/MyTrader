@@ -1,3 +1,3 @@
 # Shared package
 
-This folder is a scaffold placeholder for shared types/utilities.
+Shared types/utilities used by `apps/backend` and `apps/frontend` (e.g. IPC types).

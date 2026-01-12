@@ -1,17 +1,38 @@
 # 03 Implementation Notes
 
 ## Status
-- Current status: planned
+- Current status: in_progress
 - Last updated: 2026-01-12
 
 ## What changed
-- Created dev-docs bundle for MVP foundation planning; no code changes yet.
+- Added Electron + React (Vite) scaffold for MVP foundation.
+- Implemented account index store + account create/lock/unlock flow via IPC.
+- Implemented per-account data directory layout and DB file initialization (SQLite business DB + placeholder DuckDB file).
+- Updated MVP UI copy to Chinese-only (no i18n in MVP).
+- Adjusted login UX: account input (with suggestions), login button label, and data-dir picker behavior.
+- 按参考截图重做登录/创建账号界面（双分区、带图标输入框、分隔线与告警条），并在 `window.mytrader` 不可用时提供提示与安全降级。
+- Added a dark, cyan-accent UI theme token set based on the reference dashboard screenshots.
+- Fixed “选择数据目录”交互：对话框绑定到触发窗口并强制聚焦；按钮样式升级，并支持跟随系统浅色/深色主题自动切换。
+- 进一步增强 macOS 下目录选择弹窗可见性：激活应用并将窗口置顶后再弹出系统对话框；前端在浏览器模式也会对点击给出明确提示，避免“看起来没反应”。
+- 修复 `window.mytrader` 在 Electron 中缺失：preload 运行在 sandbox 环境时无法 `require("@mytrader/shared")`，改为通过 `tsup noExternal` 将 `@mytrader/shared` 打包进 preload/main，保证 preload 可正常注入。
+- 新增 `ui_login.md` 作为登录/创建账号界面的 UI 规范，并对主题色/按钮样式/光晕效果做了进一步对齐。
+- 对登录页排版做二次打磨：统一全局字体尺度，登录按钮/输入高度对齐，表单动作区按参考图右对齐到输入列，卡片宽度更接近 `max-w-3xl`。
+- 增加 `pnpm start`：修复环境变量 `ELECTRON_RUN_AS_NODE=1` 导致 Electron 以 Node 模式启动的问题，并为 `@mytrader/shared` 统一为 CommonJS 输出以兼容 main/preload 的 `require`。
 
 ## Files/modules touched (high level)
+- apps/backend/*
+- apps/frontend/*
+- packages/shared/*
 - dev-docs/active/mvp-foundation/*
-- docs/project/requirements.md
+- package.json / tsconfig.json / pnpm-workspace.yaml
 
 ## Decisions & tradeoffs
+- Decision: MVP UI is Chinese-only
+  - Rationale: target users and workflow are Chinese-first; reduce i18n complexity in MVP.
+  - Alternatives considered: add i18n framework and multi-language support.
+- Decision: use `@vscode/sqlite3` as the SQLite driver in Electron main process
+  - Rationale: reduce native-module friction vs `better-sqlite3` under mixed Node/Electron toolchains; aligns with Electron usage patterns.
+  - Alternatives considered: `better-sqlite3` (+ electron-rebuild), Node `node:sqlite` (runtime/version constraints).
 - Decision: account-scoped business DBs + shared market cache
   - Rationale: strong isolation with minimal data duplication
   - Alternatives considered: single shared DB with account_id partitioning

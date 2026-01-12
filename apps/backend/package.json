@@ -1,0 +1,21 @@
+{
+  "name": "@mytrader/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/start.mjs",
+    "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mytrader/shared": "workspace:*",
+    "@vscode/sqlite3": "5.1.10-vscode"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "tsup": "^8.0.0"
+  }
+}

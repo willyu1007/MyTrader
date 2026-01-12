@@ -17,6 +17,10 @@ CLAUDE.md
 
 # Node
 node_modules/
+dist/
+**/dist/
+apps/**/vite.config.js
+apps/**/tsup.config.js
 
 # Python
 __pycache__/
