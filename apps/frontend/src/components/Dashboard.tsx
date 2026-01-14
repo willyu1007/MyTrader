@@ -87,6 +87,20 @@ const navItems = [
     icon: "show_chart"
   },
   {
+    key: "index-tracking",
+    label: "\u6307\u6570\u8ddf\u8e2a",
+    meta: "\u6307\u6570/\u5bf9\u6807",
+    description: "\u8ddf\u8e2a\u6838\u5fc3\u6307\u6570\u4e0e\u5bf9\u6807\u8d70\u52bf\u3002",
+    icon: "track_changes"
+  },
+  {
+    key: "data-analysis",
+    label: "\u6570\u636e\u5206\u6790",
+    meta: "\u5206\u6790/\u6d1e\u5bdf",
+    description: "\u5bf9\u7ec4\u5408\u4e0e\u884c\u60c5\u8fdb\u884c\u6307\u6807\u5206\u6790\u3002",
+    icon: "functions"
+  },
+  {
     key: "opportunities",
     label: "机会",
     meta: "扫描/策略",
@@ -105,7 +119,7 @@ const navItems = [
     label: "观点",
     meta: "研究/复盘",
     description: "记录观点、研究与复盘笔记。",
-    icon: "insights"
+    icon: "psychology"
   },
   {
     key: "alerts",
@@ -130,6 +144,12 @@ const navItems = [
   }
 ] as const;
 
+const otherTabs = [
+  { key: "data-import", label: "\u6570\u636e\u5bfc\u5165" }
+] as const;
+
+type OtherTab = (typeof otherTabs)[number]["key"];
+
 type WorkspaceView = (typeof navItems)[number]["key"];
 
 export function Dashboard({ account, onLock }: DashboardProps) {
@@ -140,6 +160,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<WorkspaceView>("portfolio");
+  const [otherTab, setOtherTab] = useState<OtherTab>("data-import");
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
 
   const [portfolioName, setPortfolioName] = useState("");
@@ -455,14 +476,14 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   }, [snapshot, ingestStartDate, ingestEndDate, loadSnapshot]);
 
   return (
-    <div className="flex h-full bg-white dark:bg-[#0B0E14] overflow-hidden">
+    <div className="flex h-full bg-white/90 dark:bg-background-dark/80 backdrop-blur-xl overflow-hidden">
       {/* Sidebar */}
       <aside 
         className={`${
           isNavCollapsed ? "w-16" : "w-40"
-        } flex-shrink-0 bg-[#0f172a] border-r border-slate-800 flex flex-col transition-all duration-300 z-20`}
+        } flex-shrink-0 bg-surface-light/95 dark:bg-surface-dark/90 backdrop-blur-xl border-r border-border-light dark:border-border-dark flex flex-col transition-all duration-300 z-20`}
       >
-        <div className="flex items-center justify-between p-2 border-b border-slate-800 h-10">
+        <div className="flex items-center justify-between p-2 border-b border-border-light dark:border-border-dark h-10">
           <p className={`text-xs font-semibold text-slate-400 ${isNavCollapsed ? "hidden" : "block"}`}>
             导航
           </p>
@@ -512,9 +533,9 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       </aside>
 
       {/* Main Content */}
-      <section className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white dark:bg-[#0B0E14]">
+      <section className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white/85 dark:bg-background-dark/70 backdrop-blur-lg">
         {/* Top Navigation / Toolbar */}
-        <div className="h-10 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-3 flex-shrink-0 bg-white dark:bg-[#0B0E14]">
+        <div className="h-10 border-b border-border-light dark:border-border-dark flex items-center justify-between px-3 flex-shrink-0 bg-white/85 dark:bg-background-dark/75 backdrop-blur-lg">
            <div className="flex items-center gap-4">
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-200">
                 {navItems.find(n => n.key === activeView)?.label}
@@ -633,7 +654,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                             ))}
                           </tr>
                         </thead>
-                        <tbody className="bg-white dark:bg-[#0B0E14] divide-y divide-slate-200 dark:divide-slate-800">
+                        <tbody className="bg-white dark:bg-surface-dark/70 divide-y divide-slate-200 dark:divide-border-dark">
                           {snapshot.positions.length === 0 ? (
                             <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">暂无持仓</td></tr>
                           ) : (
@@ -773,7 +794,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                              <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 uppercase">市值</th>
                            </tr>
                          </thead>
-                         <tbody className="bg-white dark:bg-[#0B0E14] divide-y divide-slate-200 dark:divide-slate-800">
+                         <tbody className="bg-white dark:bg-surface-dark/70 divide-y divide-slate-200 dark:divide-border-dark">
                            {snapshot.exposures.byAssetClass.map(e => (
                              <tr key={e.key}>
                                <td className="px-4 py-2 text-sm text-slate-700 dark:text-slate-300">{formatAssetClassLabel(e.key)}</td>
@@ -850,6 +871,43 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
           {/* View: Market */}
           {activeView === "market" && (
+            <PlaceholderPanel 
+              title={navItems.find(n => n.key === activeView)?.label ?? ""}
+              description={navItems.find(n => n.key === activeView)?.description ?? ""}
+            />
+          )}
+
+          {/* View: Other Tabs */}
+          {activeView === "other" && (
+            <Panel>
+              <div className="flex items-center gap-3 border-b border-slate-200 dark:border-border-dark pb-2">
+                <div role="tablist" aria-label="\u5176\u4ed6\u529f\u80fd" className="flex items-center gap-2">
+                  {otherTabs.map((tab) => {
+                    const isActive = otherTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        className={`px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors ${
+                          isActive
+                            ? "text-primary border-primary"
+                            : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-700 dark:hover:text-slate-200"
+                        }`}
+                        onClick={() => setOtherTab(tab.key)}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </Panel>
+          )}
+
+          {/* View: Other / Data Import */}
+          {activeView === "other" && otherTab === "data-import" && (
             <Panel>
                <div className="mb-6 bg-blue-50 dark:bg-blue-900/10 border-l-4 border-blue-500 p-3 text-sm text-blue-800 dark:text-blue-300">
                   最新行情日期：<span className="font-mono font-medium">{snapshot?.priceAsOf ?? "--"}</span>
@@ -895,7 +953,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
           )}
 
           {/* Placeholders */}
-          {["opportunities", "backtest", "insights", "alerts", "other"].includes(activeView) && (
+          {["opportunities", "backtest", "insights", "alerts", "index-tracking", "data-analysis"].includes(activeView) && (
             <PlaceholderPanel 
               title={navItems.find(n => n.key === activeView)?.label ?? ""}
               description={navItems.find(n => n.key === activeView)?.description ?? ""}
@@ -991,12 +1049,12 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: string;
 }
 function Button({ children, variant = 'secondary', size = 'md', icon, className, ...props }: ButtonProps) {
-  const baseClass = "inline-flex items-center justify-center rounded font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed";
+  const baseClass = "inline-flex items-center justify-center rounded font-medium !text-white transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:brightness-90 disabled:saturate-80 disabled:shadow-none";
   
   const variants = {
-    primary: "bg-primary hover:bg-[#06b6d4] text-white border border-transparent shadow-sm focus:ring-primary",
-    secondary: "bg-slate-100/90 dark:bg-slate-700/80 border border-slate-200 dark:border-slate-500 text-slate-800 dark:text-slate-100 hover:bg-slate-200/90 dark:hover:bg-slate-600/80 focus:ring-slate-400",
-    danger: "bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-600 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-900/40 focus:ring-red-500"
+    primary: "bg-primary border border-primary/90 shadow-md hover:bg-[#14b8ca] focus:ring-primary/70",
+    secondary: "bg-slate-500 border border-slate-400/80 shadow-md hover:bg-slate-400 dark:bg-slate-400 dark:hover:bg-slate-300 focus:ring-slate-300/70",
+    danger: "bg-red-500 border border-red-400/90 shadow-md hover:bg-red-400 focus:ring-red-400/80"
   };
   
   const sizes = {

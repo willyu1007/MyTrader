@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
 import fs from "node:fs";
+import net from "node:net";
 
 const backendDir = process.cwd();
 const frontendDir = path.resolve(backendDir, "../frontend");
@@ -17,6 +18,52 @@ function spawnChild(command, args, options) {
     shell: process.platform === "win32",
     ...options
   });
+}
+
+function terminateChild(child, name) {
+  if (!child || child.killed) return;
+  const pid = child.pid;
+  if (!pid) return;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/T", "/F", "/PID", String(pid)], {
+      stdio: "ignore",
+      windowsHide: true
+    });
+    return;
+  }
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    console.warn(`[mytrader] failed to terminate ${name ?? "child process"}`);
+  }
+}
+
+function checkPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", (err) => {
+      if (err && err.code === "EADDRINUSE") resolve(false);
+      else resolve(false);
+    });
+    server.listen({ port, host: "127.0.0.1" }, () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function findAvailablePort(startPort, attempts = 20) {
+  const base = Number(startPort);
+  const total = Number(attempts);
+  for (let i = 0; i < total; i += 1) {
+    const port = base + i;
+    // eslint-disable-next-line no-await-in-loop
+    const available = await checkPortAvailable(port);
+    if (available) return port;
+  }
+  throw new Error(
+    `[mytrader] no available dev server port from ${base} to ${base + total - 1}`
+  );
 }
 
 function waitForHttpOk(url, timeoutMs) {
@@ -62,14 +109,20 @@ function watchBuildOutputs(dir, files, onChange) {
 }
 
 async function run() {
-  const devServerUrl = "http://localhost:5173";
+  const basePort = Number(process.env.MYTRADER_DEV_PORT ?? 5173);
+  const devPort = await findAvailablePort(basePort, 30);
+  const devServerUrl = `http://localhost:${devPort}`;
 
   const sharedDir = path.resolve(backendDir, "../../packages/shared");
   const sharedDistDir = path.resolve(sharedDir, "dist");
   const backendDistDir = path.resolve(backendDir, "dist");
   const sharedBuild = spawnChild(pnpmCmd, ["run", "build"], { cwd: sharedDir });
 
-  const vite = spawnChild(pnpmCmd, ["dev"], { cwd: frontendDir });
+  const vite = spawnChild(
+    pnpmCmd,
+    ["dev", "--", "--port", String(devPort)],
+    { cwd: frontendDir }
+  );
   const build = spawnChild(pnpmCmd, ["run", "build"], { cwd: backendDir });
 
   let electron = null;
@@ -77,24 +130,17 @@ async function run() {
   let backendWatch = null;
   let restartTimer = null;
   let restartArmed = false;
+  let restartSuppressUntil = 0;
   let isRestarting = false;
   let sharedWarm = false;
   let backendWarm = false;
   const stopWatchers = [];
 
   const exit = (code) => {
-    try {
-      vite.kill("SIGTERM");
-    } catch {}
-    try {
-      sharedWatch?.kill("SIGTERM");
-    } catch {}
-    try {
-      backendWatch?.kill("SIGTERM");
-    } catch {}
-    try {
-      electron?.kill("SIGTERM");
-    } catch {}
+    terminateChild(vite, "vite");
+    terminateChild(sharedWatch, "shared");
+    terminateChild(backendWatch, "backend");
+    terminateChild(electron, "electron");
     stopWatchers.forEach((stop) => stop());
     process.exit(code);
   };
@@ -112,6 +158,11 @@ async function run() {
   const childEnv = { ...process.env, MYTRADER_DEV_SERVER_URL: devServerUrl };
   delete childEnv.ELECTRON_RUN_AS_NODE;
 
+  const armRestart = () => {
+    restartArmed = true;
+    restartSuppressUntil = Date.now() + 1500;
+  };
+
   const scheduleRestart = () => {
     if (!electron || isRestarting) return;
     if (restartTimer) clearTimeout(restartTimer);
@@ -119,11 +170,7 @@ async function run() {
       restartTimer = null;
       if (!electron) return;
       isRestarting = true;
-      try {
-        electron.kill("SIGTERM");
-      } catch {
-        isRestarting = false;
-      }
+      terminateChild(electron, "electron");
     }, 200);
   };
 
@@ -144,9 +191,10 @@ async function run() {
     if (!restartArmed) {
       if (source === "backend") backendWarm = true;
       if (source === "shared") sharedWarm = true;
-      if (backendWarm && sharedWarm) restartArmed = true;
+      if (backendWarm && sharedWarm) armRestart();
       return;
     }
+    if (Date.now() < restartSuppressUntil) return;
     scheduleRestart();
   };
 
@@ -162,7 +210,8 @@ async function run() {
   const startElectron = () => {
     electron = spawnChild(electronPath, ["."], {
       cwd: backendDir,
-      env: childEnv
+      env: childEnv,
+      shell: false
     });
 
     electron.on("exit", (code) => {
@@ -177,7 +226,7 @@ async function run() {
 
   startElectron();
   setTimeout(() => {
-    restartArmed = true;
+    armRestart();
   }, 10000);
 
   process.on("SIGINT", () => exit(130));

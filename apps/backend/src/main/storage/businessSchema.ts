@@ -1,7 +1,8 @@
 import { exec, get, run } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
+import { backfillBaselineLedgerFromPositions } from "./ledgerBaseline";
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   await exec(db, "pragma foreign_keys = on;");
@@ -21,7 +22,7 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
     ["schema_version"]
   );
   const parsedVersion = row ? Number(row.value) : 0;
-  const currentVersion = Number.isFinite(parsedVersion) ? parsedVersion : 0;
+  let currentVersion = Number.isFinite(parsedVersion) ? parsedVersion : 0;
 
   if (!row) {
     await run(
@@ -32,6 +33,7 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   }
 
   if (currentVersion < 2) {
+    currentVersion = 2;
     await exec(
       db,
       `
@@ -101,7 +103,110 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
     await run(
       db,
       `insert or replace into app_meta (key, value) values (?, ?)`,
-      ["schema_version", String(CURRENT_SCHEMA_VERSION)]
+      ["schema_version", String(currentVersion)]
+    );
+  }
+
+  if (currentVersion < 3) {
+    currentVersion = 3;
+    await exec(
+      db,
+      `
+        create table if not exists ledger_entries (
+          id text primary key not null,
+          portfolio_id text not null,
+          event_type text not null,
+          trade_date text not null,
+          symbol text,
+          side text,
+          quantity real,
+          price real,
+          cash_amount real,
+          cash_currency text,
+          fee real,
+          tax real,
+          note text,
+          source text not null,
+          external_id text,
+          meta_json text,
+          created_at integer not null,
+          updated_at integer not null,
+          deleted_at integer,
+          foreign key (portfolio_id) references portfolios(id) on delete cascade,
+          check (side in ('buy', 'sell') or side is null),
+          check (quantity is null or quantity >= 0),
+          check (price is null or price >= 0),
+          check (fee is null or fee >= 0),
+          check (tax is null or tax >= 0)
+        );
+      `
+    );
+
+    await exec(
+      db,
+      `
+        create index if not exists ledger_entries_portfolio_date
+        on ledger_entries (portfolio_id, trade_date, created_at);
+      `
+    );
+
+    await exec(
+      db,
+      `
+        create index if not exists ledger_entries_portfolio_symbol_date
+        on ledger_entries (portfolio_id, symbol, trade_date);
+      `
+    );
+
+    await exec(
+      db,
+      `
+        create index if not exists ledger_entries_portfolio_type_date
+        on ledger_entries (portfolio_id, event_type, trade_date);
+      `
+    );
+
+    await exec(
+      db,
+      `
+        create unique index if not exists ledger_entries_portfolio_source_external_id
+        on ledger_entries (portfolio_id, source, external_id);
+      `
+    );
+
+    await backfillBaselineLedgerFromPositions(db);
+    await run(
+      db,
+      `insert or replace into app_meta (key, value) values (?, ?)`,
+      ["ledger_baseline_backfill_v1", "1"]
+    );
+
+    await run(
+      db,
+      `insert or replace into app_meta (key, value) values (?, ?)`,
+      ["schema_version", String(currentVersion)]
+    );
+  }
+
+  if (currentVersion >= 3) {
+    const baselineRow = await get<{ value: string }>(
+      db,
+      `select value from app_meta where key = ?`,
+      ["ledger_baseline_backfill_v1"]
+    );
+    if (!baselineRow) {
+      await backfillBaselineLedgerFromPositions(db);
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["ledger_baseline_backfill_v1", "1"]
+      );
+    }
+  }
+
+  if (currentVersion > CURRENT_SCHEMA_VERSION) {
+    throw new Error(
+      `[mytrader] business DB schema_version=${currentVersion} is newer than supported=${CURRENT_SCHEMA_VERSION}.`
     );
   }
 }

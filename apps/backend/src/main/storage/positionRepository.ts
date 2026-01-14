@@ -26,6 +26,31 @@ interface DbPositionRow {
   updated_at: number;
 }
 
+export interface PositionIngestItem {
+  symbol: string;
+  assetClass: AssetClass;
+}
+
+export async function listPositionIngestItems(
+  db: SqliteDatabase
+): Promise<PositionIngestItem[]> {
+  const rows = await all<{ symbol: string; asset_class: string }>(
+    db,
+    `
+      select distinct symbol, asset_class
+      from positions
+      where quantity > 0
+        and asset_class != 'cash'
+      order by symbol asc
+    `
+  );
+
+  return rows.map((row) => ({
+    symbol: row.symbol,
+    assetClass: row.asset_class as AssetClass
+  }));
+}
+
 export async function listPositionsByPortfolio(
   db: SqliteDatabase,
   portfolioId: PortfolioId
@@ -43,6 +68,25 @@ export async function listPositionsByPortfolio(
   );
 
   return rows.map(toPosition);
+}
+
+export async function getPositionById(
+  db: SqliteDatabase,
+  positionId: PositionId
+): Promise<Position | null> {
+  const row = await get<DbPositionRow>(
+    db,
+    `
+      select id, portfolio_id, symbol, name, asset_class, market, currency, quantity,
+             cost, open_date, created_at, updated_at
+      from positions
+      where id = ?
+      limit 1
+    `,
+    [positionId]
+  );
+
+  return row ? toPosition(row) : null;
 }
 
 export async function createPosition(

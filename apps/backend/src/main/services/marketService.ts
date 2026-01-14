@@ -8,7 +8,9 @@ import type {
 import { parseHoldingsCsv, parsePricesCsv } from "../market/csvImport";
 import { upsertInstruments, upsertPrices } from "../market/marketRepository";
 import { fetchTushareDailyPrices } from "../market/tushareClient";
+import { config } from "../config";
 import { upsertPositions } from "../storage/positionRepository";
+import { upsertBaselineLedgerFromPosition } from "../storage/ledgerBaseline";
 import type { SqliteDatabase } from "../storage/sqlite";
 
 export async function importHoldingsCsv(
@@ -45,6 +47,18 @@ export async function importHoldingsCsv(
     }))
   );
 
+  for (const row of parsed.rows) {
+    await upsertBaselineLedgerFromPosition(businessDb, {
+      portfolioId: input.portfolioId,
+      symbol: row.symbol,
+      assetClass: row.assetClass,
+      currency: row.currency,
+      quantity: row.quantity,
+      cost: row.cost,
+      openDate: row.openDate
+    });
+  }
+
   return {
     inserted: result.inserted,
     updated: result.updated,
@@ -72,10 +86,21 @@ export async function ingestTushare(
   marketDb: SqliteDatabase,
   input: TushareIngestInput
 ): Promise<MarketImportResult> {
-  const token = process.env.MYTRADER_TUSHARE_TOKEN;
+  const token = config.tushareToken;
   if (!token) {
-    throw new Error("未设置 MYTRADER_TUSHARE_TOKEN 环境变量。");
+    throw new Error("Missing MYTRADER_TUSHARE_TOKEN.");
   }
+
+  await upsertInstruments(
+    marketDb,
+    input.items.map((item) => ({
+      symbol: item.symbol,
+      assetClass: item.assetClass,
+      name: null,
+      market: null,
+      currency: null
+    }))
+  );
 
   const prices = await fetchTushareDailyPrices(
     token,

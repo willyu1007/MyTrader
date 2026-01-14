@@ -194,7 +194,7 @@ export function App() {
 
   return (
     <div className="app h-screen flex flex-col overflow-hidden">
-      <header className="topbar h-10 flex items-center justify-between px-3 bg-white dark:bg-[#0B0E14] border-b border-border-light dark:border-border-dark flex-shrink-0 z-30">
+      <header className="topbar h-10 flex items-center justify-between px-3 bg-white/90 dark:bg-background-dark/80 backdrop-blur-md border-b border-border-light dark:border-border-dark flex-shrink-0 z-30">
         <div className="brandGroup flex items-center gap-2">
           <div className="brandMark w-5 h-5 bg-primary rounded flex items-center justify-center text-white font-bold text-[10px] shadow-sm">M</div>
           <h1 className="brand text-sm font-bold tracking-tight text-slate-900 dark:text-white">MyTrader</h1>

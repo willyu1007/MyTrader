@@ -1,4 +1,8 @@
-import type { AssetClass, MarketDataSource } from "@mytrader/shared";
+import type {
+  AssetClass,
+  MarketDataSource,
+  TushareIngestItem
+} from "@mytrader/shared";
 
 import { all, run, transaction } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
@@ -34,6 +38,17 @@ export interface LatestPrice {
   ingestedAt: number;
 }
 
+export interface InstrumentRegistryEntry {
+  symbol: string;
+  name: string | null;
+  assetClass: AssetClass | null;
+  market: string | null;
+  currency: string | null;
+  autoIngest: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export async function upsertInstruments(
   db: SqliteDatabase,
   inputs: InstrumentInput[]
@@ -51,10 +66,10 @@ export async function upsertInstruments(
           )
           values (?, ?, ?, ?, ?, ?, ?)
           on conflict(symbol) do update set
-            name = excluded.name,
-            asset_class = excluded.asset_class,
-            market = excluded.market,
-            currency = excluded.currency,
+            name = coalesce(excluded.name, instruments.name),
+            asset_class = coalesce(excluded.asset_class, instruments.asset_class),
+            market = coalesce(excluded.market, instruments.market),
+            currency = coalesce(excluded.currency, instruments.currency),
             updated_at = excluded.updated_at
         `,
         [
@@ -69,6 +84,100 @@ export async function upsertInstruments(
       );
     }
   });
+}
+
+export async function listInstrumentRegistry(
+  db: SqliteDatabase
+): Promise<InstrumentRegistryEntry[]> {
+  const rows = await all<{
+    symbol: string;
+    name: string | null;
+    asset_class: string | null;
+    market: string | null;
+    currency: string | null;
+    auto_ingest: number;
+    created_at: number;
+    updated_at: number;
+  }>(
+    db,
+    `
+      select symbol, name, asset_class, market, currency, auto_ingest,
+             created_at, updated_at
+      from instruments
+      order by symbol asc
+    `
+  );
+
+  return rows.map((row) => ({
+    symbol: row.symbol,
+    name: row.name ?? null,
+    assetClass: row.asset_class ? (row.asset_class as AssetClass) : null,
+    market: row.market ?? null,
+    currency: row.currency ?? null,
+    autoIngest: row.auto_ingest === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }));
+}
+
+export async function listAutoIngestItems(
+  db: SqliteDatabase
+): Promise<TushareIngestItem[]> {
+  const rows = await all<{ symbol: string; asset_class: string }>(
+    db,
+    `
+      select symbol, asset_class
+      from instruments
+      where auto_ingest = 1
+        and asset_class is not null
+        and asset_class != 'cash'
+      order by symbol asc
+    `
+  );
+
+  return rows.map((row) => ({
+    symbol: row.symbol,
+    assetClass: row.asset_class as AssetClass
+  }));
+}
+
+export async function setInstrumentAutoIngest(
+  db: SqliteDatabase,
+  symbol: string,
+  enabled: boolean
+): Promise<void> {
+  const now = Date.now();
+  const autoIngest = enabled ? 1 : 0;
+
+  const existing = await all<{ symbol: string }>(
+    db,
+    `select symbol from instruments where symbol = ?`,
+    [symbol]
+  );
+
+  if (existing.length === 0) {
+    await run(
+      db,
+      `
+        insert into instruments (
+          symbol, name, asset_class, market, currency, auto_ingest, created_at, updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [symbol, null, null, null, null, autoIngest, now, now]
+    );
+    return;
+  }
+
+  await run(
+    db,
+    `
+      update instruments
+      set auto_ingest = ?, updated_at = ?
+      where symbol = ?
+    `,
+    [autoIngest, now, symbol]
+  );
 }
 
 export async function upsertPrices(

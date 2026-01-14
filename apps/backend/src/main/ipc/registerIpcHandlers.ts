@@ -8,12 +8,14 @@ import { IPC_CHANNELS } from "@mytrader/shared";
 import type {
   AccountSummary,
   CreateAccountInput,
+  CreateLedgerEntryInput,
   CreatePortfolioInput,
   CreatePositionInput,
   CreateRiskLimitInput,
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
   TushareIngestInput,
+  UpdateLedgerEntryInput,
   UpdatePortfolioInput,
   UpdatePositionInput,
   UpdateRiskLimitInput,
@@ -22,15 +24,34 @@ import type {
 import { ensureBusinessSchema } from "../storage/businessSchema";
 import { AccountIndexDb } from "../storage/accountIndexDb";
 import { ensureMarketCacheSchema } from "../market/marketCache";
+import { upsertInstruments } from "../market/marketRepository";
+import {
+  startAutoIngest,
+  stopAutoIngest,
+  triggerAutoIngest
+} from "../market/autoIngest";
 import {
   createPortfolio,
   deletePortfolio,
+  getPortfolio,
   listPortfolios,
   updatePortfolio
 } from "../storage/portfolioRepository";
 import {
+  createLedgerEntry,
+  listLedgerEntriesByPortfolio,
+  softDeleteLedgerEntry,
+  updateLedgerEntry
+} from "../storage/ledgerRepository";
+import {
+  getBaselineExternalIdForPosition,
+  softDeleteBaselineLedgerForPosition,
+  upsertBaselineLedgerFromPosition
+} from "../storage/ledgerBaseline";
+import {
   createPosition,
   deletePosition,
+  getPositionById,
   updatePosition
 } from "../storage/positionRepository";
 import {
@@ -47,6 +68,7 @@ import {
   importPricesCsv,
   ingestTushare
 } from "../services/marketService";
+import { config } from "../config";
 
 let accountIndexDb: AccountIndexDb | null = null;
 let activeAccount: AccountSummary | null = null;
@@ -85,7 +107,7 @@ export async function registerIpcHandlers() {
   ipcMain.handle(
     IPC_CHANNELS.ACCOUNT_CHOOSE_DATA_ROOT_DIR,
     async (event) => {
-      const isDev = Boolean(process.env.MYTRADER_DEV_SERVER_URL);
+      const isDev = config.isDev;
       if (isDev) console.log("[mytrader] 打开系统目录选择器");
 
       const ownerWindow =
@@ -169,6 +191,7 @@ export async function registerIpcHandlers() {
       const layout = await ensureAccountDataLayout(unlocked.dataDir);
 
       if (activeBusinessDb) {
+        stopAutoIngest();
         await close(activeBusinessDb);
         activeBusinessDb = null;
       }
@@ -178,12 +201,15 @@ export async function registerIpcHandlers() {
       await ensureBusinessSchema(activeBusinessDb);
 
       activeAccount = unlocked;
+      const marketDb = requireMarketCacheDb();
+      startAutoIngest(activeBusinessDb, marketDb);
       return unlocked;
     }
   );
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNT_LOCK, async () => {
     if (activeBusinessDb) {
+      stopAutoIngest();
       await close(activeBusinessDb);
       activeBusinessDb = null;
     }
@@ -247,7 +273,7 @@ export async function registerIpcHandlers() {
       if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
         throw new Error("持仓数量必须大于 0。");
       }
-      return await createPosition(db, {
+      const normalized = {
         ...input,
         symbol,
         market,
@@ -255,7 +281,21 @@ export async function registerIpcHandlers() {
         name: input.name?.trim() || null,
         cost: Number.isFinite(input.cost ?? NaN) ? input.cost ?? null : null,
         openDate: input.openDate?.trim() || null
-      });
+      };
+      const created = await createPosition(db, normalized);
+      const marketDb = requireMarketCacheDb();
+      await upsertInstruments(marketDb, [
+        {
+          symbol,
+          name: normalized.name,
+          assetClass: normalized.assetClass,
+          market: normalized.market,
+          currency: normalized.currency
+        }
+      ]);
+      await upsertBaselineLedgerFromPosition(db, created);
+      void triggerAutoIngest("positions");
+      return created;
     }
   );
 
@@ -263,6 +303,7 @@ export async function registerIpcHandlers() {
     IPC_CHANNELS.POSITION_UPDATE,
     async (_event, input: UpdatePositionInput) => {
       const db = requireActiveBusinessDb();
+      const existing = await getPositionById(db, input.id);
       const symbol = input.symbol.trim();
       const market = input.market.trim();
       const currency = input.currency.trim();
@@ -272,7 +313,7 @@ export async function registerIpcHandlers() {
       if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
         throw new Error("持仓数量必须大于 0。");
       }
-      return await updatePosition(db, input.id, {
+      const normalized = {
         ...input,
         symbol,
         market,
@@ -280,7 +321,31 @@ export async function registerIpcHandlers() {
         name: input.name?.trim() || null,
         cost: Number.isFinite(input.cost ?? NaN) ? input.cost ?? null : null,
         openDate: input.openDate?.trim() || null
-      });
+      };
+      const updated = await updatePosition(db, input.id, normalized);
+      const marketDb = requireMarketCacheDb();
+      await upsertInstruments(marketDb, [
+        {
+          symbol,
+          name: normalized.name,
+          assetClass: normalized.assetClass,
+          market: normalized.market,
+          currency: normalized.currency
+        }
+      ]);
+      await upsertBaselineLedgerFromPosition(db, updated);
+      if (existing) {
+        const existingExternalId = getBaselineExternalIdForPosition(existing);
+        const updatedExternalId = getBaselineExternalIdForPosition(updated);
+        if (
+          existing.portfolioId !== updated.portfolioId ||
+          existingExternalId !== updatedExternalId
+        ) {
+          await softDeleteBaselineLedgerForPosition(db, existing);
+        }
+      }
+      void triggerAutoIngest("positions");
+      return updated;
     }
   );
 
@@ -288,7 +353,9 @@ export async function registerIpcHandlers() {
     IPC_CHANNELS.POSITION_REMOVE,
     async (_event, positionId: string) => {
       const db = requireActiveBusinessDb();
+      const existing = await getPositionById(db, positionId);
       await deletePosition(db, positionId);
+      if (existing) await softDeleteBaselineLedgerForPosition(db, existing);
     }
   );
 
@@ -336,6 +403,40 @@ export async function registerIpcHandlers() {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.LEDGER_LIST,
+    async (_event, portfolioId: string) => {
+      const db = requireActiveBusinessDb();
+      return await listLedgerEntriesByPortfolio(db, portfolioId);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.LEDGER_CREATE,
+    async (_event, input: CreateLedgerEntryInput) => {
+      const db = requireActiveBusinessDb();
+      const normalized = await normalizeLedgerEntryInput(db, input);
+      return await createLedgerEntry(db, normalized);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.LEDGER_UPDATE,
+    async (_event, input: UpdateLedgerEntryInput) => {
+      const db = requireActiveBusinessDb();
+      const normalized = await normalizeLedgerEntryUpdateInput(db, input);
+      return await updateLedgerEntry(db, normalized);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.LEDGER_REMOVE,
+    async (_event, ledgerEntryId: string) => {
+      const db = requireActiveBusinessDb();
+      await softDeleteLedgerEntry(db, ledgerEntryId);
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.MARKET_CHOOSE_CSV_FILE,
     async (event, kind: "holdings" | "prices") => {
       const ownerWindow =
@@ -365,7 +466,9 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       if (!input.filePath) throw new Error("CSV 文件路径不能为空。");
-      return await importHoldingsCsv(businessDb, marketDb, input);
+      const result = await importHoldingsCsv(businessDb, marketDb, input);
+      void triggerAutoIngest("import");
+      return result;
     }
   );
 
@@ -388,4 +491,241 @@ export async function registerIpcHandlers() {
       return await ingestTushare(marketDb, input);
     }
   );
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function normalizeLedgerEntryInput(
+  businessDb: SqliteDatabase,
+  input: CreateLedgerEntryInput
+): Promise<CreateLedgerEntryInput> {
+  const portfolioId = normalizeRequiredString(input.portfolioId, "portfolioId");
+  const eventType = normalizeRequiredString(input.eventType, "eventType") as
+    | CreateLedgerEntryInput["eventType"];
+  const tradeDate = normalizeDate(input.tradeDate, "tradeDate");
+  const source = normalizeRequiredString(input.source, "source") as
+    | CreateLedgerEntryInput["source"];
+  const externalId = normalizeOptionalString(input.externalId);
+  const note = normalizeOptionalString(input.note);
+
+  const symbol = normalizeOptionalString(input.symbol);
+  const side = normalizeSide(input.side);
+  const quantity = normalizeOptionalNumber(input.quantity);
+  const price = normalizeOptionalNumber(input.price);
+  const cashAmount = normalizeOptionalNumber(input.cashAmount);
+  const cashCurrencyInput = normalizeOptionalString(input.cashCurrency);
+  const fee = normalizeOptionalNumber(input.fee);
+  const tax = normalizeOptionalNumber(input.tax);
+  const meta = normalizeOptionalObject(input.meta);
+
+  const baseCurrency = await getPortfolioBaseCurrency(businessDb, portfolioId);
+
+  if (fee !== null && fee < 0) throw new Error("fee must be >= 0.");
+  if (tax !== null && tax < 0) throw new Error("tax must be >= 0.");
+  if (price !== null && price < 0) throw new Error("price must be >= 0.");
+  if (quantity !== null && quantity < 0) throw new Error("quantity must be >= 0.");
+
+  switch (eventType) {
+    case "trade": {
+      if (!symbol) throw new Error("trade requires symbol.");
+      if (!side) throw new Error("trade requires side.");
+      if (!quantity || quantity <= 0) throw new Error("trade requires quantity > 0.");
+      if (price === null) throw new Error("trade requires price.");
+      const cashCurrency = cashCurrencyInput ?? baseCurrency;
+      return {
+        portfolioId,
+        eventType,
+        tradeDate,
+        symbol,
+        side,
+        quantity,
+        price,
+        cashAmount: null,
+        cashCurrency,
+        fee,
+        tax,
+        note,
+        source,
+        externalId,
+        meta
+      };
+    }
+    case "cash": {
+      if (cashAmount === null || cashAmount === 0) {
+        throw new Error("cash requires cashAmount != 0.");
+      }
+      if (!cashCurrencyInput) throw new Error("cash requires cashCurrency.");
+      return {
+        portfolioId,
+        eventType,
+        tradeDate,
+        symbol: null,
+        side: null,
+        quantity: null,
+        price: null,
+        cashAmount,
+        cashCurrency: cashCurrencyInput,
+        fee: null,
+        tax: null,
+        note,
+        source,
+        externalId,
+        meta
+      };
+    }
+    case "fee":
+    case "tax": {
+      if (cashAmount === null || cashAmount >= 0) {
+        throw new Error(`${eventType} requires cashAmount < 0.`);
+      }
+      if (!cashCurrencyInput) throw new Error(`${eventType} requires cashCurrency.`);
+      return {
+        portfolioId,
+        eventType,
+        tradeDate,
+        symbol: symbol,
+        side: null,
+        quantity: null,
+        price: null,
+        cashAmount,
+        cashCurrency: cashCurrencyInput,
+        fee: null,
+        tax: null,
+        note,
+        source,
+        externalId,
+        meta
+      };
+    }
+    case "dividend": {
+      if (!symbol) throw new Error("dividend requires symbol.");
+      if (cashAmount === null || cashAmount <= 0) {
+        throw new Error("dividend requires cashAmount > 0.");
+      }
+      if (!cashCurrencyInput) throw new Error("dividend requires cashCurrency.");
+      return {
+        portfolioId,
+        eventType,
+        tradeDate,
+        symbol,
+        side: null,
+        quantity: null,
+        price: null,
+        cashAmount,
+        cashCurrency: cashCurrencyInput,
+        fee: null,
+        tax,
+        note,
+        source,
+        externalId,
+        meta
+      };
+    }
+    case "adjustment": {
+      if (!symbol) throw new Error("adjustment requires symbol.");
+      if (!side) throw new Error("adjustment requires side.");
+      if (!quantity || quantity <= 0) {
+        throw new Error("adjustment requires quantity > 0.");
+      }
+      const cashCurrency = cashCurrencyInput ?? baseCurrency;
+      return {
+        portfolioId,
+        eventType,
+        tradeDate,
+        symbol,
+        side,
+        quantity,
+        price,
+        cashAmount: null,
+        cashCurrency,
+        fee: null,
+        tax: null,
+        note,
+        source,
+        externalId,
+        meta
+      };
+    }
+    case "corporate_action": {
+      if (!symbol) throw new Error("corporate_action requires symbol.");
+      if (!meta) throw new Error("corporate_action requires meta.");
+      return {
+        portfolioId,
+        eventType,
+        tradeDate,
+        symbol,
+        side: null,
+        quantity: null,
+        price: null,
+        cashAmount: null,
+        cashCurrency: null,
+        fee: null,
+        tax: null,
+        note,
+        source,
+        externalId,
+        meta
+      };
+    }
+    default:
+      throw new Error(`Unknown eventType: ${String(eventType)}`);
+  }
+}
+
+async function normalizeLedgerEntryUpdateInput(
+  businessDb: SqliteDatabase,
+  input: UpdateLedgerEntryInput
+): Promise<UpdateLedgerEntryInput> {
+  const id = normalizeRequiredString(input.id, "id");
+  const normalized = await normalizeLedgerEntryInput(businessDb, input);
+  return { ...normalized, id };
+}
+
+function normalizeDate(value: unknown, field: string): string {
+  const str = normalizeRequiredString(value, field);
+  if (!DATE_RE.test(str)) throw new Error(`${field} must be YYYY-MM-DD.`);
+  return str;
+}
+
+function normalizeRequiredString(value: unknown, field: string): string {
+  if (typeof value !== "string") throw new Error(`${field} must be a string.`);
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`${field} must not be empty.`);
+  return trimmed;
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeOptionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function normalizeSide(value: unknown): "buy" | "sell" | null {
+  const str = normalizeOptionalString(value);
+  if (!str) return null;
+  if (str === "buy" || str === "sell") return str;
+  throw new Error("side must be 'buy' or 'sell'.");
+}
+
+function normalizeOptionalObject(
+  value: unknown
+): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+async function getPortfolioBaseCurrency(
+  db: SqliteDatabase,
+  portfolioId: string
+): Promise<string> {
+  const portfolio = await getPortfolio(db, portfolioId);
+  if (!portfolio) throw new Error("Portfolio not found.");
+  return portfolio.baseCurrency;
 }

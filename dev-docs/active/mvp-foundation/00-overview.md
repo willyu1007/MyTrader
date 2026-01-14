@@ -2,7 +2,7 @@
 
 ## Status
 - State: in_progress
-- Next step: Run manual smoke checks for portfolio/risk/market flows and record verification results
+- Next step: Run manual smoke checks for market import/auto-ingest and record verification results
 
 ## Goal
 Deliver a local-first MVP with account-isolated storage and the agreed priority order: portfolio, risk, market data, opinions, backtest.

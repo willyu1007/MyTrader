@@ -24,6 +24,8 @@
 - Implemented CSV import for holdings and daily prices, plus Tushare daily ingestion.
 - Added IPC APIs + frontend dashboard for portfolio/positions/risk/market workflows.
 - Switched SQLite driver to `sql.js` (WASM) and added a build-time copy step for `sql-wasm.wasm`.
+- Added backend config module and auto-ingest scheduler that pulls Tushare daily data for held symbols on account unlock and after holdings/position changes.
+- Added a symbol registry column (`auto_ingest`) in market cache instruments; auto-ingest now merges registry symbols with held positions, and positions/manual Tushare pulls register symbols for global lookup.
 
 ## Files/modules touched (high level)
 - apps/backend/*

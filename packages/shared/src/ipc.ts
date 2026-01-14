@@ -170,6 +170,65 @@ export interface TushareIngestInput {
   endDate?: string | null;
 }
 
+export type LedgerEntryId = string;
+
+export type LedgerEventType =
+  | "trade"
+  | "cash"
+  | "fee"
+  | "tax"
+  | "dividend"
+  | "adjustment"
+  | "corporate_action";
+
+export type LedgerSide = "buy" | "sell";
+
+export type LedgerSource = "manual" | "csv" | "broker_import" | "system";
+
+export interface LedgerEntry {
+  id: LedgerEntryId;
+  portfolioId: PortfolioId;
+  eventType: LedgerEventType;
+  tradeDate: string;
+  symbol: string | null;
+  side: LedgerSide | null;
+  quantity: number | null;
+  price: number | null;
+  cashAmount: number | null;
+  cashCurrency: string | null;
+  fee: number | null;
+  tax: number | null;
+  note: string | null;
+  source: LedgerSource;
+  externalId: string | null;
+  meta: Record<string, unknown> | null;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+export interface CreateLedgerEntryInput {
+  portfolioId: PortfolioId;
+  eventType: LedgerEventType;
+  tradeDate: string;
+  symbol?: string | null;
+  side?: LedgerSide | null;
+  quantity?: number | null;
+  price?: number | null;
+  cashAmount?: number | null;
+  cashCurrency?: string | null;
+  fee?: number | null;
+  tax?: number | null;
+  note?: string | null;
+  source: LedgerSource;
+  externalId?: string | null;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface UpdateLedgerEntryInput extends CreateLedgerEntryInput {
+  id: LedgerEntryId;
+}
+
 export interface MyTraderApi {
   account: {
     getActive(): Promise<AccountSummary | null>;
@@ -195,6 +254,12 @@ export interface MyTraderApi {
     create(input: CreateRiskLimitInput): Promise<RiskLimit>;
     update(input: UpdateRiskLimitInput): Promise<RiskLimit>;
     remove(riskLimitId: RiskLimitId): Promise<void>;
+  };
+  ledger: {
+    list(portfolioId: PortfolioId): Promise<LedgerEntry[]>;
+    create(input: CreateLedgerEntryInput): Promise<LedgerEntry>;
+    update(input: UpdateLedgerEntryInput): Promise<LedgerEntry>;
+    remove(ledgerEntryId: LedgerEntryId): Promise<void>;
   };
   market: {
     chooseCsvFile(kind: "holdings" | "prices"): Promise<string | null>;
@@ -222,6 +287,10 @@ export const IPC_CHANNELS = {
   RISK_CREATE: "risk:create",
   RISK_UPDATE: "risk:update",
   RISK_REMOVE: "risk:remove",
+  LEDGER_LIST: "ledger:list",
+  LEDGER_CREATE: "ledger:create",
+  LEDGER_UPDATE: "ledger:update",
+  LEDGER_REMOVE: "ledger:remove",
   MARKET_CHOOSE_CSV_FILE: "market:chooseCsvFile",
   MARKET_IMPORT_HOLDINGS_CSV: "market:importHoldingsCsv",
   MARKET_IMPORT_PRICES_CSV: "market:importPricesCsv",

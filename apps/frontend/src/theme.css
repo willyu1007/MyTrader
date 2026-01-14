@@ -7,20 +7,20 @@
   --mt-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
 
-  --mt-bg: #0b0f14;
-  --mt-bg-1: #0f1620;
-  --mt-surface: rgba(14, 19, 26, 0.72);
-  --mt-surface-2: rgba(17, 25, 36, 0.78);
-  --mt-field: rgba(11, 15, 20, 0.92);
+  --mt-bg: #14171b;
+  --mt-bg-1: #1b2025;
+  --mt-surface: rgba(20, 24, 29, 0.74);
+  --mt-surface-2: rgba(24, 30, 36, 0.82);
+  --mt-field: rgba(18, 23, 28, 0.92);
 
-  --mt-border: rgba(232, 234, 237, 0.12);
-  --mt-border-strong: rgba(232, 234, 237, 0.18);
+  --mt-border: rgba(220, 225, 230, 0.16);
+  --mt-border-strong: rgba(220, 225, 230, 0.24);
 
   --mt-text: #e8eaed;
   --mt-text-2: rgba(232, 234, 237, 0.8);
   --mt-text-3: rgba(232, 234, 237, 0.7);
 
-  --mt-accent: #0891b2;
+  --mt-accent: #0ea5b7;
   --mt-accent-2: #2a8cff;
   --mt-success: #2bd970;
   --mt-danger: #ff6b6b;
@@ -35,11 +35,12 @@
 
   --mt-ring: 0 0 0 3px rgba(8, 145, 178, 0.25);
 
-  --mt-topbar-bg: rgba(14, 19, 26, 0.62);
+  --mt-topbar-bg: rgba(20, 24, 29, 0.72);
 
   --mt-body-bg:
-    radial-gradient(1200px 800px at 18% -10%, rgba(42, 140, 255, 0.18), transparent 55%),
-    radial-gradient(900px 700px at 100% 0%, rgba(8, 145, 178, 0.14), transparent 60%),
+    radial-gradient(1200px 800px at 18% -10%, rgba(110, 120, 130, 0.12), transparent 55%),
+    radial-gradient(900px 700px at 100% 0%, rgba(80, 95, 110, 0.1), transparent 60%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.14)),
     var(--mt-bg);
 
   --mt-btn-bg: linear-gradient(

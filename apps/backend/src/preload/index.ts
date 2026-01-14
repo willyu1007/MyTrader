@@ -35,6 +35,13 @@ const api: MyTraderApi = {
     remove: (riskLimitId) =>
       ipcRenderer.invoke(IPC_CHANNELS.RISK_REMOVE, riskLimitId)
   },
+  ledger: {
+    list: (portfolioId) => ipcRenderer.invoke(IPC_CHANNELS.LEDGER_LIST, portfolioId),
+    create: (input) => ipcRenderer.invoke(IPC_CHANNELS.LEDGER_CREATE, input),
+    update: (input) => ipcRenderer.invoke(IPC_CHANNELS.LEDGER_UPDATE, input),
+    remove: (ledgerEntryId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.LEDGER_REMOVE, ledgerEntryId)
+  },
   market: {
     chooseCsvFile: (kind) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_CHOOSE_CSV_FILE, kind),

@@ -2,6 +2,8 @@ import { BrowserWindow } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
+import { config } from "./config";
+
 export function createMainWindow() {
   const preloadPath = path.join(__dirname, "preload.js");
   const preloadExists = fs.existsSync(preloadPath);
@@ -69,7 +71,7 @@ export function createMainWindow() {
     }
   });
 
-  const devUrl = process.env.MYTRADER_DEV_SERVER_URL;
+  const devUrl = config.devServerUrl;
   if (devUrl) {
     mainWindow.loadURL(devUrl);
     mainWindow.webContents.openDevTools({ mode: "detach" });
