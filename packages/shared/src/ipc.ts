@@ -188,12 +188,17 @@ export type LedgerSource = "manual" | "csv" | "broker_import" | "system";
 export interface LedgerEntry {
   id: LedgerEntryId;
   portfolioId: PortfolioId;
+  accountKey: string | null;
   eventType: LedgerEventType;
   tradeDate: string;
+  eventTs: number | null;
+  sequence: number | null;
+  instrumentId: string | null;
   symbol: string | null;
   side: LedgerSide | null;
   quantity: number | null;
   price: number | null;
+  priceCurrency: string | null;
   cashAmount: number | null;
   cashCurrency: string | null;
   fee: number | null;
@@ -209,12 +214,17 @@ export interface LedgerEntry {
 
 export interface CreateLedgerEntryInput {
   portfolioId: PortfolioId;
+  accountKey?: string | null;
   eventType: LedgerEventType;
   tradeDate: string;
+  eventTs?: number | null;
+  sequence?: number | null;
+  instrumentId?: string | null;
   symbol?: string | null;
   side?: LedgerSide | null;
   quantity?: number | null;
   price?: number | null;
+  priceCurrency?: string | null;
   cashAmount?: number | null;
   cashCurrency?: string | null;
   fee?: number | null;

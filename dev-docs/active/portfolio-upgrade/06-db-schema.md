@@ -22,21 +22,26 @@
 - 主键与归属
   - `id` text primary key（uuid）
   - `portfolio_id` text not null
+  - `account_key` text（nullable，预留扩展钩子；默认 `null` 或 `default`）
 - 事件语义
   - `event_type` text not null  
     - 典型值：`trade`、`cash`、`fee`、`tax`、`dividend`、`adjustment`、`corporate_action`
   - `trade_date` text not null（`YYYY-MM-DD`）
+  - `event_ts` integer（UTC epoch ms，用于稳定排序；如无法提供可为空）
+  - `sequence` integer（同一 `event_ts` 内稳定排序，可选）
   - `note` text
 - 标的相关（可空）
+  - `instrument_id` text（稳定标的 ID，优先用于计算）
   - `symbol` text
   - `side` text（`buy` / `sell`；仅在需要方向的事件里使用）
-  - `quantity` real（数量始终为正，方向由 `side` 表达）
-  - `price` real
+  - `quantity` numeric（数量始终为正，方向由 `side` 表达）
+  - `price` numeric
+  - `price_currency` text（可选；默认等同 `cash_currency` 或标的币种）
 - 现金相关（可空）
-  - `cash_amount` real（建议用正负号表示流入/流出）
+  - `cash_amount` integer（建议用正负号表示流入/流出，按 minor units 存储）
   - `cash_currency` text
-  - `fee` real
-  - `tax` real
+  - `fee` integer（minor units）
+  - `tax` integer（minor units）
 - 导入/追溯（强烈建议保留）
   - `source` text not null（`manual`/`csv`/`broker_import`/`system` 等）
   - `external_id` text（用于幂等导入去重）
@@ -47,21 +52,45 @@
   - `deleted_at` integer（可选：软删除，满足审计/撤销/回滚）
 
 #### 语义约定（建议）
-- `trade` / `adjustment`：通常需要 `symbol + side + quantity`；`price` 视业务需要（trade 必填，adjustment 可选）
+- 排序：引擎按 `event_ts` -> `sequence` -> `id` 回放；`trade_date` 仅用于聚合/估值日
+- `trade` / `adjustment`：通常需要 `instrument_id + side + quantity`；`price` 视业务需要（trade 必填，adjustment 可选）
+- 标的引用：计算以 `instrument_id` 为准，`symbol` 仅用于展示/导入冗余
+- `trade` 现金腿：显式 `cash_amount + cash_currency`，不依赖 `quantity*price` 推导
 - `cash`：通常使用 `cash_amount + cash_currency`
 - `fee` / `tax`：可单独事件或挂在 trade 上（先按最简单的“单独事件”设计）
 - `dividend` / `corporate_action`：可以先作为事件落在 `ledger_entries`，后续如需要更丰富字段再拆表
+- `meta_json`：建议包含 `adjustment_mode`（`absolute`/`delta`）与公司行为标准字段
+
+#### 数值精度策略（建议）
+- 金额类（`cash_amount/fee/tax`）：使用 minor units 整数存储
+- 数量/价格：优先定点（`value_int + scale`）或 Decimal（字符串写入 NUMERIC），避免 SQLite REAL 累积误差
+  - 若采用 `value_int + scale`，可替换为 `quantity_int/quantity_scale`、`price_int/price_scale`
 
 #### 推荐索引/约束
 - 索引
   - `index ledger_entries_portfolio_date (portfolio_id, trade_date)`
-  - `index ledger_entries_portfolio_symbol (portfolio_id, symbol, trade_date)`
+  - `index ledger_entries_portfolio_instrument (portfolio_id, instrument_id, trade_date)`
   - `index ledger_entries_portfolio_type (portfolio_id, event_type, trade_date)`
+  - `index ledger_entries_portfolio_ts (portfolio_id, event_ts)`
 - 幂等导入（可选）
   - `unique (portfolio_id, source, external_id)`（`external_id` 为 null 时 SQLite 允许重复）
 - 检查约束（可选）
   - `check (side in ('buy','sell') or side is null)`
   - `check (quantity is null or quantity >= 0)`
+  - `check (event_ts is null or event_ts > 0)`
+  - `check (cash_amount is null or cash_currency is not null)`
+
+### 可选：`portfolio_instruments`（业务库映射表）
+> 用于提供稳定 `instrument_id`，避免 symbol 变更/退市导致历史回放不一致。
+
+- `id` text primary key（作为 `instrument_id`）
+- `portfolio_id` text not null
+- `symbol` text not null
+- `market` text
+- `name` text
+- `alias_json` text（可选：别名/历史代码）
+- `created_at` / `updated_at`
+- 约束：`unique (portfolio_id, symbol)`
 
 ### 目标配置 `allocation_targets`（计划新增）
 - `id` text primary key
@@ -100,8 +129,11 @@
 ## Decisions（已确认）
 - 交易方向：使用 `side`（`buy/sell`）
 - 成本法（MVP）：均价法
-- 不需要多账户/子账户（不引入 account_id 维度）
+- 不需要多账户/子账户（不引入 account_id 维度，但预留 `account_key`）
 
 ## Next open items
 - 是否强制启用软删除（`deleted_at`）与撤销/审计策略？
 - 公司行为事件：优先落到 `ledger_entries`（推荐）还是先建 `corporate_actions` 再映射？
+- `event_ts` 的来源与精度（是否要求导入源必须提供）
+- `price_currency` 规则（缺省等同 `cash_currency` 或标的币种）
+- 数量/价格定点策略（采用 `value_int + scale` 还是 Decimal）

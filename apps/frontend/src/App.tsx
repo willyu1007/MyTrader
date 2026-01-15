@@ -215,7 +215,7 @@ export function App() {
             <Dashboard account={state.account} onLock={handleLock} />
           </div>
         ) : (
-          <div className="authLayout flex-1 flex items-center justify-center bg-background-light dark:bg-background-dark p-4">
+          <div className="authLayout flex-1 flex items-start md:items-center justify-center bg-background-light dark:bg-background-dark p-4 overflow-y-auto">
             <div className="card authCard max-w-md w-full bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl shadow-xl dark:shadow-lg overflow-hidden">
               <div className="p-6 space-y-6">
                 {state.kind === "loading" ? (

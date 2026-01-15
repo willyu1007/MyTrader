@@ -49,6 +49,14 @@ export interface InstrumentRegistryEntry {
   updatedAt: number;
 }
 
+export interface InstrumentMetadata {
+  symbol: string;
+  name: string | null;
+  assetClass: AssetClass | null;
+  market: string | null;
+  currency: string | null;
+}
+
 export async function upsertInstruments(
   db: SqliteDatabase,
   inputs: InstrumentInput[]
@@ -118,6 +126,42 @@ export async function listInstrumentRegistry(
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }));
+}
+
+export async function getInstrumentsBySymbols(
+  db: SqliteDatabase,
+  symbols: string[]
+): Promise<Map<string, InstrumentMetadata>> {
+  if (symbols.length === 0) return new Map();
+  const placeholders = symbols.map(() => "?").join(", ");
+  const rows = await all<{
+    symbol: string;
+    name: string | null;
+    asset_class: string | null;
+    market: string | null;
+    currency: string | null;
+  }>(
+    db,
+    `
+      select symbol, name, asset_class, market, currency
+      from instruments
+      where symbol in (${placeholders})
+      order by symbol asc
+    `,
+    symbols
+  );
+
+  const result = new Map<string, InstrumentMetadata>();
+  rows.forEach((row) => {
+    result.set(row.symbol, {
+      symbol: row.symbol,
+      name: row.name ?? null,
+      assetClass: row.asset_class ? (row.asset_class as AssetClass) : null,
+      market: row.market ?? null,
+      currency: row.currency ?? null
+    });
+  });
+  return result;
 }
 
 export async function listAutoIngestItems(

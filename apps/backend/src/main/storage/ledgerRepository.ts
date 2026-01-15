@@ -17,12 +17,17 @@ import type { SqliteDatabase } from "./sqlite";
 interface DbLedgerEntryRow {
   id: string;
   portfolio_id: string;
+  account_key: string | null;
   event_type: string;
   trade_date: string;
+  event_ts: number | null;
+  sequence: number | null;
+  instrument_id: string | null;
   symbol: string | null;
   side: string | null;
   quantity: number | null;
   price: number | null;
+  price_currency: string | null;
   cash_amount: number | null;
   cash_currency: string | null;
   fee: number | null;
@@ -44,12 +49,13 @@ export async function listLedgerEntriesByPortfolio(
     db,
     `
       select id, portfolio_id, event_type, trade_date, symbol, side, quantity, price,
+             account_key, event_ts, sequence, instrument_id, price_currency,
              cash_amount, cash_currency, fee, tax, note, source, external_id, meta_json,
              created_at, updated_at, deleted_at
       from ledger_entries
       where portfolio_id = ?
         and deleted_at is null
-      order by trade_date asc, created_at asc
+      order by trade_date asc, event_ts is null, event_ts asc, sequence asc, created_at asc
     `,
     [portfolioId]
   );
@@ -68,21 +74,27 @@ export async function createLedgerEntry(
     db,
     `
       insert into ledger_entries (
-        id, portfolio_id, event_type, trade_date, symbol, side, quantity, price,
+        id, portfolio_id, account_key, event_type, trade_date, event_ts, sequence,
+        instrument_id, symbol, side, quantity, price, price_currency,
         cash_amount, cash_currency, fee, tax, note, source, external_id, meta_json,
         created_at, updated_at, deleted_at
       )
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       id,
       input.portfolioId,
+      input.accountKey ?? null,
       input.eventType,
       input.tradeDate,
+      input.eventTs ?? null,
+      input.sequence ?? null,
+      input.instrumentId ?? null,
       input.symbol ?? null,
       input.side ?? null,
       input.quantity ?? null,
       input.price ?? null,
+      input.priceCurrency ?? null,
       input.cashAmount ?? null,
       input.cashCurrency ?? null,
       input.fee ?? null,
@@ -100,12 +112,17 @@ export async function createLedgerEntry(
   return {
     id,
     portfolioId: input.portfolioId,
+    accountKey: input.accountKey ?? null,
     eventType: input.eventType,
     tradeDate: input.tradeDate,
+    eventTs: input.eventTs ?? null,
+    sequence: input.sequence ?? null,
+    instrumentId: input.instrumentId ?? null,
     symbol: input.symbol ?? null,
     side: input.side ?? null,
     quantity: input.quantity ?? null,
     price: input.price ?? null,
+    priceCurrency: input.priceCurrency ?? null,
     cashAmount: input.cashAmount ?? null,
     cashCurrency: input.cashCurrency ?? null,
     fee: input.fee ?? null,
@@ -129,20 +146,26 @@ export async function updateLedgerEntry(
     db,
     `
       update ledger_entries
-      set portfolio_id = ?, event_type = ?, trade_date = ?, symbol = ?, side = ?, quantity = ?,
-          price = ?, cash_amount = ?, cash_currency = ?, fee = ?, tax = ?, note = ?,
+      set portfolio_id = ?, account_key = ?, event_type = ?, trade_date = ?, event_ts = ?,
+          sequence = ?, instrument_id = ?, symbol = ?, side = ?, quantity = ?, price = ?,
+          price_currency = ?, cash_amount = ?, cash_currency = ?, fee = ?, tax = ?, note = ?,
           source = ?, external_id = ?, meta_json = ?, updated_at = ?
       where id = ?
         and deleted_at is null
     `,
     [
       input.portfolioId,
+      input.accountKey ?? null,
       input.eventType,
       input.tradeDate,
+      input.eventTs ?? null,
+      input.sequence ?? null,
+      input.instrumentId ?? null,
       input.symbol ?? null,
       input.side ?? null,
       input.quantity ?? null,
       input.price ?? null,
+      input.priceCurrency ?? null,
       input.cashAmount ?? null,
       input.cashCurrency ?? null,
       input.fee ?? null,
@@ -160,6 +183,7 @@ export async function updateLedgerEntry(
     db,
     `
       select id, portfolio_id, event_type, trade_date, symbol, side, quantity, price,
+             account_key, event_ts, sequence, instrument_id, price_currency,
              cash_amount, cash_currency, fee, tax, note, source, external_id, meta_json,
              created_at, updated_at, deleted_at
       from ledger_entries
@@ -222,18 +246,24 @@ export async function upsertLedgerEntryByExternalId(
     db,
     `
       insert into ledger_entries (
-        id, portfolio_id, event_type, trade_date, symbol, side, quantity, price,
+        id, portfolio_id, account_key, event_type, trade_date, event_ts, sequence,
+        instrument_id, symbol, side, quantity, price, price_currency,
         cash_amount, cash_currency, fee, tax, note, source, external_id, meta_json,
         created_at, updated_at, deleted_at
       )
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict(portfolio_id, source, external_id) do update set
         event_type = excluded.event_type,
         trade_date = excluded.trade_date,
+        event_ts = excluded.event_ts,
+        sequence = excluded.sequence,
+        instrument_id = excluded.instrument_id,
+        account_key = excluded.account_key,
         symbol = excluded.symbol,
         side = excluded.side,
         quantity = excluded.quantity,
         price = excluded.price,
+        price_currency = excluded.price_currency,
         cash_amount = excluded.cash_amount,
         cash_currency = excluded.cash_currency,
         fee = excluded.fee,
@@ -246,12 +276,17 @@ export async function upsertLedgerEntryByExternalId(
     [
       id,
       input.portfolioId,
+      input.accountKey ?? null,
       input.eventType,
       input.tradeDate,
+      input.eventTs ?? null,
+      input.sequence ?? null,
+      input.instrumentId ?? null,
       input.symbol ?? null,
       input.side ?? null,
       input.quantity ?? null,
       input.price ?? null,
+      input.priceCurrency ?? null,
       input.cashAmount ?? null,
       input.cashCurrency ?? null,
       input.fee ?? null,
@@ -270,6 +305,7 @@ export async function upsertLedgerEntryByExternalId(
     db,
     `
       select id, portfolio_id, event_type, trade_date, symbol, side, quantity, price,
+             account_key, event_ts, sequence, instrument_id, price_currency,
              cash_amount, cash_currency, fee, tax, note, source, external_id, meta_json,
              created_at, updated_at, deleted_at
       from ledger_entries
@@ -289,12 +325,17 @@ function toLedgerEntry(row: DbLedgerEntryRow): LedgerEntry {
   return {
     id: row.id,
     portfolioId: row.portfolio_id,
+    accountKey: row.account_key,
     eventType: row.event_type as LedgerEventType,
     tradeDate: row.trade_date,
+    eventTs: row.event_ts,
+    sequence: row.sequence,
+    instrumentId: row.instrument_id,
     symbol: row.symbol,
     side: row.side as LedgerSide | null,
     quantity: row.quantity,
     price: row.price,
+    priceCurrency: row.price_currency,
     cashAmount: row.cash_amount,
     cashCurrency: row.cash_currency,
     fee: row.fee,

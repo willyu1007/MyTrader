@@ -144,6 +144,16 @@ const navItems = [
   }
 ] as const;
 
+const portfolioTabs = [
+  { key: "overview", label: "总览", icon: "dashboard", description: "资产、现金、估值与关键预警。" },
+  { key: "holdings", label: "持仓", icon: "view_list", description: "当前持仓、成本与权重。" },
+  { key: "trades", label: "交易", icon: "swap_horiz", description: "流水、现金流与对账。" },
+  { key: "performance", label: "收益", icon: "timeline", description: "收益率与区间表现。" },
+  { key: "risk", label: "风险", icon: "shield", description: "风险指标与回撤。" },
+  { key: "allocation", label: "目标配置", icon: "tune", description: "目标权重与再平衡。" },
+  { key: "corporate", label: "公司行为", icon: "corporate_fare", description: "分红、拆合股与事件追溯。" }
+] as const;
+
 const otherTabs = [
   { key: "data-import", label: "\u6570\u636e\u5bfc\u5165" }
 ] as const;
@@ -151,6 +161,7 @@ const otherTabs = [
 type OtherTab = (typeof otherTabs)[number]["key"];
 
 type WorkspaceView = (typeof navItems)[number]["key"];
+type PortfolioTab = (typeof portfolioTabs)[number]["key"];
 
 export function Dashboard({ account, onLock }: DashboardProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -162,6 +173,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const [activeView, setActiveView] = useState<WorkspaceView>("portfolio");
   const [otherTab, setOtherTab] = useState<OtherTab>("data-import");
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
+  const [portfolioTab, setPortfolioTab] = useState<PortfolioTab>("overview");
 
   const [portfolioName, setPortfolioName] = useState("");
   const [portfolioBaseCurrency, setPortfolioBaseCurrency] = useState("CNY");
@@ -240,6 +252,12 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     if (!activePortfolio) return;
     setPortfolioRename(activePortfolio.name);
   }, [activePortfolio]);
+
+  useEffect(() => {
+    if (activeView === "portfolio") {
+      setPortfolioTab("overview");
+    }
+  }, [activeView]);
 
   const handleCreatePortfolio = useCallback(async () => {
     if (!window.mytrader) return;
@@ -552,6 +570,33 @@ export function Dashboard({ account, onLock }: DashboardProps) {
            </div>
         </div>
 
+        {activeView === "portfolio" && (
+          <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
+            <div className="flex items-center gap-0 overflow-x-auto px-3">
+              {portfolioTabs.map((tab) => {
+                const isActive = portfolioTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors border-b-2 ${
+                      isActive
+                        ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-slate-900/60"
+                        : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-900/40"
+                    }`}
+                    onClick={() => setPortfolioTab(tab.key)}
+                  >
+                    <span className="material-icons-outlined text-base">{tab.icon}</span>
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-0 scroll-smooth">
           
           {/* View: Account */}
@@ -570,210 +615,304 @@ export function Dashboard({ account, onLock }: DashboardProps) {
           {/* View: Portfolio */}
           {activeView === "portfolio" && (
             <>
-              <Panel>
-                <div className="space-y-6 max-w-5xl">
-                  {/* Selector & Actions */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <FormGroup label="切换组合">
-                        <Select
-                          value={activePortfolioId ?? ""}
-                          onChange={(e) => setActivePortfolioId(e.target.value)}
-                          options={[
-                            { value: "", label: "请选择组合", disabled: true },
-                            ...portfolios.map(p => ({ value: p.id, label: p.name }))
-                          ]}
-                          className="w-full"
-                        />
-                    </FormGroup>
-                    
-                    <FormGroup label="重命名当前组合">
-                       <div className="flex gap-2">
-                          <Input 
-                            value={portfolioRename}
-                            onChange={(e) => setPortfolioRename(e.target.value)}
-                            placeholder="组合名称"
-                            className="flex-1"
+              {portfolioTab === "overview" && (
+                <>
+                  <Panel>
+                    {isLoading && <EmptyState message="正在加载组合数据..." />}
+                    {!isLoading && !activePortfolio && <EmptyState message="请先选择或创建组合。" />}
+                    {!isLoading && activePortfolio && !snapshot && <EmptyState message="暂无估值快照。" />}
+
+                    {snapshot && (
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                          <SummaryCard label="总市值" value={formatCurrency(snapshot.totals.marketValue)} />
+                          <SummaryCard
+                            label="总盈亏"
+                            value={formatCurrency(snapshot.totals.pnl)}
+                            trend={snapshot.totals.pnl >= 0 ? "up" : "down"}
                           />
-                          <Button variant="secondary" onClick={handleRenamePortfolio} disabled={!activePortfolio}>更新</Button>
-                          <Button variant="danger" onClick={handleDeletePortfolio} disabled={!activePortfolio}>删除</Button>
-                       </div>
-                    </FormGroup>
-                  </div>
-
-                  <div className="border-t border-slate-100 dark:border-slate-800" />
-                  
-                  {/* Create New */}
-                  <FormGroup label="新建组合">
-                    <div className="flex gap-2 items-center">
-                       <Input 
-                         value={portfolioName}
-                         onChange={(e) => setPortfolioName(e.target.value)}
-                         placeholder="例如：核心持仓"
-                         className="flex-[2]"
-                       />
-                       <Input 
-                         value={portfolioBaseCurrency}
-                         onChange={(e) => setPortfolioBaseCurrency(e.target.value)}
-                         placeholder="基准币种"
-                         className="flex-1"
-                       />
-                       <Button variant="primary" onClick={handleCreatePortfolio} disabled={!portfolioName.trim()} icon="add">创建</Button>
-                    </div>
-                  </FormGroup>
-                </div>
-              </Panel>
-
-              <Panel>
-                <h3 className="text-sm font-semibold mb-4 text-slate-800 dark:text-slate-200">持仓明细</h3>
-                
-                {isLoading && <EmptyState message="正在加载组合数据..." />}
-                {!isLoading && !activePortfolio && <EmptyState message="请先选择或创建组合。" />}
-                {!isLoading && activePortfolio && !snapshot && <EmptyState message="暂无估值快照。" />}
-                
-                {snapshot && (
-                  <>
-                    {/* Summary Cards */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-                       <SummaryCard label="总市值" value={formatCurrency(snapshot.totals.marketValue)} />
-                       <SummaryCard 
-                          label="总盈亏" 
-                          value={formatCurrency(snapshot.totals.pnl)} 
-                          trend={snapshot.totals.pnl >= 0 ? 'up' : 'down'}
-                        />
-                    </div>
-
-                    {/* Table */}
-                    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 mb-6">
-                      <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
-                        <thead className="bg-slate-50 dark:bg-slate-900">
-                          <tr>
-                            {["代码", "名称", "类型", "数量", "成本", "现价", "市值", "盈亏", "权重", "操作"].map(h => (
-                              <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white dark:bg-surface-dark/70 divide-y divide-slate-200 dark:divide-border-dark">
-                          {snapshot.positions.length === 0 ? (
-                            <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">暂无持仓</td></tr>
-                          ) : (
-                            snapshot.positions.map((pos) => (
-                              <tr key={pos.position.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
-                                <td className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 font-mono">{pos.position.symbol}</td>
-                                <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">{pos.position.name ?? "-"}</td>
-                                <td className="px-4 py-2 text-sm text-slate-500">
-                                   <Badge>{formatAssetClassLabel(pos.position.assetClass)}</Badge>
-                                </td>
-                                <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 font-mono text-right">{formatNumber(pos.position.quantity)}</td>
-                                <td className="px-4 py-2 text-sm text-slate-500 dark:text-slate-500 font-mono text-right">{formatCurrency(pos.position.cost)}</td>
-                                <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 font-mono text-right">{formatCurrency(pos.latestPrice)}</td>
-                                <td className="px-4 py-2 text-sm text-slate-900 dark:text-slate-100 font-medium font-mono text-right">{formatCurrency(pos.marketValue)}</td>
-                                <td className={`px-4 py-2 text-sm font-mono text-right ${pos.pnl && pos.pnl < 0 ? "text-red-500" : "text-emerald-500"}`}>
-                                  {formatCurrency(pos.pnl)}
-                                </td>
-                                <td className="px-4 py-2 text-sm text-slate-500 dark:text-slate-500 font-mono text-right">
-                                  {formatPct(
-                                    snapshot.exposures.bySymbol.find(e => e.key === pos.position.symbol)?.weight ?? 0
-                                  )}
-                                </td>
-                                <td className="px-4 py-2 text-sm text-right">
-                                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => handleEditPosition(pos)} className="p-1 text-slate-400 hover:text-primary transition-colors" title="编辑">
-                                       <span className="material-icons-outlined text-base">edit</span>
-                                    </button>
-                                    <button onClick={() => handleDeletePosition(pos.position.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors" title="删除">
-                                       <span className="material-icons-outlined text-base">delete</span>
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Edit Form */}
-                    <div className="bg-slate-50 dark:bg-slate-900/50 p-4 border-t border-slate-200 dark:border-slate-800">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                          <span className="material-icons-outlined text-primary text-base">edit_note</span>
-                          {positionForm.id ? "编辑持仓" : "新增持仓"}
-                        </h3>
-                        {positionForm.id && (
-                             <Button variant="secondary" size="sm" onClick={handleCancelEditPosition}>取消编辑</Button>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <FormGroup label="代码">
-                           <Input 
-                             value={positionForm.symbol} 
-                             onChange={(e) => setPositionForm(p => ({ ...p, symbol: e.target.value }))}
-                             placeholder="例如: 600519.SH"
-                           />
-                        </FormGroup>
-                        <FormGroup label="名称">
-                           <Input 
-                             value={positionForm.name} 
-                             onChange={(e) => setPositionForm(p => ({ ...p, name: e.target.value }))}
-                             placeholder="可选"
-                           />
-                        </FormGroup>
-                        <FormGroup label="资产类别">
-                           <Select
-                             value={positionForm.assetClass}
-                             onChange={(e) => setPositionForm(p => ({ ...p, assetClass: e.target.value as AssetClass }))}
-                             options={Object.entries(assetClassLabels).map(([v, l]) => ({ value: v, label: l }))}
-                           />
-                        </FormGroup>
-                        <FormGroup label="市场 / 币种">
-                           <div className="flex gap-2">
-                             <Input 
-                               value={positionForm.market} 
-                               onChange={(e) => setPositionForm(p => ({ ...p, market: e.target.value }))}
-                               placeholder="CN"
-                             />
-                             <Input 
-                               value={positionForm.currency} 
-                               onChange={(e) => setPositionForm(p => ({ ...p, currency: e.target.value }))}
-                               placeholder="CNY"
-                             />
-                           </div>
-                        </FormGroup>
-                        <FormGroup label="数量">
-                           <Input 
-                             type="number"
-                             value={positionForm.quantity} 
-                             onChange={(e) => setPositionForm(p => ({ ...p, quantity: e.target.value }))}
-                             placeholder="0"
-                           />
-                        </FormGroup>
-                        <FormGroup label="成本单价">
-                           <Input 
-                             type="number"
-                             value={positionForm.cost} 
-                             onChange={(e) => setPositionForm(p => ({ ...p, cost: e.target.value }))}
-                             placeholder="0.00"
-                           />
-                        </FormGroup>
-                        <FormGroup label="建仓日期">
-                           <Input 
-                             type="date"
-                             value={positionForm.openDate} 
-                             onChange={(e) => setPositionForm(p => ({ ...p, openDate: e.target.value }))}
-                           />
-                        </FormGroup>
-                        <div className="flex items-end">
-                           <Button variant="primary" onClick={handleSubmitPosition} className="w-full">
-                             {positionForm.id ? "保存更改" : "添加持仓"}
-                           </Button>
+                          <SummaryCard label="成本合计" value={formatCurrency(snapshot.totals.costValue)} />
+                          <SummaryCard label="行情更新" value={snapshot.priceAsOf ?? "--"} />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                            <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">数据状态</div>
+                            <p className="text-sm text-slate-700 dark:text-slate-300">
+                              {snapshot.priceAsOf ? `价格更新至 ${snapshot.priceAsOf}` : "暂无行情数据"}
+                            </p>
+                          </div>
+                          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                            <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">风险提示</div>
+                            <p className="text-sm text-slate-700 dark:text-slate-300">
+                              {snapshot.riskWarnings.length > 0
+                                ? `${snapshot.riskWarnings.length} 条风险预警`
+                                : "暂无触发预警"}
+                            </p>
+                          </div>
+                          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                            <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">快速动作</div>
+                            <p className="text-sm text-slate-700 dark:text-slate-300">刷新行情 / 导入流水</p>
+                          </div>
                         </div>
                       </div>
+                    )}
+                  </Panel>
+
+                  <Panel>
+                    <h3 className="text-sm font-semibold mb-4 text-slate-800 dark:text-slate-200">组合管理</h3>
+                    <div className="space-y-6 max-w-5xl">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <FormGroup label="切换组合">
+                          <Select
+                            value={activePortfolioId ?? ""}
+                            onChange={(e) => setActivePortfolioId(e.target.value)}
+                            options={[
+                              { value: "", label: "请选择组合", disabled: true },
+                              ...portfolios.map((p) => ({ value: p.id, label: p.name }))
+                            ]}
+                            className="w-full"
+                          />
+                        </FormGroup>
+
+                        <FormGroup label="重命名当前组合">
+                          <div className="flex gap-2">
+                            <Input
+                              value={portfolioRename}
+                              onChange={(e) => setPortfolioRename(e.target.value)}
+                              placeholder="组合名称"
+                              className="flex-1"
+                            />
+                            <Button variant="secondary" onClick={handleRenamePortfolio} disabled={!activePortfolio}>
+                              更新
+                            </Button>
+                            <Button variant="danger" onClick={handleDeletePortfolio} disabled={!activePortfolio}>
+                              删除
+                            </Button>
+                          </div>
+                        </FormGroup>
+                      </div>
+
+                      <div className="border-t border-slate-100 dark:border-slate-800" />
+
+                      <FormGroup label="新建组合">
+                        <div className="flex gap-2 items-center">
+                          <Input
+                            value={portfolioName}
+                            onChange={(e) => setPortfolioName(e.target.value)}
+                            placeholder="例如：核心持仓"
+                            className="flex-[2]"
+                          />
+                          <Input
+                            value={portfolioBaseCurrency}
+                            onChange={(e) => setPortfolioBaseCurrency(e.target.value)}
+                            placeholder="基准币种"
+                            className="flex-1"
+                          />
+                          <Button
+                            variant="primary"
+                            onClick={handleCreatePortfolio}
+                            disabled={!portfolioName.trim()}
+                            icon="add"
+                          >
+                            创建
+                          </Button>
+                        </div>
+                      </FormGroup>
                     </div>
-                  </>
-                )}
-              </Panel>
+                  </Panel>
+                </>
+              )}
+
+              {portfolioTab === "holdings" && (
+                <Panel>
+                  <h3 className="text-sm font-semibold mb-4 text-slate-800 dark:text-slate-200">持仓明细</h3>
+
+                  {isLoading && <EmptyState message="正在加载组合数据..." />}
+                  {!isLoading && !activePortfolio && <EmptyState message="请先选择或创建组合。" />}
+                  {!isLoading && activePortfolio && !snapshot && <EmptyState message="暂无估值快照。" />}
+
+                  {snapshot && (
+                    <>
+                      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 mb-6">
+                        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+                          <thead className="bg-slate-50 dark:bg-slate-900">
+                            <tr>
+                              {["代码", "名称", "类型", "数量", "成本", "现价", "市值", "盈亏", "权重", "操作"].map((h) => (
+                                <th
+                                  key={h}
+                                  className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap"
+                                >
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white dark:bg-surface-dark/70 divide-y divide-slate-200 dark:divide-border-dark">
+                            {snapshot.positions.length === 0 ? (
+                              <tr>
+                                <td colSpan={10} className="px-4 py-8 text-center text-sm text-slate-500">
+                                  暂无持仓
+                                </td>
+                              </tr>
+                            ) : (
+                              snapshot.positions.map((pos) => (
+                                <tr
+                                  key={pos.position.id}
+                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group"
+                                >
+                                  <td className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 font-mono">
+                                    {pos.position.symbol}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">
+                                    {pos.position.name ?? "-"}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-slate-500">
+                                    <Badge>{formatAssetClassLabel(pos.position.assetClass)}</Badge>
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 font-mono text-right">
+                                    {formatNumber(pos.position.quantity)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-slate-500 dark:text-slate-500 font-mono text-right">
+                                    {formatCurrency(pos.position.cost)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 font-mono text-right">
+                                    {formatCurrency(pos.latestPrice)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-slate-900 dark:text-slate-100 font-medium font-mono text-right">
+                                    {formatCurrency(pos.marketValue)}
+                                  </td>
+                                  <td
+                                    className={`px-4 py-2 text-sm font-mono text-right ${
+                                      pos.pnl && pos.pnl < 0 ? "text-red-500" : "text-emerald-500"
+                                    }`}
+                                  >
+                                    {formatCurrency(pos.pnl)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-slate-500 dark:text-slate-500 font-mono text-right">
+                                    {formatPct(
+                                      snapshot.exposures.bySymbol.find((e) => e.key === pos.position.symbol)
+                                        ?.weight ?? 0
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-right">
+                                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={() => handleEditPosition(pos)}
+                                        className="p-1 text-slate-400 hover:text-primary transition-colors"
+                                        title="编辑"
+                                      >
+                                        <span className="material-icons-outlined text-base">edit</span>
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeletePosition(pos.position.id)}
+                                        className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+                                        title="删除"
+                                      >
+                                        <span className="material-icons-outlined text-base">delete</span>
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="bg-slate-50 dark:bg-slate-900/50 p-4 border-t border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                            <span className="material-icons-outlined text-primary text-base">edit_note</span>
+                            {positionForm.id ? "编辑持仓" : "新增持仓"}
+                          </h3>
+                          {positionForm.id && (
+                            <Button variant="secondary" size="sm" onClick={handleCancelEditPosition}>
+                              取消编辑
+                            </Button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                          <FormGroup label="代码">
+                            <Input
+                              value={positionForm.symbol}
+                              onChange={(e) => setPositionForm((p) => ({ ...p, symbol: e.target.value }))}
+                              placeholder="例如: 600519.SH"
+                            />
+                          </FormGroup>
+                          <FormGroup label="名称">
+                            <Input
+                              value={positionForm.name}
+                              onChange={(e) => setPositionForm((p) => ({ ...p, name: e.target.value }))}
+                              placeholder="可选"
+                            />
+                          </FormGroup>
+                          <FormGroup label="资产类别">
+                            <Select
+                              value={positionForm.assetClass}
+                              onChange={(e) =>
+                                setPositionForm((p) => ({ ...p, assetClass: e.target.value as AssetClass }))
+                              }
+                              options={Object.entries(assetClassLabels).map(([v, l]) => ({
+                                value: v,
+                                label: l
+                              }))}
+                            />
+                          </FormGroup>
+                          <FormGroup label="市场 / 币种">
+                            <div className="flex gap-2">
+                              <Input
+                                value={positionForm.market}
+                                onChange={(e) => setPositionForm((p) => ({ ...p, market: e.target.value }))}
+                                placeholder="CN"
+                              />
+                              <Input
+                                value={positionForm.currency}
+                                onChange={(e) => setPositionForm((p) => ({ ...p, currency: e.target.value }))}
+                                placeholder="CNY"
+                              />
+                            </div>
+                          </FormGroup>
+                          <FormGroup label="数量">
+                            <Input
+                              type="number"
+                              value={positionForm.quantity}
+                              onChange={(e) => setPositionForm((p) => ({ ...p, quantity: e.target.value }))}
+                              placeholder="0"
+                            />
+                          </FormGroup>
+                          <FormGroup label="成本单价">
+                            <Input
+                              type="number"
+                              value={positionForm.cost}
+                              onChange={(e) => setPositionForm((p) => ({ ...p, cost: e.target.value }))}
+                              placeholder="0.00"
+                            />
+                          </FormGroup>
+                          <FormGroup label="建仓日期">
+                            <Input
+                              type="date"
+                              value={positionForm.openDate}
+                              onChange={(e) => setPositionForm((p) => ({ ...p, openDate: e.target.value }))}
+                            />
+                          </FormGroup>
+                          <div className="flex items-end">
+                            <Button variant="primary" onClick={handleSubmitPosition} className="w-full">
+                              {positionForm.id ? "保存更改" : "添加持仓"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </Panel>
+              )}
+
+              {["trades", "performance", "risk", "allocation", "corporate"].includes(portfolioTab) && (
+                <PlaceholderPanel
+                  title={portfolioTabs.find((tab) => tab.key === portfolioTab)?.label ?? ""}
+                  description={portfolioTabs.find((tab) => tab.key === portfolioTab)?.description ?? ""}
+                />
+              )}
             </>
           )}
 

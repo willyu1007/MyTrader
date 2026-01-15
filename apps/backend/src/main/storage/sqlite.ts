@@ -11,6 +11,7 @@ const WASM_FILENAME = "sql-wasm.wasm";
 
 // Map to track database file paths for persistence
 const dbFilePaths = new Map<SqlJsDatabase, string>();
+const transactionDepths = new Map<SqlJsDatabase, number>();
 
 function resolveSqlJsWasmPath(): string {
   const distPath = path.join(__dirname, WASM_FILENAME);
@@ -69,11 +70,33 @@ function saveDatabase(db: SqlJsDatabase): void {
   }
 }
 
+function isTransactionActive(db: SqlJsDatabase): boolean {
+  return (transactionDepths.get(db) ?? 0) > 0;
+}
+
+function markTransactionStart(db: SqlJsDatabase): void {
+  const next = (transactionDepths.get(db) ?? 0) + 1;
+  transactionDepths.set(db, next);
+}
+
+function markTransactionEnd(db: SqlJsDatabase): void {
+  const current = transactionDepths.get(db) ?? 0;
+  if (current <= 1) {
+    transactionDepths.delete(db);
+    return;
+  }
+  transactionDepths.set(db, current - 1);
+}
+
+function flushDatabase(db: SqlJsDatabase): void {
+  if (!isTransactionActive(db)) saveDatabase(db);
+}
+
 export function exec(db: SqlJsDatabase, sql: string): Promise<void> {
   return new Promise((resolve, reject) => {
     try {
       db.exec(sql);
-      saveDatabase(db);
+      flushDatabase(db);
       resolve();
     } catch (err) {
       reject(err);
@@ -89,7 +112,7 @@ export function run(
   return new Promise((resolve, reject) => {
     try {
       db.run(sql, params as (string | number | null | Uint8Array)[]);
-      saveDatabase(db);
+      flushDatabase(db);
       resolve();
     } catch (err) {
       reject(err);
@@ -159,6 +182,7 @@ export function close(db: SqlJsDatabase): Promise<void> {
     try {
       saveDatabase(db);
       dbFilePaths.delete(db);
+      transactionDepths.delete(db);
       db.close();
       resolve();
     } catch (err) {
@@ -171,10 +195,18 @@ export async function transaction<T>(
   db: SqlJsDatabase,
   fn: () => Promise<T>
 ): Promise<T> {
-  await exec(db, "begin");
+  markTransactionStart(db);
+  try {
+    await exec(db, "begin");
+  } catch (err) {
+    markTransactionEnd(db);
+    throw err;
+  }
   try {
     const result = await fn();
     await exec(db, "commit");
+    markTransactionEnd(db);
+    saveDatabase(db);
     return result;
   } catch (err) {
     try {
@@ -182,6 +214,8 @@ export async function transaction<T>(
     } catch (rollbackError) {
       console.error("[mytrader] failed to rollback transaction", rollbackError);
     }
+    markTransactionEnd(db);
+    saveDatabase(db);
     throw err;
   }
 }

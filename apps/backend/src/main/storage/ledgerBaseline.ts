@@ -79,7 +79,7 @@ export async function upsertBaselineLedgerFromPosition(
     note: "baseline:positions",
     source: BASELINE_SOURCE,
     externalId,
-    meta: { baseline: true, from: "positions" }
+    meta: { baseline: true, from: "positions", adjustment_mode: "absolute" }
   });
 }
 
@@ -138,4 +138,3 @@ function normalizeTradeDate(openDate: string | null): string {
   if (openDate && DATE_RE.test(openDate)) return openDate;
   return new Date().toISOString().slice(0, 10);
 }
-

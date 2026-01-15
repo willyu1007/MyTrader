@@ -500,18 +500,23 @@ async function normalizeLedgerEntryInput(
   input: CreateLedgerEntryInput
 ): Promise<CreateLedgerEntryInput> {
   const portfolioId = normalizeRequiredString(input.portfolioId, "portfolioId");
+  const accountKey = normalizeOptionalString(input.accountKey);
   const eventType = normalizeRequiredString(input.eventType, "eventType") as
     | CreateLedgerEntryInput["eventType"];
   const tradeDate = normalizeDate(input.tradeDate, "tradeDate");
+  const eventTs = normalizeOptionalInteger(input.eventTs, "eventTs");
+  const sequence = normalizeOptionalInteger(input.sequence, "sequence");
   const source = normalizeRequiredString(input.source, "source") as
     | CreateLedgerEntryInput["source"];
   const externalId = normalizeOptionalString(input.externalId);
   const note = normalizeOptionalString(input.note);
 
+  const instrumentId = normalizeOptionalString(input.instrumentId);
   const symbol = normalizeOptionalString(input.symbol);
   const side = normalizeSide(input.side);
   const quantity = normalizeOptionalNumber(input.quantity);
   const price = normalizeOptionalNumber(input.price);
+  const priceCurrencyInput = normalizeOptionalString(input.priceCurrency);
   const cashAmount = normalizeOptionalNumber(input.cashAmount);
   const cashCurrencyInput = normalizeOptionalString(input.cashCurrency);
   const fee = normalizeOptionalNumber(input.fee);
@@ -524,23 +529,36 @@ async function normalizeLedgerEntryInput(
   if (tax !== null && tax < 0) throw new Error("tax must be >= 0.");
   if (price !== null && price < 0) throw new Error("price must be >= 0.");
   if (quantity !== null && quantity < 0) throw new Error("quantity must be >= 0.");
+  if (eventTs !== null && eventTs <= 0) throw new Error("eventTs must be > 0.");
+  if (sequence !== null && sequence < 0) throw new Error("sequence must be >= 0.");
 
   switch (eventType) {
     case "trade": {
-      if (!symbol) throw new Error("trade requires symbol.");
+      if (!symbol && !instrumentId) {
+        throw new Error("trade requires symbol or instrumentId.");
+      }
       if (!side) throw new Error("trade requires side.");
       if (!quantity || quantity <= 0) throw new Error("trade requires quantity > 0.");
       if (price === null) throw new Error("trade requires price.");
+      if (cashAmount === null || cashAmount === 0) {
+        throw new Error("trade requires cashAmount != 0.");
+      }
       const cashCurrency = cashCurrencyInput ?? baseCurrency;
+      const priceCurrency = priceCurrencyInput ?? cashCurrency;
       return {
         portfolioId,
+        accountKey,
         eventType,
         tradeDate,
+        eventTs,
+        sequence,
+        instrumentId,
         symbol,
         side,
         quantity,
         price,
-        cashAmount: null,
+        priceCurrency,
+        cashAmount,
         cashCurrency,
         fee,
         tax,
@@ -557,12 +575,17 @@ async function normalizeLedgerEntryInput(
       if (!cashCurrencyInput) throw new Error("cash requires cashCurrency.");
       return {
         portfolioId,
+        accountKey,
         eventType,
         tradeDate,
+        eventTs,
+        sequence,
+        instrumentId: null,
         symbol: null,
         side: null,
         quantity: null,
         price: null,
+        priceCurrency: null,
         cashAmount,
         cashCurrency: cashCurrencyInput,
         fee: null,
@@ -581,12 +604,17 @@ async function normalizeLedgerEntryInput(
       if (!cashCurrencyInput) throw new Error(`${eventType} requires cashCurrency.`);
       return {
         portfolioId,
+        accountKey,
         eventType,
         tradeDate,
+        eventTs,
+        sequence,
+        instrumentId,
         symbol: symbol,
         side: null,
         quantity: null,
         price: null,
+        priceCurrency: null,
         cashAmount,
         cashCurrency: cashCurrencyInput,
         fee: null,
@@ -598,19 +626,26 @@ async function normalizeLedgerEntryInput(
       };
     }
     case "dividend": {
-      if (!symbol) throw new Error("dividend requires symbol.");
+      if (!symbol && !instrumentId) {
+        throw new Error("dividend requires symbol or instrumentId.");
+      }
       if (cashAmount === null || cashAmount <= 0) {
         throw new Error("dividend requires cashAmount > 0.");
       }
       if (!cashCurrencyInput) throw new Error("dividend requires cashCurrency.");
       return {
         portfolioId,
+        accountKey,
         eventType,
         tradeDate,
+        eventTs,
+        sequence,
+        instrumentId,
         symbol,
         side: null,
         quantity: null,
         price: null,
+        priceCurrency: null,
         cashAmount,
         cashCurrency: cashCurrencyInput,
         fee: null,
@@ -622,20 +657,28 @@ async function normalizeLedgerEntryInput(
       };
     }
     case "adjustment": {
-      if (!symbol) throw new Error("adjustment requires symbol.");
+      if (!symbol && !instrumentId) {
+        throw new Error("adjustment requires symbol or instrumentId.");
+      }
       if (!side) throw new Error("adjustment requires side.");
       if (!quantity || quantity <= 0) {
         throw new Error("adjustment requires quantity > 0.");
       }
       const cashCurrency = cashCurrencyInput ?? baseCurrency;
+      const priceCurrency = priceCurrencyInput ?? cashCurrency;
       return {
         portfolioId,
+        accountKey,
         eventType,
         tradeDate,
+        eventTs,
+        sequence,
+        instrumentId,
         symbol,
         side,
         quantity,
         price,
+        priceCurrency,
         cashAmount: null,
         cashCurrency,
         fee: null,
@@ -647,16 +690,23 @@ async function normalizeLedgerEntryInput(
       };
     }
     case "corporate_action": {
-      if (!symbol) throw new Error("corporate_action requires symbol.");
+      if (!symbol && !instrumentId) {
+        throw new Error("corporate_action requires symbol or instrumentId.");
+      }
       if (!meta) throw new Error("corporate_action requires meta.");
       return {
         portfolioId,
+        accountKey,
         eventType,
         tradeDate,
+        eventTs,
+        sequence,
+        instrumentId,
         symbol,
         side: null,
         quantity: null,
         price: null,
+        priceCurrency: null,
         cashAmount: null,
         cashCurrency: null,
         fee: null,
@@ -705,6 +755,16 @@ function normalizeOptionalNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function normalizeOptionalInteger(value: unknown, field: string): number | null {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  if (!Number.isInteger(num)) {
+    throw new Error(`${field} must be an integer.`);
+  }
+  return num;
 }
 
 function normalizeSide(value: unknown): "buy" | "sell" | null {
