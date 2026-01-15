@@ -47,47 +47,57 @@ MyTrader 目前使用两个主要本地库：
 - 目前仍用于“持仓”界面与快照计算的输入/缓存。
 - 目标状态：由持仓引擎从 `ledger_entries` 推导得到（positions 不再作为真相源）。
 
-### `ledger_entries`（schema v3 新增，统一流水表）
+### `ledger_entries`（schema v3+，统一流水表）
 
 目的：用一个可演进、可追溯的统一流水表覆盖交易/现金流/费用税费/分红/调仓修正/公司行为等事件，为持仓引擎与收益/风险/归因提供可回放输入。
 
 字段（简述）：
 - 标识与归属：`id`、`portfolio_id`
-- 事件：`event_type`、`trade_date`（`YYYY-MM-DD`）
-- 标的：`symbol`（可空）
+- 事件：`event_type`、`trade_date`（`YYYY-MM-DD`）、`event_ts`（可空）、`sequence`（可空）
+- 说明：导入来源（`csv`/`broker_import`）要求提供 `sequence`，用于同日事件稳定排序。
+- 标的：`instrument_id`（可空）、`symbol`（可空）
 - 方向与数量：`side`（buy/sell，可空）、`quantity`（可空）
-- 价格：`price`（可空）
+- 价格：`price`（可空）、`price_currency`（可空）
 - 现金：`cash_amount`（可空）、`cash_currency`（可空）
 - 费用税费：`fee`、`tax`（可空）
+- 扩展钩子：`account_key`（可空）
 - 追溯：`source`、`external_id`（可空）、`meta_json`（可空）
 - 其他：`note`、`created_at / updated_at / deleted_at`
 
 索引与约束（已落地）：
 - 按组合 + 日期/标的/事件类型查询索引
 - 幂等去重：`unique (portfolio_id, source, external_id)`
-- `side` 枚举约束；`quantity/price/fee/tax` 非负约束；软删除 `deleted_at`
+- `side` 枚举约束；`quantity/price/fee/tax` 非负约束；`event_ts/sequence` 非负约束；软删除 `deleted_at`
+- `cash_amount` 不为空时要求 `cash_currency` 不为空
 
 ## `event_type` 事件类型与输入口径
 
 当前约定（以 IPC 输入校验为准，见 `apps/backend/src/main/ipc/registerIpcHandlers.ts`）：
 
 - `trade`：买卖成交
-  - 必填：`symbol`、`side`、`quantity>0`、`price`
-  - 可选：`fee`、`tax`、`cash_currency`（默认组合 baseCurrency）
+  - 必填：`symbol` 或 `instrument_id`、`side`、`quantity>0`、`price`、`cash_amount != 0`
+  - 现金腿约束：`side=buy` 时 `cash_amount < 0`；`side=sell` 时 `cash_amount > 0`
+  - 可选：`fee`、`tax`、`cash_currency`（默认组合 baseCurrency）、`price_currency`（默认等于 cash_currency）
 - `adjustment`：持仓修正/期初基线（baseline）
-  - 必填：`symbol`、`side`、`quantity>0`
-  - 可选：`price`、`cash_currency`（默认组合 baseCurrency）
+  - 必填：`symbol` 或 `instrument_id`、`side`、`quantity>0`
+  - 可选：`price`、`cash_currency`（默认组合 baseCurrency）、`price_currency`（默认等于 cash_currency）
 - `cash`：入金/出金/现金变动
   - 必填：`cash_amount != 0`、`cash_currency`
   - `symbol/side/quantity/price` 均为空
 - `fee` / `tax`：单独记账的费用/税费（MVP 先做“独立事件”）
   - 必填：`cash_amount < 0`、`cash_currency`
-  - 可选：`symbol`（用于归属到标的）
+  - 可选：`symbol` 或 `instrument_id`（用于归属到标的）
 - `dividend`：分红
-  - 必填：`symbol`、`cash_amount > 0`、`cash_currency`
+  - 必填：`symbol` 或 `instrument_id`、`cash_amount > 0`、`cash_currency`
   - 可选：`tax`（允许记录分红税）
 - `corporate_action`：公司行为（事件壳）
-  - 必填：`symbol`、`meta`（对象，存放拆并股/送转配等细节）
+  - 必填：`symbol` 或 `instrument_id`、`meta`（对象，存放拆并股/送转配等细节）
+
+**`corporate_action.meta` schema（v1）**
+- `kind`: `split` | `reverse_split` | `info`
+- `split/reverse_split`：`numerator`/`denominator`（正整数，比例 = numerator / denominator）
+- `info`：`category`（`decision`/`org_change`/`policy_support`/`other`）、`title`、`description`（可选）
+- `info` 事件仅用于展示/追溯/记录，不影响持仓与收益；拆股/合股会调整持仓数量与成本单价（成本总额保持不变）。
 
 现金正负号建议：
 - `cash_amount > 0`：资金流入（入金/分红到账等）
@@ -136,6 +146,13 @@ MyTrader 目前使用两个主要本地库：
 类型定义与 IPC channel：
 - `packages/shared/src/ipc.ts`
 
+## 数据质量 DoD（v1）
+
+- 覆盖率（按市值）：>= 98% 可用；95%~98% 标记“可用但有缺口”；<95% 视为不可用并降级口径。
+- 新鲜度：`price_date` 与 as-of 间隔 <= 3 自然日视为“新鲜”，4~5 日为“可用但有缺口”，>5 日视为不可用。
+- 追溯：`source`/`external_id`/`meta_json` 必须有效，保证幂等导入与审计。
+- 可复算：同一流水回放应得到一致的持仓/现金/收益结果。
+
 ## 后续迭代（建议顺序）
 
 1. 持仓引擎（Position Engine）：从 `ledger_entries` 推导持仓、现金余额、成本与已实现/未实现 PnL
@@ -143,4 +160,3 @@ MyTrader 目前使用两个主要本地库：
 3. 风险与回撤：波动率、最大回撤、集中度等指标，结果可追溯
 4. 公司行为：逐步完善 `corporate_action` 的 meta 结构与对持仓/成本/收益的影响
 5. positions 降级：逐步停止直接编辑 positions，改为生成 adjustment/cash 流水并由引擎派生缓存
-

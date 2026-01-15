@@ -8,7 +8,8 @@
     "build": "tsup",
     "dev": "node scripts/dev.mjs",
     "start": "node scripts/start.mjs",
-    "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json"
+    "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
+    "verify:position-engine": "pnpm run build && node dist/verify-position-engine.js"
   },
   "dependencies": {
     "@mytrader/shared": "workspace:*",

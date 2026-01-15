@@ -309,3 +309,75 @@ export async function getLatestPrices(
 
   return latest;
 }
+
+export async function listPriceDatesInRange(
+  db: SqliteDatabase,
+  symbols: string[],
+  startDate: string,
+  endDate: string
+): Promise<string[]> {
+  if (symbols.length === 0) return [];
+  const placeholders = symbols.map(() => "?").join(", ");
+  const rows = await all<{ trade_date: string }>(
+    db,
+    `
+      select distinct trade_date
+      from daily_prices
+      where symbol in (${placeholders})
+        and trade_date >= ?
+        and trade_date <= ?
+      order by trade_date asc
+    `,
+    [...symbols, startDate, endDate]
+  );
+
+  return rows.map((row) => row.trade_date);
+}
+
+export async function getLatestPricesAsOf(
+  db: SqliteDatabase,
+  symbols: string[],
+  asOfDate: string
+): Promise<Map<string, LatestPrice>> {
+  if (symbols.length === 0) return new Map();
+  const placeholders = symbols.map(() => "?").join(", ");
+  const rows = await all<{
+    symbol: string;
+    trade_date: string;
+    open: number | null;
+    high: number | null;
+    low: number | null;
+    close: number | null;
+    volume: number | null;
+    source: MarketDataSource;
+    ingested_at: number;
+  }>(
+    db,
+    `
+      select symbol, trade_date, open, high, low, close, volume, source, ingested_at
+      from daily_prices
+      where symbol in (${placeholders})
+        and trade_date <= ?
+      order by symbol asc, trade_date desc
+    `,
+    [...symbols, asOfDate]
+  );
+
+  const latest = new Map<string, LatestPrice>();
+  for (const row of rows) {
+    if (latest.has(row.symbol)) continue;
+    latest.set(row.symbol, {
+      symbol: row.symbol,
+      tradeDate: row.trade_date,
+      open: row.open,
+      high: row.high,
+      low: row.low,
+      close: row.close,
+      volume: row.volume,
+      source: row.source,
+      ingestedAt: row.ingested_at
+    });
+  }
+
+  return latest;
+}

@@ -5,7 +5,13 @@ import type {
   AssetClass,
   CreatePositionInput,
   CreateRiskLimitInput,
+  DataQualityLevel,
+  MarketDataQuality,
+  PerformanceMethod,
+  PerformanceRangeKey,
   Portfolio,
+  PortfolioPerformanceRangeResult,
+  PortfolioPerformanceSeries,
   PortfolioSnapshot,
   PositionValuation,
   RiskLimit,
@@ -158,6 +164,15 @@ const otherTabs = [
   { key: "data-import", label: "\u6570\u636e\u5bfc\u5165" }
 ] as const;
 
+const performanceRanges = [
+  { key: "1M", label: "1M" },
+  { key: "3M", label: "3M" },
+  { key: "6M", label: "6M" },
+  { key: "1Y", label: "1Y" },
+  { key: "YTD", label: "YTD" },
+  { key: "ALL", label: "\u5168\u90e8" }
+] as const;
+
 type OtherTab = (typeof otherTabs)[number]["key"];
 
 type WorkspaceView = (typeof navItems)[number]["key"];
@@ -174,6 +189,13 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const [otherTab, setOtherTab] = useState<OtherTab>("data-import");
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
   const [portfolioTab, setPortfolioTab] = useState<PortfolioTab>("overview");
+  const [performanceRange, setPerformanceRange] = useState<PerformanceRangeKey>(
+    "1Y"
+  );
+  const [performanceResult, setPerformanceResult] =
+    useState<PortfolioPerformanceRangeResult | null>(null);
+  const [performanceLoading, setPerformanceLoading] = useState(false);
+  const [performanceError, setPerformanceError] = useState<string | null>(null);
 
   const [portfolioName, setPortfolioName] = useState("");
   const [portfolioBaseCurrency, setPortfolioBaseCurrency] = useState("CNY");
@@ -197,6 +219,29 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     () => portfolios.find((portfolio) => portfolio.id === activePortfolioId) ?? null,
     [portfolios, activePortfolioId]
   );
+
+  const cashTotal = useMemo(() => {
+    if (!snapshot) return 0;
+    return snapshot.positions.reduce((sum, valuation) => {
+      if (valuation.position.assetClass !== "cash") return sum;
+      return sum + (valuation.marketValue ?? valuation.position.quantity);
+    }, 0);
+  }, [snapshot]);
+
+  const performance = performanceResult?.performance ?? null;
+  const performanceSeries = performanceResult?.series ?? null;
+  const dataQuality = snapshot?.dataQuality ?? null;
+
+  const selectedPerformance = useMemo(() => {
+    if (!performance) return null;
+    if (performance.selectedMethod === "twr") {
+      return performance.twr;
+    }
+    if (performance.selectedMethod === "mwr") {
+      return performance.mwr;
+    }
+    return null;
+  }, [performance]);
 
   const loadPortfolios = useCallback(
     async (preferredId?: string | null) => {
@@ -234,6 +279,30 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     }
   }, []);
 
+  const loadPerformance = useCallback(
+    async (portfolioId: string, range: PerformanceRangeKey) => {
+      if (!window.mytrader) {
+        setPerformanceError("未检测到桌面端后端（preload API）。");
+        return;
+      }
+      setPerformanceLoading(true);
+      setPerformanceError(null);
+      try {
+        const data = await window.mytrader.portfolio.getPerformance({
+          portfolioId,
+          range
+        });
+        setPerformanceResult(data);
+      } catch (err) {
+        setPerformanceError(toUserErrorMessage(err));
+        setPerformanceResult(null);
+      } finally {
+        setPerformanceLoading(false);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     loadPortfolios().catch((err) => setError(toUserErrorMessage(err)));
   }, [loadPortfolios]);
@@ -247,6 +316,17 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       setError(toUserErrorMessage(err))
     );
   }, [activePortfolioId, loadSnapshot]);
+
+  useEffect(() => {
+    if (!activePortfolioId) {
+      setPerformanceResult(null);
+      return;
+    }
+    if (portfolioTab !== "performance") return;
+    loadPerformance(activePortfolioId, performanceRange).catch((err) =>
+      setPerformanceError(toUserErrorMessage(err))
+    );
+  }, [activePortfolioId, loadPerformance, performanceRange, portfolioTab]);
 
   useEffect(() => {
     if (!activePortfolio) return;
@@ -480,10 +560,16 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     if (!window.mytrader || !snapshot) return;
     setError(null);
     setNotice(null);
-    const items = snapshot.positions.map((pos) => ({
-      symbol: pos.position.symbol,
-      assetClass: pos.position.assetClass
-    }));
+    const items = snapshot.positions
+      .filter((pos) => pos.position.assetClass !== "cash")
+      .map((pos) => ({
+        symbol: pos.position.symbol,
+        assetClass: pos.position.assetClass
+      }));
+    if (!items.length) {
+      setNotice("当前组合没有可拉取行情的标的。");
+      return;
+    }
     const result = await window.mytrader.market.ingestTushare({
       items,
       startDate: ingestStartDate,
@@ -623,9 +709,10 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                     {!isLoading && activePortfolio && !snapshot && <EmptyState message="暂无估值快照。" />}
 
                     {snapshot && (
-                      <div className="space-y-6">
+                        <div className="space-y-6">
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                          <SummaryCard label="总市值" value={formatCurrency(snapshot.totals.marketValue)} />
+                          <SummaryCard label="总资产" value={formatCurrency(snapshot.totals.marketValue)} />
+                          <SummaryCard label="现金余额" value={formatCurrency(cashTotal)} />
                           <SummaryCard
                             label="总盈亏"
                             value={formatCurrency(snapshot.totals.pnl)}
@@ -907,7 +994,142 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                 </Panel>
               )}
 
-              {["trades", "performance", "risk", "allocation", "corporate"].includes(portfolioTab) && (
+              {portfolioTab === "performance" && (
+                <Panel>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">收益表现</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        收益曲线与口径区间保持一致。
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {performanceRanges.map((range) => {
+                        const isActive = performanceRange === range.key;
+                        return (
+                          <button
+                            key={range.key}
+                            type="button"
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                              isActive
+                                ? "bg-primary text-white border-primary"
+                                : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
+                            }`}
+                            onClick={() => setPerformanceRange(range.key)}
+                          >
+                            {range.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {performanceLoading && <EmptyState message="正在加载收益曲线..." />}
+                  {!performanceLoading && performanceError && (
+                    <ErrorState
+                      message={performanceError}
+                      onRetry={() => {
+                        if (!activePortfolioId) return;
+                        loadPerformance(activePortfolioId, performanceRange).catch((err) =>
+                          setPerformanceError(toUserErrorMessage(err))
+                        );
+                      }}
+                    />
+                  )}
+                  {!performanceLoading && !performanceError && !activePortfolio && (
+                    <EmptyState message="请先选择或创建组合。" />
+                  )}
+                  {!performanceLoading &&
+                    !performanceError &&
+                    activePortfolio &&
+                    !performanceResult && <EmptyState message="暂无收益数据。" />}
+
+                  {!performanceLoading && !performanceError && performance && (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <SummaryCard
+                          label="当前口径"
+                          value={formatPerformanceMethod(performance.selectedMethod)}
+                        />
+                        <SummaryCard
+                          label="区间"
+                          value={formatDateRange(
+                            selectedPerformance?.startDate,
+                            selectedPerformance?.endDate
+                          )}
+                        />
+                        <SummaryCard
+                          label="总收益率"
+                          value={formatPctNullable(selectedPerformance?.totalReturn ?? null)}
+                        />
+                        <SummaryCard
+                          label="年化收益率"
+                          value={formatPctNullable(selectedPerformance?.annualizedReturn ?? null)}
+                        />
+                      </div>
+
+                      {dataQuality && <DataQualityCard quality={dataQuality} />}
+
+                      {performance.reason && (
+                        <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg p-4 text-sm text-slate-600 dark:text-slate-300">
+                          {performance.reason}
+                        </div>
+                      )}
+
+                      {performanceSeries ? (
+                        <PerformanceChart series={performanceSeries} />
+                      ) : (
+                        <EmptyState message="暂无收益曲线。" />
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                          <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">TWR</div>
+                          <DescriptionItem
+                            label="区间"
+                            value={formatDateRange(
+                              performance.twr?.startDate,
+                              performance.twr?.endDate
+                            )}
+                          />
+                          <DescriptionItem
+                            label="总收益率"
+                            value={formatPctNullable(performance.twr?.totalReturn ?? null)}
+                          />
+                          <DescriptionItem
+                            label="年化收益率"
+                            value={formatPctNullable(
+                              performance.twr?.annualizedReturn ?? null
+                            )}
+                          />
+                        </div>
+                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                          <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">MWR</div>
+                          <DescriptionItem
+                            label="区间"
+                            value={formatDateRange(
+                              performance.mwr?.startDate,
+                              performance.mwr?.endDate
+                            )}
+                          />
+                          <DescriptionItem
+                            label="总收益率"
+                            value={formatPctNullable(performance.mwr?.totalReturn ?? null)}
+                          />
+                          <DescriptionItem
+                            label="年化收益率"
+                            value={formatPctNullable(
+                              performance.mwr?.annualizedReturn ?? null
+                            )}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </Panel>
+              )}
+
+              {["trades", "risk", "allocation", "corporate"].includes(portfolioTab) && (
                 <PlaceholderPanel
                   title={portfolioTabs.find((tab) => tab.key === portfolioTab)?.label ?? ""}
                   description={portfolioTabs.find((tab) => tab.key === portfolioTab)?.description ?? ""}
@@ -1244,6 +1466,80 @@ function EmptyState({ message }: { message: string }) {
   )
 }
 
+function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-4 px-4 text-sm text-rose-600 bg-rose-50 dark:bg-rose-900/20 rounded-lg border border-rose-200 dark:border-rose-900/40">
+      <div className="flex items-center gap-2">
+        <span className="material-icons-outlined text-base">error_outline</span>
+        <span>{message}</span>
+      </div>
+      {onRetry && (
+        <Button variant="secondary" size="sm" onClick={onRetry}>
+          重试
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function DataQualityCard({ quality }: { quality: MarketDataQuality }) {
+  const overall = describeDataQuality(quality.overallLevel);
+  const coverage = describeDataQuality(quality.coverageLevel);
+  const freshness = describeDataQuality(quality.freshnessLevel);
+  const freshnessLabel =
+    quality.freshnessDays === null ? "--" : `${quality.freshnessDays} 天`;
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${overall.badgeClass}`}>
+            {overall.label}
+          </span>
+          <span className="text-xs text-slate-500 dark:text-slate-400">数据质量</span>
+        </div>
+        <span className="text-xs text-slate-400 dark:text-slate-500">
+          as-of {quality.asOfDate ?? "--"}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-md p-3">
+          <div className="text-xs text-slate-500 mb-1">覆盖率</div>
+          <div className="font-mono text-slate-800 dark:text-slate-200">
+            {formatPctNullable(quality.coverageRatio ?? null)}
+          </div>
+          <div className={`text-[11px] font-semibold ${coverage.textClass}`}>
+            {coverage.label}
+          </div>
+        </div>
+        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-md p-3">
+          <div className="text-xs text-slate-500 mb-1">新鲜度</div>
+          <div className="font-mono text-slate-800 dark:text-slate-200">
+            {freshnessLabel}
+          </div>
+          <div className={`text-[11px] font-semibold ${freshness.textClass}`}>
+            {freshness.label}
+          </div>
+        </div>
+        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-md p-3">
+          <div className="text-xs text-slate-500 mb-1">缺失标的</div>
+          <div className="font-mono text-slate-800 dark:text-slate-200">
+            {quality.missingSymbols.length}
+          </div>
+          <div className="text-[11px] text-slate-400">
+            {quality.missingSymbols.length ? "需要补齐行情" : "覆盖完整"}
+          </div>
+        </div>
+      </div>
+      {quality.notes.length > 0 && (
+        <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+          {quality.notes.join("；")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatNumber(value: number | null, digits = 2): string {
   if (value === null || Number.isNaN(value)) return "--";
   return value.toFixed(digits);
@@ -1259,6 +1555,27 @@ function formatCurrency(value: number | null): string {
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatPctNullable(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  return formatPct(value);
+}
+
+function formatPerformanceMethod(value: PerformanceMethod): string {
+  switch (value) {
+    case "twr":
+      return "TWR";
+    case "mwr":
+      return "MWR";
+    default:
+      return "--";
+  }
+}
+
+function formatDateRange(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start || !end) return "--";
+  return `${start} ~ ${end}`;
 }
 
 function formatAssetClassLabel(value: string): string {
@@ -1277,6 +1594,33 @@ function formatDateTime(value: number | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--";
   return date.toLocaleString("zh-CN");
+}
+
+function describeDataQuality(level: DataQualityLevel): {
+  label: string;
+  badgeClass: string;
+  textClass: string;
+} {
+  switch (level) {
+    case "ok":
+      return {
+        label: "可用",
+        badgeClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+        textClass: "text-emerald-600 dark:text-emerald-400"
+      };
+    case "partial":
+      return {
+        label: "有缺口",
+        badgeClass: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+        textClass: "text-amber-600 dark:text-amber-400"
+      };
+    default:
+      return {
+        label: "不可用",
+        badgeClass: "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+        textClass: "text-rose-600 dark:text-rose-400"
+      };
+  }
 }
 
 function toUserErrorMessage(error: unknown) {
@@ -1305,4 +1649,60 @@ function DescriptionItem({ label, value }: { label: string, value: React.ReactNo
       <span className="text-sm font-medium text-slate-900 dark:text-slate-200">{value}</span>
     </div>
   )
+}
+
+function PerformanceChart({ series }: { series: PortfolioPerformanceSeries }) {
+  if (series.points.length < 2) {
+    return <EmptyState message={series.reason ?? "暂无收益曲线。"} />;
+  }
+
+  const width = 640;
+  const height = 200;
+  const returns = series.points.map((point) => point.returnPct);
+  const min = Math.min(...returns, 0);
+  const max = Math.max(...returns, 0);
+  const range = max - min || 1;
+
+  const toX = (index: number) =>
+    (index / (series.points.length - 1)) * width;
+  const toY = (value: number) => height - ((value - min) / range) * height;
+
+  const path = series.points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${toX(index)},${toY(point.returnPct)}`)
+    .join(" ");
+  const baselineY = toY(0);
+  const areaPath = `${path} L${width},${baselineY} L0,${baselineY} Z`;
+  const endPoint = series.points[series.points.length - 1];
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs uppercase tracking-wider text-slate-500">收益曲线</div>
+        <Badge>{formatPerformanceMethod(series.method)}</Badge>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-40"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id="performanceFill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#performanceFill)" />
+        <path d={path} fill="none" stroke="#0ea5e9" strokeWidth="2" />
+        <line x1="0" y1={baselineY} x2={width} y2={baselineY} stroke="#94a3b8" strokeDasharray="4 4" />
+      </svg>
+      <div className="flex items-center justify-between text-xs text-slate-500 mt-2">
+        <span>{series.startDate}</span>
+        <span className="font-mono">{formatPctNullable(endPoint?.returnPct)}</span>
+        <span>{series.endDate}</span>
+      </div>
+      {series.reason && (
+        <p className="text-xs text-slate-400 mt-2">{series.reason}</p>
+      )}
+    </div>
+  );
 }

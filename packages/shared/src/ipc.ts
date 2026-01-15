@@ -93,6 +93,8 @@ export interface PortfolioSnapshot {
     costValue: number;
     pnl: number;
   };
+  performance: PortfolioPerformance | null;
+  dataQuality: MarketDataQuality | null;
   exposures: {
     byAssetClass: ExposureEntry[];
     bySymbol: ExposureEntry[];
@@ -100,6 +102,62 @@ export interface PortfolioSnapshot {
   riskLimits: RiskLimit[];
   riskWarnings: RiskWarning[];
   priceAsOf: string | null;
+}
+
+export type DataQualityLevel = "ok" | "partial" | "insufficient";
+
+export interface MarketDataQuality {
+  overallLevel: DataQualityLevel;
+  coverageLevel: DataQualityLevel;
+  freshnessLevel: DataQualityLevel;
+  coverageRatio: number | null;
+  freshnessDays: number | null;
+  asOfDate: string | null;
+  missingSymbols: string[];
+  notes: string[];
+}
+
+export type PerformanceMethod = "twr" | "mwr" | "none";
+
+export interface PerformanceMetric {
+  method: "twr" | "mwr";
+  totalReturn: number;
+  annualizedReturn: number | null;
+  startDate: string;
+  endDate: string;
+}
+
+export interface PortfolioPerformance {
+  selectedMethod: PerformanceMethod;
+  reason: string | null;
+  twr: PerformanceMetric | null;
+  mwr: PerformanceMetric | null;
+}
+
+export type PerformanceRangeKey = "1M" | "3M" | "6M" | "1Y" | "YTD" | "ALL";
+
+export interface PortfolioPerformanceSeriesPoint {
+  date: string;
+  value: number;
+  returnPct: number;
+}
+
+export interface PortfolioPerformanceSeries {
+  method: PerformanceMethod;
+  points: PortfolioPerformanceSeriesPoint[];
+  startDate: string;
+  endDate: string;
+  reason: string | null;
+}
+
+export interface PortfolioPerformanceRangeInput {
+  portfolioId: PortfolioId;
+  range: PerformanceRangeKey;
+}
+
+export interface PortfolioPerformanceRangeResult {
+  performance: PortfolioPerformance;
+  series: PortfolioPerformanceSeries | null;
 }
 
 export interface CreatePortfolioInput {
@@ -185,6 +243,33 @@ export type LedgerSide = "buy" | "sell";
 
 export type LedgerSource = "manual" | "csv" | "broker_import" | "system";
 
+export type CorporateActionKind = "split" | "reverse_split" | "info";
+
+export type CorporateActionCategory =
+  | "decision"
+  | "org_change"
+  | "policy_support"
+  | "other";
+
+export interface CorporateActionSplitMeta {
+  kind: "split" | "reverse_split";
+  numerator: number;
+  denominator: number;
+}
+
+export interface CorporateActionInfoMeta {
+  kind: "info";
+  category: CorporateActionCategory;
+  title: string;
+  description?: string | null;
+}
+
+export type CorporateActionMeta =
+  | CorporateActionSplitMeta
+  | CorporateActionInfoMeta;
+
+export type LedgerEntryMeta = Record<string, unknown> | CorporateActionMeta;
+
 export interface LedgerEntry {
   id: LedgerEntryId;
   portfolioId: PortfolioId;
@@ -206,7 +291,7 @@ export interface LedgerEntry {
   note: string | null;
   source: LedgerSource;
   externalId: string | null;
-  meta: Record<string, unknown> | null;
+  meta: LedgerEntryMeta | null;
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
@@ -232,7 +317,7 @@ export interface CreateLedgerEntryInput {
   note?: string | null;
   source: LedgerSource;
   externalId?: string | null;
-  meta?: Record<string, unknown> | null;
+  meta?: LedgerEntryMeta | null;
 }
 
 export interface UpdateLedgerEntryInput extends CreateLedgerEntryInput {
@@ -254,6 +339,9 @@ export interface MyTraderApi {
     update(input: UpdatePortfolioInput): Promise<Portfolio>;
     remove(portfolioId: PortfolioId): Promise<void>;
     getSnapshot(portfolioId: PortfolioId): Promise<PortfolioSnapshot>;
+    getPerformance(
+      input: PortfolioPerformanceRangeInput
+    ): Promise<PortfolioPerformanceRangeResult>;
   };
   position: {
     create(input: CreatePositionInput): Promise<Position>;
@@ -291,6 +379,7 @@ export const IPC_CHANNELS = {
   PORTFOLIO_UPDATE: "portfolio:update",
   PORTFOLIO_REMOVE: "portfolio:remove",
   PORTFOLIO_GET_SNAPSHOT: "portfolio:getSnapshot",
+  PORTFOLIO_GET_PERFORMANCE: "portfolio:getPerformance",
   POSITION_CREATE: "position:create",
   POSITION_UPDATE: "position:update",
   POSITION_REMOVE: "position:remove",

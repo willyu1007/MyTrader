@@ -3,7 +3,8 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: {
     main: "src/main/index.ts",
-    preload: "src/preload/index.ts"
+    preload: "src/preload/index.ts",
+    "verify-position-engine": "src/main/verifyPositionEngine.ts"
   },
   format: ["cjs"],
   target: "es2022",

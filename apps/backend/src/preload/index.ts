@@ -21,7 +21,9 @@ const api: MyTraderApi = {
     remove: (portfolioId) =>
       ipcRenderer.invoke(IPC_CHANNELS.PORTFOLIO_REMOVE, portfolioId),
     getSnapshot: (portfolioId) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PORTFOLIO_GET_SNAPSHOT, portfolioId)
+      ipcRenderer.invoke(IPC_CHANNELS.PORTFOLIO_GET_SNAPSHOT, portfolioId),
+    getPerformance: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PORTFOLIO_GET_PERFORMANCE, input)
   },
   position: {
     create: (input) => ipcRenderer.invoke(IPC_CHANNELS.POSITION_CREATE, input),

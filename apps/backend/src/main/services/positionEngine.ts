@@ -37,6 +37,10 @@ export function derivePositionsFromLedger(input: {
   const sorted = [...entries].sort(compareLedgerEntries);
   for (const entry of sorted) {
     applyCash(entry, cashBalances);
+    if (entry.eventType === "corporate_action") {
+      applyCorporateAction(entry, accumulators);
+      continue;
+    }
     if (entry.eventType !== "trade" && entry.eventType !== "adjustment") {
       continue;
     }
@@ -120,6 +124,42 @@ function applyCash(entry: LedgerEntry, balances: Record<string, number>): void {
     (balances[entry.cashCurrency] ?? 0) + entry.cashAmount;
 }
 
+function applyCorporateAction(
+  entry: LedgerEntry,
+  accumulators: Map<string, PositionAccumulator>
+): void {
+  const ratio = getCorporateActionRatio(entry.meta);
+  if (!ratio) return;
+  const key = entry.instrumentId ?? entry.symbol;
+  if (!key) return;
+  let acc = accumulators.get(key) ?? null;
+  if (!acc && entry.symbol) {
+    acc =
+      Array.from(accumulators.values()).find(
+        (item) => item.symbol === entry.symbol
+      ) ?? null;
+  }
+  if (!acc || acc.quantity <= 0) return;
+  acc.quantity = acc.quantity * ratio;
+  if (!Number.isFinite(acc.quantity) || acc.quantity <= 0) {
+    acc.quantity = 0;
+    acc.costValue = 0;
+  }
+  accumulators.set(acc.key, acc);
+}
+
+function getCorporateActionRatio(meta: LedgerEntry["meta"]): number | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const data = meta as Record<string, unknown>;
+  const kind = data.kind;
+  if (kind !== "split" && kind !== "reverse_split") return null;
+  const numerator = Number(data.numerator);
+  const denominator = Number(data.denominator);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) return null;
+  if (numerator <= 0 || denominator <= 0) return null;
+  return numerator / denominator;
+}
+
 function resolveMetadata(
   symbol: string,
   metadataBySymbol: Map<string, PositionMetadata>,
@@ -199,12 +239,12 @@ function buildCashPositions(
   return positions;
 }
 
-function getAdjustmentMode(
-  meta: Record<string, unknown> | null
-): "absolute" | "delta" {
-  const raw = meta?.adjustment_mode;
+function getAdjustmentMode(meta: LedgerEntry["meta"]): "absolute" | "delta" {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return "delta";
+  const data = meta as Record<string, unknown>;
+  const raw = data.adjustment_mode;
   if (raw === "absolute" || raw === "delta") return raw;
-  if (meta?.baseline === true) return "absolute";
+  if (data.baseline === true) return "absolute";
   return "delta";
 }
 

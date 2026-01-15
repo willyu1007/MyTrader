@@ -7,6 +7,8 @@ import { IPC_CHANNELS } from "@mytrader/shared";
 
 import type {
   AccountSummary,
+  CorporateActionCategory,
+  CorporateActionMeta,
   CreateAccountInput,
   CreateLedgerEntryInput,
   CreatePortfolioInput,
@@ -14,6 +16,7 @@ import type {
   CreateRiskLimitInput,
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
+  PortfolioPerformanceRangeInput,
   TushareIngestInput,
   UpdateLedgerEntryInput,
   UpdatePortfolioInput,
@@ -24,7 +27,7 @@ import type {
 import { ensureBusinessSchema } from "../storage/businessSchema";
 import { AccountIndexDb } from "../storage/accountIndexDb";
 import { ensureMarketCacheSchema } from "../market/marketCache";
-import { upsertInstruments } from "../market/marketRepository";
+import { getLatestPrices, upsertInstruments } from "../market/marketRepository";
 import {
   startAutoIngest,
   stopAutoIngest,
@@ -63,6 +66,7 @@ import { ensureAccountDataLayout } from "../storage/paths";
 import { close, exec, openSqliteDatabase } from "../storage/sqlite";
 import type { SqliteDatabase } from "../storage/sqlite";
 import { getPortfolioSnapshot } from "../services/portfolioService";
+import { buildPortfolioPerformanceRange } from "../services/performanceService";
 import {
   importHoldingsCsv,
   importPricesCsv,
@@ -257,6 +261,39 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       return await getPortfolioSnapshot(businessDb, marketDb, portfolioId);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.PORTFOLIO_GET_PERFORMANCE,
+    async (_event, input: PortfolioPerformanceRangeInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      const portfolioId = normalizeRequiredString(input.portfolioId, "portfolioId");
+      const range = normalizePerformanceRange(input.range);
+      const ledgerEntries = await listLedgerEntriesByPortfolio(
+        businessDb,
+        portfolioId
+      );
+      const symbols = Array.from(
+        new Set(
+          ledgerEntries
+            .map((entry) => entry.symbol)
+            .filter((symbol): symbol is string => Boolean(symbol))
+        )
+      );
+      const latestPrices = await getLatestPrices(marketDb, symbols);
+      const priceAsOf = Array.from(latestPrices.values())
+        .map((price) => price.tradeDate)
+        .filter(Boolean)
+        .sort()
+        .pop() ?? null;
+      return await buildPortfolioPerformanceRange({
+        ledgerEntries,
+        marketDb,
+        range,
+        priceAsOf
+      });
     }
   );
 
@@ -494,6 +531,14 @@ export async function registerIpcHandlers() {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const PERFORMANCE_RANGES = new Set([
+  "1M",
+  "3M",
+  "6M",
+  "1Y",
+  "YTD",
+  "ALL"
+]);
 
 async function normalizeLedgerEntryInput(
   businessDb: SqliteDatabase,
@@ -531,6 +576,9 @@ async function normalizeLedgerEntryInput(
   if (quantity !== null && quantity < 0) throw new Error("quantity must be >= 0.");
   if (eventTs !== null && eventTs <= 0) throw new Error("eventTs must be > 0.");
   if (sequence !== null && sequence < 0) throw new Error("sequence must be >= 0.");
+  if ((source === "csv" || source === "broker_import") && sequence === null) {
+    throw new Error("sequence is required for import sources.");
+  }
 
   switch (eventType) {
     case "trade": {
@@ -542,6 +590,12 @@ async function normalizeLedgerEntryInput(
       if (price === null) throw new Error("trade requires price.");
       if (cashAmount === null || cashAmount === 0) {
         throw new Error("trade requires cashAmount != 0.");
+      }
+      if (side === "buy" && cashAmount > 0) {
+        throw new Error("buy trade requires cashAmount < 0.");
+      }
+      if (side === "sell" && cashAmount < 0) {
+        throw new Error("sell trade requires cashAmount > 0.");
       }
       const cashCurrency = cashCurrencyInput ?? baseCurrency;
       const priceCurrency = priceCurrencyInput ?? cashCurrency;
@@ -693,7 +747,7 @@ async function normalizeLedgerEntryInput(
       if (!symbol && !instrumentId) {
         throw new Error("corporate_action requires symbol or instrumentId.");
       }
-      if (!meta) throw new Error("corporate_action requires meta.");
+      const corporateMeta = normalizeCorporateActionMeta(meta);
       return {
         portfolioId,
         accountKey,
@@ -714,7 +768,7 @@ async function normalizeLedgerEntryInput(
         note,
         source,
         externalId,
-        meta
+        meta: corporateMeta
       };
     }
     default:
@@ -735,6 +789,16 @@ function normalizeDate(value: unknown, field: string): string {
   const str = normalizeRequiredString(value, field);
   if (!DATE_RE.test(str)) throw new Error(`${field} must be YYYY-MM-DD.`);
   return str;
+}
+
+function normalizePerformanceRange(value: unknown): PortfolioPerformanceRangeInput["range"] {
+  if (typeof value !== "string") {
+    throw new Error("range must be a string.");
+  }
+  if (!PERFORMANCE_RANGES.has(value)) {
+    throw new Error("range is invalid.");
+  }
+  return value as PortfolioPerformanceRangeInput["range"];
 }
 
 function normalizeRequiredString(value: unknown, field: string): string {
@@ -779,6 +843,58 @@ function normalizeOptionalObject(
 ): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+const CORPORATE_ACTION_CATEGORIES = new Set<CorporateActionCategory>([
+  "decision",
+  "org_change",
+  "policy_support",
+  "other"
+]);
+
+function normalizeCorporateActionMeta(
+  value: Record<string, unknown> | null
+): CorporateActionMeta {
+  if (!value) throw new Error("corporate_action requires meta.");
+  const kind = value.kind;
+  if (kind === "split" || kind === "reverse_split") {
+    const numerator = normalizePositiveInteger(value.numerator, "meta.numerator");
+    const denominator = normalizePositiveInteger(
+      value.denominator,
+      "meta.denominator"
+    );
+    return {
+      kind,
+      numerator,
+      denominator
+    };
+  }
+  if (kind === "info") {
+    const category = normalizeRequiredString(
+      value.category,
+      "meta.category"
+    ) as CorporateActionCategory;
+    if (!CORPORATE_ACTION_CATEGORIES.has(category)) {
+      throw new Error("meta.category is invalid.");
+    }
+    const title = normalizeRequiredString(value.title, "meta.title");
+    const description = normalizeOptionalString(value.description);
+    return {
+      kind,
+      category,
+      title,
+      description
+    };
+  }
+  throw new Error("meta.kind is invalid.");
+}
+
+function normalizePositiveInteger(value: unknown, field: string): number {
+  const num = Number(value);
+  if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
+    throw new Error(`${field} must be a positive integer.`);
+  }
+  return num;
 }
 
 async function getPortfolioBaseCurrency(

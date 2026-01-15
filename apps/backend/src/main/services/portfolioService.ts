@@ -1,4 +1,10 @@
-import type { PortfolioId, PortfolioSnapshot, PositionValuation } from "@mytrader/shared";
+import type {
+  DataQualityLevel,
+  MarketDataQuality,
+  PortfolioId,
+  PortfolioSnapshot,
+  PositionValuation
+} from "@mytrader/shared";
 
 import { getInstrumentsBySymbols, getLatestPrices } from "../market/marketRepository";
 import { listLedgerEntriesByPortfolio } from "../storage/ledgerRepository";
@@ -6,6 +12,7 @@ import { listPositionsByPortfolio } from "../storage/positionRepository";
 import { getPortfolio } from "../storage/portfolioRepository";
 import { listRiskLimits } from "../storage/riskLimitRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
+import { buildPortfolioPerformance } from "./performanceService";
 import { derivePositionsFromLedger, type PositionMetadata } from "./positionEngine";
 
 export async function getPortfolioSnapshot(
@@ -59,23 +66,52 @@ export async function getPortfolioSnapshot(
     });
   });
 
-  const hasHoldingsEntries = ledgerEntries.some(
+  const hasHoldingsLedgerEntries = ledgerEntries.some(
     (entry) => entry.eventType === "trade" || entry.eventType === "adjustment"
   );
-  const derived = hasHoldingsEntries
-    ? derivePositionsFromLedger({
-        portfolioId,
-        entries: ledgerEntries,
-        metadataBySymbol,
-        baseCurrency: portfolio.baseCurrency
-      })
-    : null;
-  const positions = derived?.positions ?? storedPositions;
+  const hasCashLedgerEntries = ledgerEntries.some(
+    (entry) => entry.cashAmount !== null
+  );
+
+  const derived =
+    hasHoldingsLedgerEntries || hasCashLedgerEntries
+      ? derivePositionsFromLedger({
+          portfolioId,
+          entries: ledgerEntries,
+          metadataBySymbol,
+          baseCurrency: portfolio.baseCurrency
+        })
+      : null;
+
+  const positions = derived
+    ? hasHoldingsLedgerEntries
+      ? derived.positions
+      : [
+          ...storedPositions.filter((position) => position.assetClass !== "cash"),
+          ...derived.positions.filter((position) => position.assetClass === "cash")
+        ].sort((a, b) => a.symbol.localeCompare(b.symbol))
+    : storedPositions;
   const riskLimits = await listRiskLimits(businessDb, portfolioId);
-  const symbols = positions.map((position) => position.symbol);
-  const latestPrices = await getLatestPrices(marketDb, symbols);
+  const symbolsForPrices = positions
+    .filter((position) => position.assetClass !== "cash")
+    .map((position) => position.symbol);
+  const latestPrices = await getLatestPrices(marketDb, symbolsForPrices);
 
   const valuations: PositionValuation[] = positions.map((position) => {
+    if (position.assetClass === "cash") {
+      const marketValue = position.quantity;
+      const costValue = marketValue;
+      return {
+        position,
+        latestPrice: 1,
+        priceDate: null,
+        marketValue,
+        costValue,
+        pnl: 0,
+        pnlPct: 0
+      };
+    }
+
     const latest = latestPrices.get(position.symbol);
     const latestPrice = latest?.close ?? null;
     const priceDate = latest?.tradeDate ?? null;
@@ -184,6 +220,14 @@ export async function getPortfolioSnapshot(
     .sort()
     .pop() ?? null;
 
+  const performance = await buildPortfolioPerformance({
+    ledgerEntries,
+    marketDb,
+    endValue: totalMarketValue,
+    priceAsOf
+  });
+  const dataQuality = buildMarketDataQuality(valuations, priceAsOf);
+
   return {
     portfolio,
     positions: valuations,
@@ -192,6 +236,8 @@ export async function getPortfolioSnapshot(
       costValue: totalCostValue,
       pnl: totalMarketValue - totalCostValue
     },
+    performance,
+    dataQuality,
     exposures: {
       byAssetClass,
       bySymbol
@@ -217,4 +263,116 @@ function formatAssetClassLabel(value: string): string {
     default:
       return value;
   }
+}
+
+const COVERAGE_OK_THRESHOLD = 0.98;
+const COVERAGE_PARTIAL_THRESHOLD = 0.95;
+const FRESHNESS_OK_DAYS = 3;
+const FRESHNESS_PARTIAL_DAYS = 5;
+
+function buildMarketDataQuality(
+  valuations: PositionValuation[],
+  priceAsOf: string | null
+): MarketDataQuality | null {
+  if (valuations.length === 0) return null;
+
+  const nonCash = valuations.filter(
+    (valuation) => valuation.position.assetClass !== "cash"
+  );
+  if (nonCash.length === 0) {
+    return {
+      overallLevel: "ok",
+      coverageLevel: "ok",
+      freshnessLevel: "ok",
+      coverageRatio: 1,
+      freshnessDays: 0,
+      asOfDate: priceAsOf,
+      missingSymbols: [],
+      notes: []
+    };
+  }
+
+  let coveredValue = 0;
+  let totalValue = 0;
+  let missingUnknown = 0;
+  const missingSymbols: string[] = [];
+
+  for (const valuation of nonCash) {
+    if (valuation.marketValue !== null) {
+      coveredValue += valuation.marketValue;
+      totalValue += valuation.marketValue;
+      continue;
+    }
+    missingSymbols.push(valuation.position.symbol);
+    if (valuation.costValue !== null) {
+      totalValue += valuation.costValue;
+    } else {
+      missingUnknown += 1;
+    }
+  }
+
+  const coverageRatio = totalValue > 0 ? coveredValue / totalValue : null;
+  const coverageLevel = resolveCoverageLevel(coverageRatio);
+
+  const priceDates = nonCash
+    .map((valuation) => valuation.priceDate)
+    .filter((date): date is string => Boolean(date));
+  const freshnessDays =
+    priceAsOf && priceDates.length > 0 ? maxDateLag(priceAsOf, priceDates) : null;
+  const freshnessLevel = resolveFreshnessLevel(freshnessDays);
+
+  const notes: string[] = [];
+  if (missingSymbols.length > 0) {
+    notes.push(`缺少 ${missingSymbols.length} 个标的行情`);
+  }
+  if (missingUnknown > 0) {
+    notes.push("部分缺失标的无成本，覆盖率可能偏高");
+  }
+  if (!priceAsOf) {
+    notes.push("缺少行情 as-of 日期");
+  }
+
+  return {
+    overallLevel: pickWorstLevel(coverageLevel, freshnessLevel),
+    coverageLevel,
+    freshnessLevel,
+    coverageRatio,
+    freshnessDays,
+    asOfDate: priceAsOf,
+    missingSymbols,
+    notes
+  };
+}
+
+function resolveCoverageLevel(ratio: number | null): DataQualityLevel {
+  if (ratio === null || !Number.isFinite(ratio)) return "insufficient";
+  if (ratio >= COVERAGE_OK_THRESHOLD) return "ok";
+  if (ratio >= COVERAGE_PARTIAL_THRESHOLD) return "partial";
+  return "insufficient";
+}
+
+function resolveFreshnessLevel(days: number | null): DataQualityLevel {
+  if (days === null || !Number.isFinite(days)) return "insufficient";
+  if (days <= FRESHNESS_OK_DAYS) return "ok";
+  if (days <= FRESHNESS_PARTIAL_DAYS) return "partial";
+  return "insufficient";
+}
+
+function maxDateLag(asOfDate: string, dates: string[]): number {
+  const asOf = Date.parse(`${asOfDate}T00:00:00Z`);
+  return dates.reduce((max, date) => {
+    const current = Date.parse(`${date}T00:00:00Z`);
+    if (!Number.isFinite(current) || current > asOf) return max;
+    const lag = Math.max(0, (asOf - current) / 86_400_000);
+    return Math.max(max, lag);
+  }, 0);
+}
+
+function pickWorstLevel(
+  first: DataQualityLevel,
+  second: DataQualityLevel
+): DataQualityLevel {
+  const rank = (value: DataQualityLevel) =>
+    value === "insufficient" ? 2 : value === "partial" ? 1 : 0;
+  return rank(first) >= rank(second) ? first : second;
 }

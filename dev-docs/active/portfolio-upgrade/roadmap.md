@@ -94,3 +94,131 @@
 | 口径（成本/收益/公司行为）不统一导致用户误判 | 高 | 先定“口径字典”，UI 明示；每个指标都能追溯输入与版本 |
 | 先做 UI 后做引擎导致返工 | 高 | 先对齐数据语义与最小数据模型，再做 UI 细节 |
 | 多币种/汇率引入复杂依赖 | 中-高 | 先把结构留好；需要时单独定义 FX 数据源与追溯策略 |
+
+## 后续执行计划（按功能/依赖顺序，2026-01-15 更新）
+
+### 目标
+- 在已完成“收益口径（TWR/MWR）+ 区间选择 + 收益曲线”的基础上，推进分析层、目标配置与报表的最小闭环。
+
+### 非目标
+- 本轮不做高级归因模型（Brinson/多因子）与多币种/汇率的全量接入（先保留扩展点）。
+- 不做复杂策略回测与高级预警系统。
+
+### 开放问题与假设
+#### 已对齐（2026-01-15）
+- 公司行为范围：分红、拆股/合股必须支持；同时支持“关键决策/组织架构调整/政策支持”等信息型公司行为，仅用于展示/追溯/记录，不影响持仓与收益。
+- 多币种/汇率：不纳入本轮主线（保留扩展点）。
+- 事件排序：接受 `event_ts` -> `trade_date + sequence` -> `created_at/id` 的稳定顺序；导入时 `sequence` 强制要求。
+
+#### 数据质量 DoD（已确认参考值）
+- 完整性：`event_type`/`trade_date`/`portfolio_id` 等必填项不为空；`cash_amount` 有值则 `cash_currency` 必填；trade 必有 `cash_amount`。
+- 覆盖率（按市值）：估值区间内价格覆盖率 >= 98% 视为可用；95%~98% 标记“可用但有缺口”；<95% 视为不可用并降级口径。
+- 新鲜度：`price_date` 与 as-of 的间隔 <= 1 交易日（有交易日历）或 <= 3 自然日（无交易日历）视为“新鲜”；>5 自然日视为不可用。
+- 可追溯：`source`/`external_id`/`meta_json` 有效，保证幂等导入与审计。
+- 可复算：同一流水回放结果一致（持仓/现金/收益稳定）。
+
+#### 事件排序与现金腿（已确认）
+- 排序：`event_ts`（ISO8601，推荐 UTC）优先；若缺失，用 `trade_date` + `sequence`；仍缺失则用 `created_at/id` 作为稳定兜底。
+- `sequence`：同日/同一时间多笔事件的稳定顺序键（导入必填）。
+- 现金腿：trade 必须显式 `cash_amount` + `cash_currency`（买入 <0，卖出 >0）；fee/tax 必须 <0；dividend 必须 >0；cash 入金 >0/出金 <0；corporate_action 仅在有现金影响时填 `cash_amount`。
+- 信息型公司行为（关键决策/组织架构调整/政策支持）不产生现金腿，默认不影响持仓/收益，仅用于展示与解释。
+
+#### 假设（若未确认）
+- A1: 分析层 v1 仅做“收益贡献归因 + 风险指标（波动/最大回撤/集中度）”，基准对比留到后续（风险：中）。
+- A2: 目标配置/再平衡以“目标权重 + 漂移监控 + 建议交易清单”作为最小闭环（风险：中）。
+
+### 里程碑
+1. **Milestone 1: 数据/流水完整性确认与补齐**
+   - Deliverable: 现金流与公司行为事件的最小覆盖范围确认，事件排序/现金腿规则明确。
+   - Acceptance: 可用输入能稳定驱动持仓引擎与收益口径。
+2. **Milestone 2: 分析层 v1**
+   - Deliverable: 收益贡献归因 + 风险指标 v1（波动/最大回撤/集中度）。
+   - Acceptance: UI 可解释、可追溯到输入数据。
+3. **Milestone 3: 目标配置/再平衡 v1**
+   - Deliverable: 目标权重配置、漂移监控、再平衡建议清单。
+   - Acceptance: 与持仓/收益联动定位，能形成操作建议。
+4. **Milestone 4: 报表/导出 v1**
+   - Deliverable: 快照、对账、导出最小链路。
+   - Acceptance: 支持手工复核与归档。
+
+### 分阶段计划（宏观）
+#### Phase 0 - Discovery（如需要）
+- Objective: 盘点当前 ledger/position/performance 的覆盖范围与缺口。
+- Deliverables:
+  - 缺口清单与数据口径确认笔记。
+- Verification:
+  - 关键口径与事件规则已得到确认。
+- Rollback:
+  - N/A（无代码变更）。
+
+#### Phase 1 - 分析层 v1
+- Objective: 建立最小可用的收益贡献归因与风险指标。
+- Deliverables:
+  - 贡献归因口径与计算结果展示。
+  - 风险指标（波动/最大回撤/集中度）与解释文案。
+- Verification:
+  - typecheck/build 通过；关键指标可复算。
+- Rollback:
+  - 关闭分析入口或回退至仅收益展示。
+
+#### Phase 2 - 目标配置/再平衡 v1
+- Objective: 目标权重与漂移监控形成操作建议。
+- Deliverables:
+  - 目标配置入口与漂移提示。
+  - 再平衡建议清单（不含自动执行）。
+- Verification:
+  - 配置变更能在界面稳定呈现并可追溯。
+- Rollback:
+  - 退回只读配置或隐藏建议模块。
+
+#### Phase 3 - 报表/导出 v1
+- Objective: 形成对账与归档的最小报表链路。
+- Deliverables:
+  - 快照、对账视图与导出（CSV）。
+- Verification:
+  - 手工复核流程完整可用。
+- Rollback:
+  - 仅保留快照，不开放导出。
+
+### 验证与验收标准
+- Build/typecheck:
+  - `pnpm typecheck`
+- Manual checks:
+  - 收益/分析/风险/配置/报表入口可用，关键指标可追溯。
+- Acceptance criteria:
+  - 分析层指标可解释且与基础数据一致。
+  - 目标配置与漂移提示稳定。
+  - 报表支持对账与归档。
+
+### 风险与缓解
+| 风险 | 概率 | 影响 | 缓解 | 发现 | 回滚 |
+|---|---:|---:|---|---|---|
+| 数据口径不统一导致分析/风险失真 | 中 | 高 | 先完成口径与事件规则确认 | 指标异常/无法复算 | 关闭分析入口 |
+| 公司行为或现金腿处理不一致 | 中 | 中 | 先定义最小覆盖与排序规则 | 回测/复算不一致 | 回退至收益总览 |
+| 目标配置与建议可用性不足 | 中 | 中 | 以只读建议起步 | 反馈不稳定 | 隐藏建议模块 |
+
+## 可选详细文档布局（约定）
+如需维护详细 dev-docs 文档包，约定如下：
+
+```
+dev-docs/active/portfolio-upgrade/
+  roadmap.md              # Macro-level planning (plan-maker)
+  00-overview.md
+  01-plan.md
+  02-architecture.md
+  03-implementation-notes.md
+  04-verification.md
+  05-pitfalls.md
+```
+
+Suggested mapping:
+- Roadmap 的 Goal/Non-goals/Scope -> `dev-docs/active/portfolio-upgrade/00-overview.md`
+- Roadmap 的 Milestones/Phases -> `dev-docs/active/portfolio-upgrade/01-plan.md`
+- Roadmap 的 high-level architecture -> `dev-docs/active/portfolio-upgrade/02-architecture.md`
+- 执行过程中的决策/偏差 -> `dev-docs/active/portfolio-upgrade/03-implementation-notes.md`
+- 验证记录 -> `dev-docs/active/portfolio-upgrade/04-verification.md`
+
+## To-dos
+- [ ] 确认开放问题
+- [ ] 确认里程碑顺序与 DoD
+- [ ] 确认验证/验收与回滚策略
