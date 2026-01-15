@@ -19,7 +19,8 @@ export interface CreateAccountInput {
 
 export interface UnlockAccountInput {
   accountId: AccountId;
-  password: string;
+  password?: string;
+  devBypass?: boolean;
 }
 
 export type AssetClass = "stock" | "etf" | "cash";

@@ -12,3 +12,11 @@
 - 2026-01-15: `pnpm typecheck`（通过，数据质量 DoD + sequence 校验）
 - 2026-01-15: `pnpm typecheck`（失败：CorporateActionMeta 类型不兼容/未使用变量）
 - 2026-01-15: `pnpm typecheck`（通过，公司行为 meta + 拆股/合股）
+- 2026-01-15: `pnpm typecheck`（通过，交易流水 UI）
+- 2026-01-15: `pnpm typecheck`（通过，交易流水 UX 调整）
+- 2026-01-15: `pnpm typecheck`（通过，交易流水布局与筛选调整）
+- 2026-01-15: `pnpm typecheck`（通过，交易流水顶部两行布局）
+- 2026-01-15: `pnpm typecheck`（通过，交易流水头部布局对齐截图）
+- 2026-01-15: `pnpm typecheck`（通过，交易流水顶部去圆角与日期区优化）
+- 2026-01-15: `pnpm typecheck`（通过，交易流水头部细节调整）
+- 2026-01-15: `pnpm typecheck`（通过，开发模式自动解锁）

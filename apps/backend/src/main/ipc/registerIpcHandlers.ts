@@ -185,12 +185,15 @@ export async function registerIpcHandlers() {
     async (_event, input: UnlockAccountInput) => {
       if (!accountIndexDb) throw new Error("账号索引库尚未初始化。");
       if (!input.accountId) throw new Error("账号 ID 不能为空。");
-      if (!input.password) throw new Error("密码不能为空。");
+      const allowDevBypass = config.isDev && input.devBypass === true;
+      if (!allowDevBypass && !input.password) throw new Error("密码不能为空。");
 
-      const unlocked = await accountIndexDb.unlockAccount({
-        accountId: input.accountId,
-        password: input.password
-      });
+      const unlocked = allowDevBypass
+        ? await accountIndexDb.unlockAccountDev(input.accountId)
+        : await accountIndexDb.unlockAccount({
+            accountId: input.accountId,
+            password: input.password ?? ""
+          });
 
       const layout = await ensureAccountDataLayout(unlocked.dataDir);
 

@@ -137,6 +137,31 @@ export class AccountIndexDb {
       lastLoginAt: now
     };
   }
+
+  async unlockAccountDev(accountId: string): Promise<AccountSummary> {
+    const row = await get<DbAccountRow>(
+      this.db,
+      `select id, label, data_dir, created_at, last_login_at from accounts where id = ?`,
+      [accountId]
+    );
+
+    if (!row) throw new Error("未找到该账号。");
+
+    const now = Date.now();
+    await run(
+      this.db,
+      `update accounts set last_login_at = ? where id = ?`,
+      [now, row.id]
+    );
+
+    return {
+      id: row.id,
+      label: row.label,
+      dataDir: row.data_dir,
+      createdAt: row.created_at,
+      lastLoginAt: now
+    };
+  }
 }
 
 function isSqliteConstraintError(error: unknown): boolean {

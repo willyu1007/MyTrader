@@ -20,7 +20,7 @@ function toUserErrorMessage(error: unknown) {
   if (error instanceof Error) {
     const message = error.message?.trim() ?? "";
     if (isDesktopApiMissingError(message)) {
-      return "未检测到桌面端后端（preload API），请使用桌面端启动应用。";
+      return "未检测到桌面端后端（预加载接口），请使用桌面端启动应用。";
     }
     return message || "发生未知错误。";
   }
@@ -33,6 +33,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const hasDesktopApi = Boolean(window.mytrader);
   const isElectron = navigator.userAgent.toLowerCase().includes("electron");
+  const isDev = import.meta.env.DEV;
 
   const [createLabel, setCreateLabel] = useState("");
   const [createPassword, setCreatePassword] = useState("");
@@ -67,6 +68,38 @@ export function App() {
 
         const list = await window.mytrader.account.list();
         if (cancelled) return;
+
+        if (isDev) {
+          let target = list[0];
+          if (!target) {
+            target = await window.mytrader.account.create({
+              label: "开发账号",
+              password: "dev",
+              dataRootDir: null
+            });
+            if (cancelled) return;
+          }
+
+          try {
+            const unlocked = await window.mytrader.account.unlock({
+              accountId: target.id,
+              password: "",
+              devBypass: true
+            });
+            if (cancelled) return;
+            setState({ kind: "unlocked", account: unlocked });
+            setLoginAccount(unlocked.label);
+            return;
+          } catch (e) {
+            if (cancelled) return;
+            setError(toUserErrorMessage(e));
+            const fallbackList = list.length > 0 ? list : [target];
+            setState({ kind: "locked", accounts: fallbackList });
+            if (fallbackList.length > 0) setLoginAccount(fallbackList[0]!.label);
+            return;
+          }
+        }
+
         setState({ kind: "locked", accounts: list });
         if (list.length > 0) setLoginAccount(list[0]!.label);
       } catch (e) {
@@ -78,12 +111,12 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isDev]);
 
   const refreshAccounts = useCallback(async (preferredLoginAccount?: string) => {
     if (!window.mytrader) {
       setError(
-        "未检测到桌面端后端（preload API），请使用桌面端启动应用。"
+        "未检测到桌面端后端（预加载接口），请使用桌面端启动应用。"
       );
       setState({ kind: "locked", accounts: [] });
       return;
@@ -105,7 +138,7 @@ export function App() {
     try {
       if (!window.mytrader) {
         throw new Error(
-          "未检测到桌面端后端（preload API），无法打开系统选择器。"
+          "未检测到桌面端后端（预加载接口），无法打开系统选择器。"
         );
       }
       const selected = await window.mytrader.account.chooseDataRootDir();
@@ -120,7 +153,7 @@ export function App() {
   const handleCreateAccount = useCallback(async () => {
     setError(null);
     if (!window.mytrader) {
-      setError("未检测到桌面端后端（preload API），无法创建账号。");
+      setError("未检测到桌面端后端（预加载接口），无法创建账号。");
       return;
     }
     if (createPassword !== createPasswordConfirm) {
@@ -154,7 +187,7 @@ export function App() {
   const handleUnlock = useCallback(async () => {
     setError(null);
     if (!window.mytrader) {
-      setError("未检测到桌面端后端（preload API），无法登录。");
+      setError("未检测到桌面端后端（预加载接口），无法登录。");
       return;
     }
     const loginAccountTrimmed = loginAccount.trim();
@@ -181,7 +214,7 @@ export function App() {
     setError(null);
     try {
       if (!window.mytrader) {
-        throw new Error("未检测到桌面端后端（preload API），无法锁定。");
+        throw new Error("未检测到桌面端后端（预加载接口），无法锁定。");
       }
       const lastLoginAccount =
         state.kind === "unlocked" ? state.account.label : undefined;
@@ -200,7 +233,6 @@ export function App() {
           <h1 className="brand text-sm font-bold tracking-tight text-slate-900 dark:text-white">MyTrader</h1>
         </div>
         <div className="flex items-center gap-3">
-          <div className="badge text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">MVP 基础</div>
           {state.kind === "unlocked" && (
             <div className="text-xs text-slate-600 dark:text-slate-300 font-medium px-2 border-l border-slate-200 dark:border-slate-800">
               {state.account.label}
@@ -461,7 +493,7 @@ export function App() {
                       </p>
                       <p className="text-blue-600 dark:text-blue-400 font-mono mt-0.5">
                         {isElectron
-                          ? "检测到 Electron，但 preload API 不可用。"
+                          ? "检测到 Electron，但预加载接口不可用。"
                           : "浏览器模式：未加载桌面端后端。"}
                       </p>
                     </div>

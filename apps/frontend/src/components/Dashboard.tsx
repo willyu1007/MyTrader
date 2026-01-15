@@ -3,9 +3,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AccountSummary,
   AssetClass,
+  CorporateActionCategory,
+  CorporateActionKind,
+  CorporateActionMeta,
+  CreateLedgerEntryInput,
   CreatePositionInput,
   CreateRiskLimitInput,
   DataQualityLevel,
+  LedgerEntry,
+  LedgerEntryMeta,
+  LedgerEventType,
+  LedgerSide,
+  LedgerSource,
   MarketDataQuality,
   PerformanceMethod,
   PerformanceRangeKey,
@@ -42,6 +51,36 @@ interface RiskFormState {
   thresholdPct: string;
 }
 
+interface LedgerFormState {
+  id?: string;
+  eventType: LedgerEventType;
+  tradeDate: string;
+  eventTime: string;
+  sequence: string;
+  accountKey: string;
+  instrumentId: string;
+  symbol: string;
+  side: LedgerSide | "";
+  quantity: string;
+  price: string;
+  priceCurrency: string;
+  cashAmount: string;
+  cashCurrency: string;
+  fee: string;
+  tax: string;
+  note: string;
+  source: LedgerSource;
+  externalId: string;
+  corporateKind: CorporateActionKind;
+  corporateNumerator: string;
+  corporateDenominator: string;
+  corporateCategory: CorporateActionCategory;
+  corporateTitle: string;
+  corporateDescription: string;
+}
+
+type LedgerFilter = "all" | LedgerEventType;
+
 const emptyPositionForm: PositionFormState = {
   symbol: "",
   name: "",
@@ -68,6 +107,41 @@ const assetClassLabels: Record<AssetClass, string> = {
 const riskLimitTypeLabels: Record<RiskLimitType, string> = {
   position_weight: "持仓权重",
   asset_class_weight: "资产类别权重"
+};
+
+const ledgerEventTypeLabels: Record<LedgerEventType, string> = {
+  trade: "交易",
+  cash: "现金流",
+  fee: "费用",
+  tax: "税费",
+  dividend: "分红",
+  adjustment: "调整",
+  corporate_action: "公司行为"
+};
+
+const ledgerSideLabels: Record<LedgerSide, string> = {
+  buy: "买入",
+  sell: "卖出"
+};
+
+const ledgerSourceLabels: Record<LedgerSource, string> = {
+  manual: "手动",
+  csv: "CSV",
+  broker_import: "券商导入",
+  system: "系统"
+};
+
+const corporateActionKindLabels: Record<CorporateActionKind, string> = {
+  split: "拆股",
+  reverse_split: "合股",
+  info: "信息"
+};
+
+const corporateActionCategoryLabels: Record<CorporateActionCategory, string> = {
+  decision: "关键决策",
+  org_change: "组织调整",
+  policy_support: "政策支持",
+  other: "其他"
 };
 
 const navItems = [
@@ -205,6 +279,19 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     emptyPositionForm
   );
   const [riskForm, setRiskForm] = useState<RiskFormState>(emptyRiskForm);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
+  const [ledgerStartDate, setLedgerStartDate] = useState("");
+  const [ledgerEndDate, setLedgerEndDate] = useState("");
+  const [ledgerForm, setLedgerForm] = useState<LedgerFormState>(() =>
+    createEmptyLedgerForm("CNY")
+  );
+  const [isLedgerFormOpen, setIsLedgerFormOpen] = useState(false);
+  const [ledgerDeleteTarget, setLedgerDeleteTarget] = useState<LedgerEntry | null>(
+    null
+  );
 
   const [holdingsCsvPath, setHoldingsCsvPath] = useState<string | null>(null);
   const [pricesCsvPath, setPricesCsvPath] = useState<string | null>(null);
@@ -231,6 +318,46 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const performance = performanceResult?.performance ?? null;
   const performanceSeries = performanceResult?.series ?? null;
   const dataQuality = snapshot?.dataQuality ?? null;
+  const filteredLedgerEntries = useMemo(() => {
+    let entries = ledgerEntries;
+    if (ledgerFilter !== "all") {
+      entries = entries.filter((entry) => entry.eventType === ledgerFilter);
+    }
+    if (ledgerStartDate) {
+      entries = entries.filter((entry) => entry.tradeDate >= ledgerStartDate);
+    }
+    if (ledgerEndDate) {
+      entries = entries.filter((entry) => entry.tradeDate <= ledgerEndDate);
+    }
+    return entries;
+  }, [ledgerEntries, ledgerFilter, ledgerStartDate, ledgerEndDate]);
+  const cashFlowTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    filteredLedgerEntries.forEach((entry) => {
+      if (entry.cashAmount === null || !entry.cashCurrency) return;
+      totals.set(
+        entry.cashCurrency,
+        (totals.get(entry.cashCurrency) ?? 0) + entry.cashAmount
+      );
+    });
+    return Array.from(totals.entries()).map(([currency, amount]) => ({
+      currency,
+      amount
+    }));
+  }, [filteredLedgerEntries]);
+
+  const ledgerDeleteSummary = useMemo(() => {
+    if (!ledgerDeleteTarget) return "";
+    const symbolLabel =
+      ledgerDeleteTarget.symbol ??
+      ledgerDeleteTarget.instrumentId ??
+      "\u65e0\u6807\u7684";
+    return `${formatLedgerEventType(ledgerDeleteTarget.eventType)} · ${ledgerDeleteTarget.tradeDate} · ${symbolLabel}`;
+  }, [ledgerDeleteTarget]);
+  const toastMessage = useMemo(() => {
+    if (error) return sanitizeToastMessage(error);
+    return notice ?? "";
+  }, [error, notice]);
 
   const selectedPerformance = useMemo(() => {
     if (!performance) return null;
@@ -246,7 +373,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const loadPortfolios = useCallback(
     async (preferredId?: string | null) => {
       if (!window.mytrader) {
-        setError("未检测到桌面端后端（preload API）。");
+        setError("未检测到桌面端后端接口。");
         return;
       }
       const list = await window.mytrader.portfolio.list();
@@ -263,7 +390,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
   const loadSnapshot = useCallback(async (portfolioId: string) => {
     if (!window.mytrader) {
-      setError("未检测到桌面端后端（preload API）。");
+      setError("未检测到桌面端后端接口。");
       return;
     }
     setIsLoading(true);
@@ -279,10 +406,27 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     }
   }, []);
 
+  const loadLedgerEntries = useCallback(async (portfolioId: string) => {
+    if (!window.mytrader) {
+      setLedgerError("未检测到桌面端后端接口。");
+      return;
+    }
+    setLedgerLoading(true);
+    setLedgerError(null);
+    try {
+      const entries = await window.mytrader.ledger.list(portfolioId);
+      setLedgerEntries(entries);
+    } catch (err) {
+      setLedgerError(toUserErrorMessage(err));
+    } finally {
+      setLedgerLoading(false);
+    }
+  }, []);
+
   const loadPerformance = useCallback(
     async (portfolioId: string, range: PerformanceRangeKey) => {
       if (!window.mytrader) {
-        setPerformanceError("未检测到桌面端后端（preload API）。");
+        setPerformanceError("未检测到桌面端后端接口。");
         return;
       }
       setPerformanceLoading(true);
@@ -329,15 +473,52 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   }, [activePortfolioId, loadPerformance, performanceRange, portfolioTab]);
 
   useEffect(() => {
+    if (!activePortfolioId) {
+      setLedgerEntries([]);
+      return;
+    }
+    if (portfolioTab !== "trades") return;
+    loadLedgerEntries(activePortfolioId).catch((err) =>
+      setLedgerError(toUserErrorMessage(err))
+    );
+  }, [activePortfolioId, loadLedgerEntries, portfolioTab]);
+
+  useEffect(() => {
     if (!activePortfolio) return;
     setPortfolioRename(activePortfolio.name);
   }, [activePortfolio]);
+
+  useEffect(() => {
+    if (!activePortfolio) {
+      setLedgerForm(createEmptyLedgerForm("CNY"));
+      setIsLedgerFormOpen(false);
+      setLedgerDeleteTarget(null);
+      setLedgerStartDate("");
+      setLedgerEndDate("");
+      return;
+    }
+    setLedgerForm(createEmptyLedgerForm(activePortfolio.baseCurrency));
+    setLedgerFilter("all");
+    setIsLedgerFormOpen(false);
+    setLedgerDeleteTarget(null);
+    setLedgerStartDate("");
+    setLedgerEndDate("");
+  }, [activePortfolio?.id, activePortfolio?.baseCurrency]);
 
   useEffect(() => {
     if (activeView === "portfolio") {
       setPortfolioTab("overview");
     }
   }, [activeView]);
+
+  useEffect(() => {
+    if (!error && !notice) return;
+    const timer = window.setTimeout(() => {
+      setError(null);
+      setNotice(null);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [error, notice]);
 
   const handleCreatePortfolio = useCallback(async () => {
     if (!window.mytrader) return;
@@ -522,6 +703,309 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     [activePortfolio, loadSnapshot]
   );
 
+  const updateLedgerForm = useCallback((patch: Partial<LedgerFormState>) => {
+    setLedgerForm((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const handleOpenLedgerForm = useCallback(() => {
+    if (!activePortfolio) return;
+    setLedgerForm(createEmptyLedgerForm(activePortfolio.baseCurrency));
+    setIsLedgerFormOpen(true);
+  }, [activePortfolio]);
+
+  const handleEditLedgerEntry = useCallback((entry: LedgerEntry) => {
+    const corporateMeta = isCorporateActionMeta(entry.meta) ? entry.meta : null;
+    setLedgerForm({
+      id: entry.id,
+      eventType: entry.eventType,
+      tradeDate: entry.tradeDate,
+      eventTime: formatDateTimeInput(entry.eventTs),
+      sequence: entry.sequence?.toString() ?? "",
+      accountKey: entry.accountKey ?? "",
+      instrumentId: entry.instrumentId ?? "",
+      symbol: entry.symbol ?? "",
+      side: entry.side ?? "",
+      quantity: entry.quantity?.toString() ?? "",
+      price: entry.price?.toString() ?? "",
+      priceCurrency: entry.priceCurrency ?? "",
+      cashAmount: entry.cashAmount?.toString() ?? "",
+      cashCurrency: entry.cashCurrency ?? "",
+      fee: entry.fee?.toString() ?? "",
+      tax: entry.tax?.toString() ?? "",
+      note: entry.note ?? "",
+      source: entry.source,
+      externalId: entry.externalId ?? "",
+      corporateKind: corporateMeta?.kind ?? "split",
+      corporateNumerator:
+        corporateMeta && corporateMeta.kind !== "info"
+          ? String(corporateMeta.numerator)
+          : "",
+      corporateDenominator:
+        corporateMeta && corporateMeta.kind !== "info"
+          ? String(corporateMeta.denominator)
+          : "",
+      corporateCategory:
+        corporateMeta && corporateMeta.kind === "info"
+          ? corporateMeta.category
+          : "decision",
+      corporateTitle:
+        corporateMeta && corporateMeta.kind === "info" ? corporateMeta.title : "",
+      corporateDescription:
+        corporateMeta && corporateMeta.kind === "info"
+          ? corporateMeta.description ?? ""
+          : ""
+    });
+    setIsLedgerFormOpen(true);
+  }, []);
+
+  const handleCancelLedgerEdit = useCallback(() => {
+    setLedgerForm(createEmptyLedgerForm(activePortfolio?.baseCurrency ?? "CNY"));
+    setIsLedgerFormOpen(false);
+  }, [activePortfolio]);
+
+  const handleSubmitLedgerEntry = useCallback(async () => {
+    if (!window.mytrader || !activePortfolio) return;
+    setError(null);
+    setNotice(null);
+
+    const tradeDate = ledgerForm.tradeDate.trim();
+    if (!tradeDate) {
+      setError("请输入交易日期。");
+      return;
+    }
+
+    const eventType = ledgerForm.eventType;
+    const symbol = ledgerForm.symbol.trim();
+    const instrumentId = ledgerForm.instrumentId.trim();
+    const side = ledgerForm.side || null;
+    const cashCurrency = ledgerForm.cashCurrency.trim();
+    const priceCurrency = ledgerForm.priceCurrency.trim();
+
+    let eventTs: number | null;
+    let sequence: number | null;
+    let quantity: number | null;
+    let price: number | null;
+    let cashAmount: number | null;
+    let fee: number | null;
+    let tax: number | null;
+
+    try {
+      eventTs = parseOptionalDateTimeInput(ledgerForm.eventTime, "事件时间");
+      sequence = parseOptionalIntegerInput(ledgerForm.sequence, "排序序号");
+      quantity = parseOptionalNumberInput(ledgerForm.quantity, "数量");
+      price = parseOptionalNumberInput(ledgerForm.price, "价格");
+      cashAmount = parseOptionalNumberInput(ledgerForm.cashAmount, "现金腿");
+      fee = parseOptionalNumberInput(ledgerForm.fee, "费用");
+      tax = parseOptionalNumberInput(ledgerForm.tax, "税费");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      return;
+    }
+
+    if (eventTs !== null && eventTs <= 0) {
+      setError("事件时间格式不正确。");
+      return;
+    }
+    if (sequence !== null && sequence < 0) {
+      setError("排序序号不能为负数。");
+      return;
+    }
+    if (quantity !== null && quantity < 0) {
+      setError("数量不能为负数。");
+      return;
+    }
+    if (price !== null && price < 0) {
+      setError("价格不能为负数。");
+      return;
+    }
+    if (fee !== null && fee < 0) {
+      setError("费用必须为非负数。");
+      return;
+    }
+    if (tax !== null && tax < 0) {
+      setError("税费必须为非负数。");
+      return;
+    }
+
+    if (
+      ["trade", "dividend", "adjustment", "corporate_action"].includes(eventType) &&
+      !symbol &&
+      !instrumentId
+    ) {
+      setError("请输入代码或 instrumentId。");
+      return;
+    }
+
+    if ((ledgerForm.source === "csv" || ledgerForm.source === "broker_import") && sequence === null) {
+      setError("CSV/券商导入需要填写排序序号。");
+      return;
+    }
+
+    if (eventType === "trade") {
+      if (!side) {
+        setError("交易需要填写方向。");
+        return;
+      }
+      if (!quantity || quantity <= 0) {
+        setError("交易数量必须大于 0。");
+        return;
+      }
+      if (price === null) {
+        setError("交易需要填写价格。");
+        return;
+      }
+      if (cashAmount === null || cashAmount === 0) {
+        setError("交易需要填写现金腿金额。");
+        return;
+      }
+      if (side === "buy" && cashAmount > 0) {
+        setError("买入交易现金腿必须为负数。");
+        return;
+      }
+      if (side === "sell" && cashAmount < 0) {
+        setError("卖出交易现金腿必须为正数。");
+        return;
+      }
+    }
+
+    if (eventType === "cash") {
+      if (cashAmount === null || cashAmount === 0) {
+        setError("现金流需要填写金额。");
+        return;
+      }
+      if (!cashCurrency) {
+        setError("现金流需要填写币种。");
+        return;
+      }
+    }
+
+    if (eventType === "fee" || eventType === "tax") {
+      if (cashAmount === null || cashAmount >= 0) {
+        setError(`${formatLedgerEventType(eventType)} 需要填写负数金额。`);
+        return;
+      }
+      if (!cashCurrency) {
+        setError(`${formatLedgerEventType(eventType)} 需要填写币种。`);
+        return;
+      }
+    }
+
+    if (eventType === "dividend") {
+      if (cashAmount === null || cashAmount <= 0) {
+        setError("分红需要填写正数金额。");
+        return;
+      }
+      if (!cashCurrency) {
+        setError("分红需要填写币种。");
+        return;
+      }
+    }
+
+    if (eventType === "adjustment") {
+      if (!side) {
+        setError("持仓调整需要填写方向。");
+        return;
+      }
+      if (!quantity || quantity <= 0) {
+        setError("持仓调整数量必须大于 0。");
+        return;
+      }
+    }
+
+    let meta: CreateLedgerEntryInput["meta"] = null;
+    if (eventType === "corporate_action") {
+      if (ledgerForm.corporateKind === "info") {
+        const title = ledgerForm.corporateTitle.trim();
+        if (!title) {
+          setError("公司行为信息需要填写标题。");
+          return;
+        }
+        meta = {
+          kind: "info",
+          category: ledgerForm.corporateCategory,
+          title,
+          description: ledgerForm.corporateDescription.trim() || null
+        };
+      } else {
+        const numerator = Number(ledgerForm.corporateNumerator);
+        const denominator = Number(ledgerForm.corporateDenominator);
+        if (!Number.isFinite(numerator) || !Number.isInteger(numerator) || numerator <= 0) {
+          setError("拆合股分子需要为正整数。");
+          return;
+        }
+        if (
+          !Number.isFinite(denominator) ||
+          !Number.isInteger(denominator) ||
+          denominator <= 0
+        ) {
+          setError("拆合股分母需要为正整数。");
+          return;
+        }
+        meta = {
+          kind: ledgerForm.corporateKind,
+          numerator,
+          denominator
+        };
+      }
+    }
+
+    const payload: CreateLedgerEntryInput = {
+      portfolioId: activePortfolio.id,
+      accountKey: ledgerForm.accountKey.trim() || null,
+      eventType,
+      tradeDate,
+      eventTs,
+      sequence,
+      instrumentId: instrumentId || null,
+      symbol: symbol || null,
+      side,
+      quantity,
+      price,
+      priceCurrency: priceCurrency || null,
+      cashAmount,
+      cashCurrency: cashCurrency || null,
+      fee,
+      tax,
+      note: ledgerForm.note.trim() || null,
+      source: ledgerForm.source,
+      externalId: ledgerForm.externalId.trim() || null,
+      meta
+    };
+
+    if (ledgerForm.id) {
+      await window.mytrader.ledger.update({ ...payload, id: ledgerForm.id });
+      setNotice("流水已更新。");
+    } else {
+      await window.mytrader.ledger.create(payload);
+      setNotice("流水已新增。");
+    }
+
+    setLedgerForm(createEmptyLedgerForm(activePortfolio.baseCurrency));
+    setIsLedgerFormOpen(false);
+    await loadLedgerEntries(activePortfolio.id);
+    await loadSnapshot(activePortfolio.id);
+  }, [activePortfolio, ledgerForm, loadLedgerEntries, loadSnapshot]);
+
+  const handleRequestDeleteLedgerEntry = useCallback((entry: LedgerEntry) => {
+    setLedgerDeleteTarget(entry);
+  }, []);
+
+  const handleConfirmDeleteLedgerEntry = useCallback(async () => {
+    if (!window.mytrader || !activePortfolio || !ledgerDeleteTarget) return;
+    setError(null);
+    setNotice(null);
+    const entryId = ledgerDeleteTarget.id;
+    setLedgerDeleteTarget(null);
+    await window.mytrader.ledger.remove(entryId);
+    await loadLedgerEntries(activePortfolio.id);
+    await loadSnapshot(activePortfolio.id);
+    setNotice("流水已删除。");
+  }, [activePortfolio, ledgerDeleteTarget, loadLedgerEntries, loadSnapshot]);
+
+  const handleCancelDeleteLedgerEntry = useCallback(() => {
+    setLedgerDeleteTarget(null);
+  }, []);
+
   const handleChooseCsv = useCallback(async (kind: "holdings" | "prices") => {
     if (!window.mytrader) return;
     setError(null);
@@ -576,7 +1060,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       endDate: ingestEndDate || null
     });
     await loadSnapshot(snapshot.portfolio.id);
-    setNotice(`Tushare 拉取：新增 ${result.inserted} 条。`);
+    setNotice(`行情拉取：新增 ${result.inserted} 条。`);
   }, [snapshot, ingestStartDate, ingestEndDate, loadSnapshot]);
 
   return (
@@ -649,9 +1133,6 @@ export function Dashboard({ account, onLock }: DashboardProps) {
            <div className="flex items-center gap-2">
               {activeView === "account" && (
                  <Button variant="secondary" size="sm" onClick={onLock} icon="lock">锁定</Button>
-              )}
-              {activeView === "portfolio" && (
-                 <Button variant="secondary" size="sm" onClick={() => loadPortfolios(activePortfolioId)} icon="refresh">刷新</Button>
               )}
            </div>
         </div>
@@ -1129,7 +1610,137 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                 </Panel>
               )}
 
-              {["trades", "risk", "allocation", "corporate"].includes(portfolioTab) && (
+              {portfolioTab === "trades" && (
+                <Panel>
+                  <div className="mb-2 rounded-none border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 overflow-hidden">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-700">
+                      <div className="flex items-center gap-2">
+                        <span className="material-icons-outlined text-base text-primary">
+                          swap_horiz
+                        </span>
+                        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                          交易流水
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-2 rounded-none bg-transparent px-2 py-1">
+                        <span className="text-xs text-slate-400">开始日期</span>
+                        <Input
+                          type="date"
+                          value={ledgerStartDate}
+                          onChange={(e) => setLedgerStartDate(e.target.value)}
+                          className="text-xs w-32 border-0 bg-transparent dark:bg-transparent focus:ring-0 focus:border-transparent rounded-none"
+                          disabled={!activePortfolio}
+                        />
+                        <span className="text-xs text-slate-400">至</span>
+                        <span className="text-xs text-slate-400">结束日期</span>
+                        <Input
+                          type="date"
+                          value={ledgerEndDate}
+                          onChange={(e) => setLedgerEndDate(e.target.value)}
+                          className="text-xs w-32 border-0 bg-transparent dark:bg-transparent focus:ring-0 focus:border-transparent rounded-none"
+                          disabled={!activePortfolio}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                        <Select
+                          value={ledgerFilter}
+                          onChange={(e) => setLedgerFilter(e.target.value as LedgerFilter)}
+                          options={[
+                            { value: "all", label: "全部交易类型" },
+                            ...Object.entries(ledgerEventTypeLabels).map(([value, label]) => ({
+                              value,
+                              label
+                            }))
+                          ]}
+                          className="text-[11px] w-40 rounded-none border-0 bg-transparent focus:ring-0 focus:border-transparent px-0"
+                          disabled={!activePortfolio}
+                        />
+                        <span className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
+                        <span>
+                          筛选结果 {filteredLedgerEntries.length} / {ledgerEntries.length}
+                        </span>
+                        {cashFlowTotals.map((item) => (
+                          <span
+                            key={item.currency}
+                            className="text-[11px] font-mono text-emerald-500 dark:text-emerald-300"
+                          >
+                            现金净流 {item.currency} {formatCurrency(item.amount)}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <IconButton
+                          icon="refresh"
+                          label="刷新流水"
+                          size="sm"
+                          className="rounded-none"
+                          onClick={() => {
+                            if (!activePortfolioId) return;
+                            loadLedgerEntries(activePortfolioId).catch((err) =>
+                              setLedgerError(toUserErrorMessage(err))
+                            );
+                          }}
+                          disabled={!activePortfolioId || ledgerLoading}
+                        />
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon="add"
+                          className="rounded-none px-2 py-1 text-[11px]"
+                          onClick={handleOpenLedgerForm}
+                          disabled={!activePortfolio}
+                        >
+                          录入
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {!activePortfolio && <EmptyState message="请先选择或创建组合。" />}
+                  {activePortfolio && ledgerLoading && <EmptyState message="正在加载流水..." />}
+                  {activePortfolio && ledgerError && (
+                    <ErrorState
+                      message={ledgerError}
+                      onRetry={() => {
+                        if (!activePortfolioId) return;
+                        loadLedgerEntries(activePortfolioId).catch((err) =>
+                          setLedgerError(toUserErrorMessage(err))
+                        );
+                      }}
+                    />
+                  )}
+
+                  {activePortfolio && (isLedgerFormOpen || Boolean(ledgerForm.id)) && (
+                    <div className="mb-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                      <LedgerForm
+                        form={ledgerForm}
+                        baseCurrency={activePortfolio.baseCurrency}
+                        onChange={updateLedgerForm}
+                        onSubmit={handleSubmitLedgerEntry}
+                        onCancel={handleCancelLedgerEdit}
+                      />
+                    </div>
+                  )}
+
+                  {activePortfolio && !ledgerLoading && !ledgerError && (
+                    <>
+                      {filteredLedgerEntries.length === 0 ? (
+                        <EmptyState message="暂无流水记录。" />
+                      ) : (
+                        <LedgerTable
+                          entries={filteredLedgerEntries}
+                          onEdit={handleEditLedgerEntry}
+                          onDelete={handleRequestDeleteLedgerEntry}
+                        />
+                      )}
+                    </>
+                  )}
+                </Panel>
+              )}
+
+              {["risk", "allocation", "corporate"].includes(portfolioTab) && (
                 <PlaceholderPanel
                   title={portfolioTabs.find((tab) => tab.key === portfolioTab)?.label ?? ""}
                   description={portfolioTabs.find((tab) => tab.key === portfolioTab)?.description ?? ""}
@@ -1323,6 +1934,24 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
         </div>
 
+        {ledgerDeleteTarget && (
+          <ConfirmDialog
+            open={Boolean(ledgerDeleteTarget)}
+            title="确认删除"
+            message={
+              <div className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                <p>将删除以下流水记录，操作不可撤销。</p>
+                <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                  {ledgerDeleteSummary}
+                </p>
+              </div>
+            }
+            confirmLabel="删除"
+            onConfirm={handleConfirmDeleteLedgerEntry}
+            onCancel={handleCancelDeleteLedgerEntry}
+          />
+        )}
+
         {/* Global Notifications */}
         {(error || notice) && (
            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in-up">
@@ -1332,7 +1961,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                  : "bg-emerald-50 dark:bg-emerald-900 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-100"
               }`}>
                  <span className="material-icons-outlined">{error ? "error" : "check_circle"}</span>
-                 <span className="text-sm font-medium">{error ?? notice}</span>
+                 <span className="text-sm font-medium">{toastMessage}</span>
                  <button onClick={() => { setError(null); setNotice(null); }} className="ml-2 opacity-60 hover:opacity-100">
                     <span className="material-icons-outlined text-sm">close</span>
                  </button>
@@ -1369,7 +1998,7 @@ function PlaceholderPanel({ title, description }: { title: string, description: 
    )
 }
 
-function FormGroup({ label, children }: { label: string, children: React.ReactNode }) {
+function FormGroup({ label, children }: { label: React.ReactNode, children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{label}</label>
@@ -1380,9 +2009,16 @@ function FormGroup({ label, children }: { label: string, children: React.ReactNo
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
 function Input({ className, ...props }: InputProps) {
+  const isDateInput =
+    props.type === "date" || props.type === "datetime-local";
+  const isEmpty =
+    props.value === "" || props.value === undefined || props.value === null;
+  const dateHintClass =
+    isDateInput && isEmpty ? "text-slate-500 dark:text-slate-400" : "";
+
   return (
     <input 
-      className={`block w-full rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-1.5 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 placeholder:text-slate-400 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${className}`}
+      className={`block w-full rounded-md border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 py-1.5 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary sm:text-sm sm:leading-6 placeholder:text-slate-400 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${dateHintClass} ${className}`}
       {...props}
     />
   );
@@ -1422,14 +2058,51 @@ function Button({ children, variant = 'secondary', size = 'md', icon, className,
     sm: "px-2.5 py-1.5 text-xs",
     md: "px-4 py-2 text-sm"
   };
+  const hasChildren = children !== undefined && children !== null && children !== false;
 
   return (
     <button 
       className={`${baseClass} ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     >
-      {icon && <span className={`material-icons-outlined ${size === 'sm' ? 'text-sm mr-1.5' : 'text-base mr-2'}`}>{icon}</span>}
+      {icon && (
+        <span
+          className={`material-icons-outlined ${
+            size === "sm" ? "text-sm" : "text-base"
+          } ${hasChildren ? (size === "sm" ? "mr-1.5" : "mr-2") : ""}`}
+        >
+          {icon}
+        </span>
+      )}
       {children}
+    </button>
+  );
+}
+
+interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  icon: string;
+  label: string;
+  size?: "sm" | "md";
+}
+
+function IconButton({
+  icon,
+  label,
+  size = "md",
+  className,
+  ...props
+}: IconButtonProps) {
+  const sizeClass = size === "sm" ? "p-1.5" : "p-2";
+  const iconClass = size === "sm" ? "text-sm" : "text-base";
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={`inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 ${sizeClass} text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      {...props}
+    >
+      <span className={`material-icons-outlined ${iconClass}`}>{icon}</span>
     </button>
   );
 }
@@ -1478,6 +2151,528 @@ function ErrorState({ message, onRetry }: { message: string; onRetry?: () => voi
           重试
         </Button>
       )}
+    </div>
+  );
+}
+
+function HelpHint({ text }: { text: string }) {
+  return (
+    <span
+      className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300 dark:border-slate-600 text-[10px] text-slate-500 dark:text-slate-300 cursor-help"
+      title={text}
+      aria-label={text}
+    >
+      ?
+    </span>
+  );
+}
+
+interface ConfirmDialogProps {
+  open: boolean;
+  title: string;
+  message: React.ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel = "确认",
+  cancelLabel = "取消",
+  onConfirm,
+  onCancel
+}: ConfirmDialogProps) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+        onClick={onCancel}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-xl w-full max-w-md mx-4 p-5"
+      >
+        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 mb-2">
+          {title}
+        </div>
+        <div className="text-sm text-slate-600 dark:text-slate-300">
+          {message}
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="secondary" size="sm" onClick={onCancel}>
+            {cancelLabel}
+          </Button>
+          <Button variant="danger" size="sm" onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface LedgerTableProps {
+  entries: LedgerEntry[];
+  onEdit: (entry: LedgerEntry) => void;
+  onDelete: (entry: LedgerEntry) => void;
+}
+
+function LedgerTable({ entries, onEdit, onDelete }: LedgerTableProps) {
+  return (
+    <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 mb-4">
+      <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+        <thead className="bg-slate-50 dark:bg-slate-900">
+          <tr>
+            {[
+              "日期",
+              "类型",
+              "标的",
+              "方向",
+              "数量/价格",
+              "现金腿",
+              "费用/税费",
+              "来源",
+              "备注",
+              "操作"
+            ].map((h) => (
+              <th
+                key={h}
+                className="px-4 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap"
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="bg-white dark:bg-surface-dark/70 divide-y divide-slate-200 dark:divide-border-dark">
+          {entries.map((entry) => {
+            const isReadonly = entry.source === "system";
+            const cashClass =
+              entry.cashAmount === null
+                ? "text-slate-500 dark:text-slate-400"
+                : entry.cashAmount < 0
+                  ? "text-red-500"
+                  : "text-emerald-600";
+            return (
+              <tr
+                key={entry.id}
+                className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group"
+              >
+                <td className="px-4 py-2">
+                  <div className="text-sm font-mono text-slate-700 dark:text-slate-300">
+                    {entry.tradeDate}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    {entry.eventTs ? formatDateTime(entry.eventTs) : "无时间"}
+                    {entry.sequence !== null ? ` / seq ${entry.sequence}` : ""}
+                  </div>
+                </td>
+                <td className="px-4 py-2">
+                  <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    {formatLedgerEventType(entry.eventType)}
+                  </div>
+                  {entry.eventType === "corporate_action" && (
+                    <div className="text-[10px] text-slate-400">
+                      {formatCorporateActionMeta(entry.meta)}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  <div className="text-sm font-mono text-slate-700 dark:text-slate-200">
+                    {entry.symbol ?? entry.instrumentId ?? "--"}
+                  </div>
+                  {entry.symbol && entry.instrumentId && (
+                    <div className="text-[10px] text-slate-400">
+                      {entry.instrumentId}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300">
+                  {formatLedgerSide(entry.side)}
+                </td>
+                <td className="px-4 py-2">
+                  <div className="text-sm font-mono text-right text-slate-700 dark:text-slate-200">
+                    {formatNumber(entry.quantity)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 text-right">
+                    {entry.price !== null ? formatCurrency(entry.price) : "--"}
+                    {entry.priceCurrency ? ` ${entry.priceCurrency}` : ""}
+                  </div>
+                </td>
+                <td className="px-4 py-2">
+                  <div className={`text-sm font-mono text-right ${cashClass}`}>
+                    {formatCurrency(entry.cashAmount)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 text-right">
+                    {entry.cashCurrency ?? "--"}
+                  </div>
+                </td>
+                <td className="px-4 py-2">
+                  <div className="text-[11px] font-mono text-right text-slate-600 dark:text-slate-300">
+                    {entry.fee !== null ? formatCurrency(entry.fee) : "--"}
+                  </div>
+                  <div className="text-[11px] font-mono text-right text-slate-600 dark:text-slate-300">
+                    {entry.tax !== null ? formatCurrency(entry.tax) : "--"}
+                  </div>
+                </td>
+                <td className="px-4 py-2">
+                  <div className="text-xs text-slate-600 dark:text-slate-300">
+                    {formatLedgerSource(entry.source)}
+                  </div>
+                  {entry.externalId && (
+                    <div className="text-[10px] text-slate-400">
+                      {entry.externalId}
+                    </div>
+                  )}
+                </td>
+                <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">
+                  {entry.note ?? "--"}
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => onEdit(entry)}
+                      className={`p-1 transition-colors ${
+                        isReadonly
+                          ? "text-slate-300 cursor-not-allowed"
+                          : "text-slate-400 hover:text-primary"
+                      }`}
+                      title={isReadonly ? "系统流水不可编辑" : "编辑"}
+                      disabled={isReadonly}
+                    >
+                      <span className="material-icons-outlined text-base">edit</span>
+                    </button>
+                    <button
+                      onClick={() => onDelete(entry)}
+                      className={`p-1 transition-colors ${
+                        isReadonly
+                          ? "text-slate-300 cursor-not-allowed"
+                          : "text-slate-400 hover:text-red-500"
+                      }`}
+                      title={isReadonly ? "系统流水不可删除" : "删除"}
+                      disabled={isReadonly}
+                    >
+                      <span className="material-icons-outlined text-base">delete</span>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+interface LedgerFormProps {
+  form: LedgerFormState;
+  baseCurrency: string;
+  onChange: (patch: Partial<LedgerFormState>) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}
+
+function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: LedgerFormProps) {
+  const isEditing = Boolean(form.id);
+  const usesInstrument = [
+    "trade",
+    "dividend",
+    "adjustment",
+    "corporate_action"
+  ].includes(form.eventType);
+  const usesSide = ["trade", "adjustment"].includes(form.eventType);
+  const usesQuantity = ["trade", "adjustment"].includes(form.eventType);
+  const usesPrice = ["trade", "adjustment"].includes(form.eventType);
+  const usesCash = ["trade", "cash", "fee", "tax", "dividend"].includes(
+    form.eventType
+  );
+  const usesFeeTax = form.eventType === "trade";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+          <span className="material-icons-outlined text-primary text-base">
+            edit_note
+          </span>
+          {isEditing ? "编辑流水" : "新增流水"}
+        </h3>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <FormGroup label="事件类型">
+          <Select
+            value={form.eventType}
+            onChange={(e) =>
+              onChange({
+                eventType: e.target.value as LedgerEventType,
+                cashCurrency: form.cashCurrency || baseCurrency,
+                priceCurrency: form.priceCurrency || baseCurrency
+              })
+            }
+            options={Object.entries(ledgerEventTypeLabels).map(([value, label]) => ({
+              value,
+              label
+            }))}
+          />
+        </FormGroup>
+        <FormGroup label="交易日期">
+          <Input
+            type="date"
+            value={form.tradeDate}
+            onChange={(e) => onChange({ tradeDate: e.target.value })}
+          />
+        </FormGroup>
+        <FormGroup label="事件时间">
+          <Input
+            type="datetime-local"
+            value={form.eventTime}
+            onChange={(e) => onChange({ eventTime: e.target.value })}
+          />
+        </FormGroup>
+        <FormGroup label="排序序号">
+          <Input
+            type="number"
+            value={form.sequence}
+            onChange={(e) => onChange({ sequence: e.target.value })}
+            placeholder="同日顺序"
+          />
+        </FormGroup>
+
+        {usesInstrument && (
+          <FormGroup label="代码">
+            <Input
+              value={form.symbol}
+              onChange={(e) => onChange({ symbol: e.target.value })}
+              placeholder="例如: 600519.SH"
+            />
+          </FormGroup>
+        )}
+        {usesInstrument && (
+          <FormGroup label="标的标识">
+            <Input
+              value={form.instrumentId}
+              onChange={(e) => onChange({ instrumentId: e.target.value })}
+              placeholder="可选"
+            />
+          </FormGroup>
+        )}
+        {usesSide && (
+          <FormGroup label="方向">
+            <Select
+              value={form.side}
+              onChange={(e) => onChange({ side: e.target.value as LedgerSide })}
+              options={[
+                { value: "", label: "请选择", disabled: true },
+                { value: "buy", label: ledgerSideLabels.buy },
+                { value: "sell", label: ledgerSideLabels.sell }
+              ]}
+            />
+          </FormGroup>
+        )}
+        {usesQuantity && (
+          <FormGroup label="数量">
+            <Input
+              type="number"
+              value={form.quantity}
+              onChange={(e) => onChange({ quantity: e.target.value })}
+              placeholder="0"
+            />
+          </FormGroup>
+        )}
+        {usesPrice && (
+          <FormGroup label="价格">
+            <Input
+              type="number"
+              value={form.price}
+              onChange={(e) => onChange({ price: e.target.value })}
+              placeholder="0.00"
+            />
+          </FormGroup>
+        )}
+        {usesPrice && (
+          <FormGroup label="价格币种">
+            <Input
+              value={form.priceCurrency}
+              onChange={(e) => onChange({ priceCurrency: e.target.value })}
+              placeholder={baseCurrency}
+            />
+          </FormGroup>
+        )}
+        {usesCash && (
+          <FormGroup
+            label={
+              <span className="inline-flex items-center gap-1">
+                现金腿
+                <HelpHint text="买入为负，卖出为正；费用/税费为负；分红为正。" />
+              </span>
+            }
+          >
+            <Input
+              type="number"
+              value={form.cashAmount}
+              onChange={(e) => onChange({ cashAmount: e.target.value })}
+              placeholder="0.00"
+            />
+          </FormGroup>
+        )}
+        {usesCash && (
+          <FormGroup label="现金币种">
+            <Input
+              value={form.cashCurrency}
+              onChange={(e) => onChange({ cashCurrency: e.target.value })}
+              placeholder={baseCurrency}
+            />
+          </FormGroup>
+        )}
+        {usesFeeTax && (
+          <FormGroup label="费用">
+            <Input
+              type="number"
+              value={form.fee}
+              onChange={(e) => onChange({ fee: e.target.value })}
+              placeholder="0.00"
+            />
+          </FormGroup>
+        )}
+        {usesFeeTax && (
+          <FormGroup label="税费">
+            <Input
+              type="number"
+              value={form.tax}
+              onChange={(e) => onChange({ tax: e.target.value })}
+              placeholder="0.00"
+            />
+          </FormGroup>
+        )}
+        <FormGroup label="来源">
+          <Select
+            value={form.source}
+            onChange={(e) => onChange({ source: e.target.value as LedgerSource })}
+            options={[
+              { value: "manual", label: ledgerSourceLabels.manual },
+              { value: "csv", label: ledgerSourceLabels.csv },
+              { value: "broker_import", label: ledgerSourceLabels.broker_import },
+              { value: "system", label: ledgerSourceLabels.system, disabled: true }
+            ]}
+          />
+        </FormGroup>
+        <FormGroup label="外部标识">
+          <Input
+            value={form.externalId}
+            onChange={(e) => onChange({ externalId: e.target.value })}
+            placeholder="可选"
+          />
+        </FormGroup>
+        <FormGroup label="账户标识">
+          <Input
+            value={form.accountKey}
+            onChange={(e) => onChange({ accountKey: e.target.value })}
+            placeholder="可选"
+          />
+        </FormGroup>
+        <FormGroup label="备注">
+          <Input
+            value={form.note}
+            onChange={(e) => onChange({ note: e.target.value })}
+            placeholder="可选"
+          />
+        </FormGroup>
+      </div>
+
+      {form.eventType === "corporate_action" && (
+        <div className="mt-4 border-t border-slate-200 dark:border-slate-800 pt-4">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
+            公司行为详情
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <FormGroup label="事件类型">
+              <Select
+                value={form.corporateKind}
+                onChange={(e) =>
+                  onChange({ corporateKind: e.target.value as CorporateActionKind })
+                }
+                options={Object.entries(corporateActionKindLabels).map(
+                  ([value, label]) => ({
+                    value,
+                    label
+                  })
+                )}
+              />
+            </FormGroup>
+
+            {form.corporateKind === "info" ? (
+              <>
+                <FormGroup label="分类">
+                  <Select
+                    value={form.corporateCategory}
+                    onChange={(e) =>
+                      onChange({
+                        corporateCategory: e.target.value as CorporateActionCategory
+                      })
+                    }
+                    options={Object.entries(corporateActionCategoryLabels).map(
+                      ([value, label]) => ({
+                        value,
+                        label
+                      })
+                    )}
+                  />
+                </FormGroup>
+                <FormGroup label="标题">
+                  <Input
+                    value={form.corporateTitle}
+                    onChange={(e) => onChange({ corporateTitle: e.target.value })}
+                    placeholder="例如：董事会决议"
+                  />
+                </FormGroup>
+                <FormGroup label="描述">
+                  <Input
+                    value={form.corporateDescription}
+                    onChange={(e) => onChange({ corporateDescription: e.target.value })}
+                    placeholder="可选"
+                  />
+                </FormGroup>
+              </>
+            ) : (
+              <>
+                <FormGroup label="分子">
+                  <Input
+                    type="number"
+                    value={form.corporateNumerator}
+                    onChange={(e) => onChange({ corporateNumerator: e.target.value })}
+                    placeholder="2"
+                  />
+                </FormGroup>
+                <FormGroup label="分母">
+                  <Input
+                    type="number"
+                    value={form.corporateDenominator}
+                    onChange={(e) => onChange({ corporateDenominator: e.target.value })}
+                    placeholder="1"
+                  />
+                </FormGroup>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-2">
+        <Button variant="primary" onClick={onSubmit} icon="save">
+          保存
+        </Button>
+        <Button variant="secondary" onClick={onCancel}>
+          取消
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1589,11 +2784,62 @@ function formatRiskLimitTypeLabel(value: RiskLimitType): string {
   return riskLimitTypeLabels[value] ?? value;
 }
 
+function formatLedgerEventType(value: LedgerEventType): string {
+  return ledgerEventTypeLabels[value] ?? value;
+}
+
+function formatLedgerSide(value: LedgerSide | null): string {
+  if (!value) return "--";
+  return ledgerSideLabels[value] ?? value;
+}
+
+function formatLedgerSource(value: LedgerSource): string {
+  return ledgerSourceLabels[value] ?? value;
+}
+
+function isCorporateActionMeta(
+  meta: LedgerEntryMeta | null
+): meta is CorporateActionMeta {
+  if (!meta || typeof meta !== "object") return false;
+  const kind = (meta as CorporateActionMeta).kind;
+  return kind === "split" || kind === "reverse_split" || kind === "info";
+}
+
+function formatCorporateActionMeta(meta: LedgerEntryMeta | null): string {
+  if (!isCorporateActionMeta(meta)) return "--";
+  if (meta.kind === "info") {
+    const category = corporateActionCategoryLabels[meta.category] ?? meta.category;
+    return `${category} · ${meta.title}`;
+  }
+  const kindLabel = corporateActionKindLabels[meta.kind] ?? meta.kind;
+  return `${kindLabel} ${meta.numerator}:${meta.denominator}`;
+}
+
 function formatDateTime(value: number | null): string {
   if (!value) return "--";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--";
   return date.toLocaleString("zh-CN");
+}
+
+function formatDateTimeInput(value: number | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+
+function sanitizeToastMessage(message: string): string {
+  if (!message) return message;
+  if (/[A-Za-z]/.test(message)) {
+    return "操作失败，请检查输入后重试。";
+  }
+  return message;
 }
 
 function describeDataQuality(level: DataQualityLevel): {
@@ -1640,6 +2886,65 @@ function formatInputDate(date: Date): string {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseOptionalNumberInput(value: string, field: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) {
+    throw new Error(`${field}必须是数字。`);
+  }
+  return num;
+}
+
+function parseOptionalIntegerInput(value: string, field: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num) || !Number.isInteger(num)) {
+    throw new Error(`${field}必须是整数。`);
+  }
+  return num;
+}
+
+function parseOptionalDateTimeInput(value: string, field: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const ts = Date.parse(trimmed);
+  if (Number.isNaN(ts)) {
+    throw new Error(`${field}格式不正确。`);
+  }
+  return ts;
+}
+
+function createEmptyLedgerForm(baseCurrency: string): LedgerFormState {
+  return {
+    eventType: "trade",
+    tradeDate: formatInputDate(new Date()),
+    eventTime: "",
+    sequence: "",
+    accountKey: "",
+    instrumentId: "",
+    symbol: "",
+    side: "",
+    quantity: "",
+    price: "",
+    priceCurrency: baseCurrency,
+    cashAmount: "",
+    cashCurrency: baseCurrency,
+    fee: "",
+    tax: "",
+    note: "",
+    source: "manual",
+    externalId: "",
+    corporateKind: "split",
+    corporateNumerator: "",
+    corporateDenominator: "",
+    corporateCategory: "decision",
+    corporateTitle: "",
+    corporateDescription: ""
+  };
 }
 
 function DescriptionItem({ label, value }: { label: string, value: React.ReactNode }) {
