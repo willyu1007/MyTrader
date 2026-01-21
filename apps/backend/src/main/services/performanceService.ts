@@ -1,13 +1,18 @@
 import type {
+  ContributionBreakdown,
   LedgerEntry,
   PerformanceMetric,
   PerformanceRangeKey,
   PortfolioPerformance,
+  PortfolioPerformanceAnalysis,
   PortfolioPerformanceRangeResult,
-  PortfolioPerformanceSeries
+  PortfolioPerformanceSeries,
+  PortfolioRiskMetrics,
+  RiskSeriesMetrics
 } from "@mytrader/shared";
 
 import {
+  getInstrumentsBySymbols,
   getLatestPricesAsOf,
   listPriceDatesInRange
 } from "../market/marketRepository";
@@ -44,6 +49,7 @@ interface ValuationResult {
 }
 
 const MS_PER_DAY = 86_400_000;
+const TRADING_DAYS_PER_YEAR = 252;
 
 export async function buildPortfolioPerformance(input: {
   ledgerEntries: LedgerEntry[];
@@ -111,7 +117,8 @@ export async function buildPortfolioPerformanceRange(input: {
         twr: null,
         mwr: null
       },
-      series: null
+      series: null,
+      analysis: null
     };
   }
 
@@ -128,7 +135,8 @@ export async function buildPortfolioPerformanceRange(input: {
         twr: null,
         mwr: null
       },
-      series: null
+      series: null,
+      analysis: null
     };
   }
 
@@ -144,6 +152,14 @@ export async function buildPortfolioPerformanceRange(input: {
     startDate,
     endDate
   });
+  const analysis = await buildPerformanceAnalysis({
+    ledgerEntries,
+    marketDb,
+    startDate,
+    endDate,
+    twrSeries: twr.series,
+    navSeries: mwr.series
+  });
 
   if (twr.metric) {
     return {
@@ -153,7 +169,8 @@ export async function buildPortfolioPerformanceRange(input: {
         twr: twr.metric,
         mwr: mwr.metric
       },
-      series: twr.series
+      series: twr.series,
+      analysis
     };
   }
 
@@ -165,7 +182,8 @@ export async function buildPortfolioPerformanceRange(input: {
         twr: twr.metric,
         mwr: mwr.metric
       },
-      series: mwr.series
+      series: mwr.series,
+      analysis
     };
   }
 
@@ -176,7 +194,31 @@ export async function buildPortfolioPerformanceRange(input: {
       twr: twr.metric,
       mwr: mwr.metric
     },
-    series: twr.series.points.length ? twr.series : mwr.series.points.length ? mwr.series : null
+    series: twr.series.points.length ? twr.series : mwr.series.points.length ? mwr.series : null,
+    analysis
+  };
+}
+
+async function buildPerformanceAnalysis(input: {
+  ledgerEntries: LedgerEntry[];
+  marketDb: SqliteDatabase;
+  startDate: string;
+  endDate: string;
+  navSeries: PortfolioPerformanceSeries;
+  twrSeries: PortfolioPerformanceSeries;
+}): Promise<PortfolioPerformanceAnalysis> {
+  const { ledgerEntries, marketDb, startDate, endDate, navSeries, twrSeries } =
+    input;
+  const contributions = await buildContributionBreakdown({
+    ledgerEntries,
+    marketDb,
+    startDate,
+    endDate
+  });
+  const riskMetrics = buildRiskMetrics({ navSeries, twrSeries });
+  return {
+    contributions,
+    riskMetrics
   };
 }
 
@@ -651,6 +693,301 @@ function buildNavSeriesPoints(
     value: entry.value,
     returnPct: entry.value / startValue - 1
   }));
+}
+
+async function buildContributionBreakdown(input: {
+  ledgerEntries: LedgerEntry[];
+  marketDb: SqliteDatabase;
+  startDate: string;
+  endDate: string;
+}): Promise<ContributionBreakdown> {
+  const { ledgerEntries, marketDb, startDate, endDate } = input;
+  const state = buildLedgerStateAtDate(ledgerEntries, endDate);
+  const holdings = Array.from(state.holdings.entries()).filter(
+    ([, quantity]) => quantity > 0
+  );
+  const symbols = holdings.map(([symbol]) => symbol);
+  const instruments = await getInstrumentsBySymbols(marketDb, symbols);
+  const startPrices = await getLatestPricesAsOf(marketDb, symbols, startDate);
+  const endPrices = await getLatestPricesAsOf(marketDb, symbols, endDate);
+  const cashValue = Array.from(state.cashBalances.values()).reduce(
+    (sum, amount) => sum + amount,
+    0
+  );
+
+  const missingSymbols: string[] = [];
+  const bySymbol: ContributionBreakdown["bySymbol"] = [];
+
+  const symbolMarketValues = new Map<string, number>();
+  holdings.forEach(([symbol, quantity]) => {
+    const endPrice = endPrices.get(symbol)?.close ?? null;
+    const marketValue =
+      endPrice !== null && Number.isFinite(endPrice) ? endPrice * quantity : 0;
+    symbolMarketValues.set(symbol, marketValue);
+  });
+
+  const totalMarketValue =
+    cashValue +
+    Array.from(symbolMarketValues.values()).reduce((sum, value) => sum + value, 0);
+
+  if (!Number.isFinite(totalMarketValue) || totalMarketValue <= 0) {
+    return {
+      startDate,
+      endDate,
+      bySymbol: [],
+      byAssetClass: [],
+      missingSymbols: [],
+      reason: "期末市值不足"
+    };
+  }
+
+  holdings.forEach(([symbol]) => {
+    const instrument = instruments.get(symbol);
+    const label = instrument?.name ?? symbol;
+    const marketValue = symbolMarketValues.get(symbol) ?? 0;
+    const weight = marketValue / totalMarketValue;
+    const startPrice = startPrices.get(symbol)?.close ?? null;
+    const endPrice = endPrices.get(symbol)?.close ?? null;
+    let returnPct: number | null = null;
+    if (
+      startPrice !== null &&
+      endPrice !== null &&
+      Number.isFinite(startPrice) &&
+      Number.isFinite(endPrice) &&
+      startPrice > 0
+    ) {
+      returnPct = endPrice / startPrice - 1;
+    } else {
+      missingSymbols.push(symbol);
+    }
+    const contribution =
+      returnPct === null ? null : returnPct * weight;
+    bySymbol.push({
+      key: symbol,
+      label,
+      weight,
+      marketValue,
+      returnPct,
+      contribution,
+      priceStart: startPrice,
+      priceEnd: endPrice
+    });
+  });
+
+  const byAssetClassMap = new Map<
+    string,
+    {
+      label: string;
+      weight: number;
+      marketValue: number;
+      contribution: number;
+      hasMissing: boolean;
+    }
+  >();
+
+  bySymbol.forEach((entry) => {
+    const instrument = instruments.get(entry.key);
+    const assetClass = instrument?.assetClass ?? "stock";
+    const label = formatAssetClassLabel(assetClass);
+    const group =
+      byAssetClassMap.get(assetClass) ?? {
+        label,
+        weight: 0,
+        marketValue: 0,
+        contribution: 0,
+        hasMissing: false
+      };
+    group.weight += entry.weight;
+    group.marketValue += entry.marketValue;
+    if (entry.contribution === null) {
+      group.hasMissing = true;
+    } else {
+      group.contribution += entry.contribution;
+    }
+    byAssetClassMap.set(assetClass, group);
+  });
+
+  if (cashValue !== 0) {
+    const weight = cashValue / totalMarketValue;
+    const group =
+      byAssetClassMap.get("cash") ?? {
+        label: formatAssetClassLabel("cash"),
+        weight: 0,
+        marketValue: 0,
+        contribution: 0,
+        hasMissing: false
+      };
+    group.weight += weight;
+    group.marketValue += cashValue;
+    byAssetClassMap.set("cash", group);
+  }
+
+  const byAssetClass = Array.from(byAssetClassMap.entries()).map(
+    ([key, group]) => {
+      const returnPct =
+        group.hasMissing || group.weight === 0
+          ? null
+          : group.contribution / group.weight;
+      return {
+        key,
+        label: group.label,
+        weight: group.weight,
+        marketValue: group.marketValue,
+        returnPct,
+        contribution: group.hasMissing ? null : group.contribution,
+        priceStart: null,
+        priceEnd: null
+      };
+    }
+  );
+
+  return {
+    startDate,
+    endDate,
+    bySymbol,
+    byAssetClass,
+    missingSymbols,
+    reason:
+      missingSymbols.length > 0
+        ? `缺少 ${missingSymbols.length} 个标的价格，贡献结果不完整`
+        : null
+  };
+}
+
+function buildRiskMetrics(input: {
+  navSeries: PortfolioPerformanceSeries;
+  twrSeries: PortfolioPerformanceSeries;
+}): PortfolioRiskMetrics {
+  const { navSeries, twrSeries } = input;
+  return {
+    nav: buildRiskSeriesMetrics(navSeries, "nav"),
+    twr: buildRiskSeriesMetrics(twrSeries, "twr")
+  };
+}
+
+function buildRiskSeriesMetrics(
+  series: PortfolioPerformanceSeries,
+  mode: "nav" | "twr"
+): RiskSeriesMetrics {
+  const points = series.points;
+  if (points.length < 2) {
+    return {
+      volatility: null,
+      volatilityAnnualized: null,
+      maxDrawdown: null,
+      startDate: series.startDate ?? null,
+      endDate: series.endDate ?? null,
+      points: points.length,
+      reason: series.reason ?? "可计算区间不足"
+    };
+  }
+
+  const values = points.map((point) => {
+    if (mode === "nav") return point.value;
+    return 1 + point.returnPct;
+  });
+
+  if (values.some((value) => !Number.isFinite(value) || value <= 0)) {
+    return {
+      volatility: null,
+      volatilityAnnualized: null,
+      maxDrawdown: null,
+      startDate: series.startDate ?? null,
+      endDate: series.endDate ?? null,
+      points: points.length,
+      reason: "序列数据异常"
+    };
+  }
+
+  const returns = values
+    .slice(1)
+    .map((value, index) => value / values[index] - 1)
+    .filter((value) => Number.isFinite(value));
+
+  if (returns.length < 2) {
+    return {
+      volatility: null,
+      volatilityAnnualized: null,
+      maxDrawdown: null,
+      startDate: series.startDate ?? null,
+      endDate: series.endDate ?? null,
+      points: points.length,
+      reason: series.reason ?? "可计算区间不足"
+    };
+  }
+
+  const volatility = computeStandardDeviation(returns);
+  const maxDrawdown = computeMaxDrawdown(values);
+
+  return {
+    volatility,
+    volatilityAnnualized:
+      volatility === null ? null : volatility * Math.sqrt(TRADING_DAYS_PER_YEAR),
+    maxDrawdown,
+    startDate: series.startDate ?? null,
+    endDate: series.endDate ?? null,
+    points: points.length,
+    reason: series.reason ?? null
+  };
+}
+
+function buildLedgerStateAtDate(
+  entries: LedgerEntry[],
+  asOfDate: string
+): LedgerState {
+  const state: LedgerState = {
+    holdings: new Map(),
+    cashBalances: new Map()
+  };
+  if (!asOfDate) return state;
+  const sorted = [...entries].sort(compareLedgerEntries);
+  const cutoff = endOfDayTimestamp(asOfDate);
+  for (const entry of sorted) {
+    if (entrySortKey(entry) > cutoff) break;
+    applyEntry(entry, state);
+  }
+  return state;
+}
+
+function computeStandardDeviation(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance =
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+    (values.length - 1);
+  if (!Number.isFinite(variance) || variance < 0) return null;
+  return Math.sqrt(variance);
+}
+
+function computeMaxDrawdown(values: number[]): number | null {
+  if (values.length < 2) return null;
+  let peak = values[0];
+  let maxDrawdown = 0;
+  for (const value of values) {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    if (value > peak) {
+      peak = value;
+      continue;
+    }
+    const drawdown = value / peak - 1;
+    if (drawdown < maxDrawdown) {
+      maxDrawdown = drawdown;
+    }
+  }
+  return maxDrawdown;
+}
+
+function formatAssetClassLabel(value: string): string {
+  switch (value) {
+    case "stock":
+      return "股票";
+    case "etf":
+      return "ETF";
+    case "cash":
+      return "现金";
+    default:
+      return value;
+  }
 }
 
 function shiftDate(date: Date, months: number, years: number): Date {

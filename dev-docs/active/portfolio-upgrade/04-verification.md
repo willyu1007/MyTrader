@@ -20,3 +20,36 @@
 - 2026-01-15: `pnpm typecheck`（通过，交易流水顶部去圆角与日期区优化）
 - 2026-01-15: `pnpm typecheck`（通过，交易流水头部细节调整）
 - 2026-01-15: `pnpm typecheck`（通过，开发模式自动解锁）
+- 2026-01-15: `pnpm typecheck`（通过，录入表单按钮与提示样式调整）
+- 2026-01-15: `pnpm typecheck`（通过，事件类型与问号提示调整）
+- 2026-01-15: `pnpm typecheck`（通过，事件类型入口与自动计算设置调整）
+- 2026-01-15: `pnpm typecheck`（通过，交易录入表单布局分区调整）
+- 2026-01-15: `pnpm typecheck`（通过，交易录入表单紧凑布局）
+- 2026-01-15: `pnpm typecheck`（通过，筛选下拉无黑底与内边距调整）
+- 2026-01-15: `pnpm typecheck`（通过，筛选文字主色与录入标题隐藏）
+- 2026-01-15: `pnpm typecheck`（通过，方向切换与单行布局调整）
+- 2026-01-15: `pnpm typecheck`（通过，行间分隔与时间标题移除）
+- 2026-01-15: `pnpm typecheck`（通过，新增表头分隔线）
+- 2026-01-15: `pnpm typecheck`（通过，费用/税费自动计算与录入布局重排）
+- 2026-01-15: `pnpm typecheck`（通过，时间与备注合并单行）
+- 2026-01-15: `pnpm typecheck`（通过，现金腿自动计算与费率持久化）
+- 2026-01-15: `pnpm typecheck`（通过，现金腿含费税自动计算）
+- 2026-01-15: `pnpm typecheck`（通过，录入区域背景色调整）
+- 2026-01-15: `pnpm typecheck`（通过，录入背景暖色调整）
+- 2026-01-15: `pnpm typecheck`（通过，录入背景更浅）
+- 2026-01-15: `pnpm typecheck`（通过，录入背景中性化）
+- 2026-01-15: `pnpm typecheck`（通过，录入背景区分调整）
+- 2026-01-15: `pnpm typecheck`（通过，录入背景区分度提升）
+- 2026-01-15: `pnpm typecheck`（通过，录入区域顶部分隔增强）
+- 2026-01-15: `pnpm typecheck`（通过，分隔线更明显）
+- 2026-01-15: `pnpm typecheck`（通过，分隔线改为左右与下方）
+- 2026-01-15: `pnpm typecheck`（通过，录入按钮禁用置灰）
+- 2026-01-15: `pnpm typecheck`（通过，交易日期默认值与顶部压缩）
+- 2026-01-15: `pnpm typecheck`（通过，交易日期默认值固定）
+- 2026-01-15: `pnpm typecheck`（通过，日期输入加宽）
+- 2026-01-15: `pnpm typecheck`（通过，公司行为表单重排与拆合股输入调整）
+- 2026-01-15: `pnpm typecheck`（通过，Milestone 1 回归）
+- 2026-01-15: `pnpm -C apps/backend verify:position-engine`（通过，100 runs，fingerprint: {"cashBalances":[["CNY",18162],["USD",98]],"positions":[{"symbol":"600519.SH","assetClass":"stock","currency":"CNY","quantity":12,"cost":1034},{"symbol":"CASH:CNY","assetClass":"cash","currency":"CNY","quantity":18162,"cost":null},{"symbol":"CASH:USD","assetClass":"cash","currency":"USD","quantity":98,"cost":null}]})）
+- 2026-01-15: `pnpm typecheck`（通过，分析层 v1 贡献/风险指标）
+- 2026-01-15: `pnpm -C packages/shared build && pnpm -C apps/backend dev`（失败：Vite 端口 5173 被占用）
+- 2026-01-15: `pnpm -C packages/shared build && pnpm -C apps/backend dev`（启动 Vite 成功但命令超时退出；期间出现 preload.js 短暂缺失与 window.mytrader 未注入提示）

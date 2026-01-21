@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   AccountSummary,
   AssetClass,
-  CorporateActionCategory,
   CorporateActionKind,
   CorporateActionMeta,
+  ContributionEntry,
   CreateLedgerEntryInput,
   CreatePositionInput,
   CreateRiskLimitInput,
@@ -24,6 +24,7 @@ import type {
   PortfolioSnapshot,
   PositionValuation,
   RiskLimit,
+  RiskSeriesMetrics,
   RiskLimitType
 } from "@mytrader/shared";
 
@@ -68,18 +69,18 @@ interface LedgerFormState {
   cashCurrency: string;
   fee: string;
   tax: string;
+  feeRate: string;
+  taxRate: string;
+  cashAmountAuto: boolean;
   note: string;
   source: LedgerSource;
   externalId: string;
-  corporateKind: CorporateActionKind;
-  corporateNumerator: string;
-  corporateDenominator: string;
-  corporateCategory: CorporateActionCategory;
-  corporateTitle: string;
-  corporateDescription: string;
+  corporateKind: CorporateActionKindUi;
+  corporateAfterShares: string;
 }
 
 type LedgerFilter = "all" | LedgerEventType;
+type CorporateActionKindUi = CorporateActionKind | "dividend";
 
 const emptyPositionForm: PositionFormState = {
   symbol: "",
@@ -112,12 +113,18 @@ const riskLimitTypeLabels: Record<RiskLimitType, string> = {
 const ledgerEventTypeLabels: Record<LedgerEventType, string> = {
   trade: "交易",
   cash: "现金流",
-  fee: "费用",
-  tax: "税费",
-  dividend: "分红",
-  adjustment: "调整",
+  fee: "费用（历史）",
+  tax: "税费（历史）",
+  dividend: "公司行为·分红",
+  adjustment: "调整（历史）",
   corporate_action: "公司行为"
 };
+
+const ledgerEventTypeOptions: { value: LedgerEventType; label: string }[] = [
+  { value: "trade", label: ledgerEventTypeLabels.trade },
+  { value: "cash", label: ledgerEventTypeLabels.cash },
+  { value: "corporate_action", label: ledgerEventTypeLabels.corporate_action }
+];
 
 const ledgerSideLabels: Record<LedgerSide, string> = {
   buy: "买入",
@@ -131,13 +138,17 @@ const ledgerSourceLabels: Record<LedgerSource, string> = {
   system: "系统"
 };
 
-const corporateActionKindLabels: Record<CorporateActionKind, string> = {
+const DEFAULT_LEDGER_START_DATE = "2000-01-01";
+const DEFAULT_LEDGER_END_DATE = "2099-12-31";
+
+const corporateActionKindLabels: Record<CorporateActionKindUi, string> = {
   split: "拆股",
   reverse_split: "合股",
-  info: "信息"
+  info: "信息",
+  dividend: "分红"
 };
 
-const corporateActionCategoryLabels: Record<CorporateActionCategory, string> = {
+const corporateActionCategoryLabels: Record<string, string> = {
   decision: "关键决策",
   org_change: "组织调整",
   policy_support: "政策支持",
@@ -247,6 +258,9 @@ const performanceRanges = [
   { key: "ALL", label: "\u5168\u90e8" }
 ] as const;
 
+const CONTRIBUTION_TOP_N = 5;
+const HHI_WARN_THRESHOLD = 0.25;
+
 type OtherTab = (typeof otherTabs)[number]["key"];
 
 type WorkspaceView = (typeof navItems)[number]["key"];
@@ -270,6 +284,11 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     useState<PortfolioPerformanceRangeResult | null>(null);
   const [performanceLoading, setPerformanceLoading] = useState(false);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
+  const [showAllSymbolContribution, setShowAllSymbolContribution] =
+    useState(false);
+  const [showAllAssetContribution, setShowAllAssetContribution] =
+    useState(false);
+  const [riskAnnualized, setRiskAnnualized] = useState(true);
 
   const [portfolioName, setPortfolioName] = useState("");
   const [portfolioBaseCurrency, setPortfolioBaseCurrency] = useState("CNY");
@@ -283,8 +302,10 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
   const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>("all");
-  const [ledgerStartDate, setLedgerStartDate] = useState("");
-  const [ledgerEndDate, setLedgerEndDate] = useState("");
+  const [ledgerStartDate, setLedgerStartDate] = useState(
+    DEFAULT_LEDGER_START_DATE
+  );
+  const [ledgerEndDate, setLedgerEndDate] = useState(DEFAULT_LEDGER_END_DATE);
   const [ledgerForm, setLedgerForm] = useState<LedgerFormState>(() =>
     createEmptyLedgerForm("CNY")
   );
@@ -317,11 +338,28 @@ export function Dashboard({ account, onLock }: DashboardProps) {
 
   const performance = performanceResult?.performance ?? null;
   const performanceSeries = performanceResult?.series ?? null;
+  const performanceAnalysis = performanceResult?.analysis ?? null;
+  const contributionBreakdown = performanceAnalysis?.contributions ?? null;
+  const riskMetrics = performanceAnalysis?.riskMetrics ?? null;
   const dataQuality = snapshot?.dataQuality ?? null;
+  const hhiValue = useMemo(() => {
+    if (!snapshot) return null;
+    return snapshot.exposures.bySymbol.reduce((sum, entry) => {
+      return sum + entry.weight * entry.weight;
+    }, 0);
+  }, [snapshot]);
   const filteredLedgerEntries = useMemo(() => {
     let entries = ledgerEntries;
     if (ledgerFilter !== "all") {
-      entries = entries.filter((entry) => entry.eventType === ledgerFilter);
+      entries = entries.filter((entry) => {
+        if (ledgerFilter === "corporate_action") {
+          return (
+            entry.eventType === "corporate_action" ||
+            entry.eventType === "dividend"
+          );
+        }
+        return entry.eventType === ledgerFilter;
+      });
     }
     if (ledgerStartDate) {
       entries = entries.filter((entry) => entry.tradeDate >= ledgerStartDate);
@@ -466,7 +504,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       setPerformanceResult(null);
       return;
     }
-    if (portfolioTab !== "performance") return;
+    if (portfolioTab !== "performance" && portfolioTab !== "risk") return;
     loadPerformance(activePortfolioId, performanceRange).catch((err) =>
       setPerformanceError(toUserErrorMessage(err))
     );
@@ -493,16 +531,16 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       setLedgerForm(createEmptyLedgerForm("CNY"));
       setIsLedgerFormOpen(false);
       setLedgerDeleteTarget(null);
-      setLedgerStartDate("");
-      setLedgerEndDate("");
+      setLedgerStartDate(DEFAULT_LEDGER_START_DATE);
+      setLedgerEndDate(DEFAULT_LEDGER_END_DATE);
       return;
     }
     setLedgerForm(createEmptyLedgerForm(activePortfolio.baseCurrency));
     setLedgerFilter("all");
     setIsLedgerFormOpen(false);
     setLedgerDeleteTarget(null);
-    setLedgerStartDate("");
-    setLedgerEndDate("");
+    setLedgerStartDate(DEFAULT_LEDGER_START_DATE);
+    setLedgerEndDate(DEFAULT_LEDGER_END_DATE);
   }, [activePortfolio?.id, activePortfolio?.baseCurrency]);
 
   useEffect(() => {
@@ -510,6 +548,11 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       setPortfolioTab("overview");
     }
   }, [activeView]);
+
+  useEffect(() => {
+    setShowAllSymbolContribution(false);
+    setShowAllAssetContribution(false);
+  }, [performanceRange, activePortfolioId]);
 
   useEffect(() => {
     if (!error && !notice) return;
@@ -714,10 +757,18 @@ export function Dashboard({ account, onLock }: DashboardProps) {
   }, [activePortfolio]);
 
   const handleEditLedgerEntry = useCallback((entry: LedgerEntry) => {
+    const storedRates = loadStoredRates(entry.eventType);
+    const derivedFeeRate = deriveRateValue(entry.fee, entry.quantity, entry.price);
+    const derivedTaxRate = deriveRateValue(entry.tax, entry.quantity, entry.price);
+    const isDividendEntry = entry.eventType === "dividend";
     const corporateMeta = isCorporateActionMeta(entry.meta) ? entry.meta : null;
+    const corporateAfterShares =
+      !isDividendEntry && corporateMeta && corporateMeta.kind !== "info"
+        ? formatCorporateAfterShares(corporateMeta.numerator, corporateMeta.denominator)
+        : "";
     setLedgerForm({
       id: entry.id,
-      eventType: entry.eventType,
+      eventType: isDividendEntry ? "corporate_action" : entry.eventType,
       tradeDate: entry.tradeDate,
       eventTime: formatDateTimeInput(entry.eventTs),
       sequence: entry.sequence?.toString() ?? "",
@@ -732,28 +783,14 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       cashCurrency: entry.cashCurrency ?? "",
       fee: entry.fee?.toString() ?? "",
       tax: entry.tax?.toString() ?? "",
+      feeRate: derivedFeeRate || storedRates.feeRate,
+      taxRate: derivedTaxRate || storedRates.taxRate,
+      cashAmountAuto: entry.cashAmount === null,
       note: entry.note ?? "",
       source: entry.source,
       externalId: entry.externalId ?? "",
-      corporateKind: corporateMeta?.kind ?? "split",
-      corporateNumerator:
-        corporateMeta && corporateMeta.kind !== "info"
-          ? String(corporateMeta.numerator)
-          : "",
-      corporateDenominator:
-        corporateMeta && corporateMeta.kind !== "info"
-          ? String(corporateMeta.denominator)
-          : "",
-      corporateCategory:
-        corporateMeta && corporateMeta.kind === "info"
-          ? corporateMeta.category
-          : "decision",
-      corporateTitle:
-        corporateMeta && corporateMeta.kind === "info" ? corporateMeta.title : "",
-      corporateDescription:
-        corporateMeta && corporateMeta.kind === "info"
-          ? corporateMeta.description ?? ""
-          : ""
+      corporateKind: isDividendEntry ? "dividend" : corporateMeta?.kind ?? "split",
+      corporateAfterShares
     });
     setIsLedgerFormOpen(true);
   }, []);
@@ -775,11 +812,25 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     }
 
     const eventType = ledgerForm.eventType;
+    const isCorporateDividend =
+      eventType === "corporate_action" && ledgerForm.corporateKind === "dividend";
+    const effectiveEventType: LedgerEventType = isCorporateDividend
+      ? "dividend"
+      : eventType;
     const symbol = ledgerForm.symbol.trim();
     const instrumentId = ledgerForm.instrumentId.trim();
     const side = ledgerForm.side || null;
     const cashCurrency = ledgerForm.cashCurrency.trim();
     const priceCurrency = ledgerForm.priceCurrency.trim();
+    const autoFeeTaxEnabled = effectiveEventType === "trade";
+    const normalizedCurrency =
+      effectiveEventType === "trade"
+        ? priceCurrency || cashCurrency || activePortfolio.baseCurrency
+        : cashCurrency || activePortfolio.baseCurrency;
+    const normalizedPriceCurrency =
+      effectiveEventType === "trade" ? normalizedCurrency : priceCurrency;
+    const normalizedCashCurrency =
+      effectiveEventType === "trade" ? normalizedCurrency : cashCurrency;
 
     let eventTs: number | null;
     let sequence: number | null;
@@ -788,6 +839,8 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     let cashAmount: number | null;
     let fee: number | null;
     let tax: number | null;
+    let feeRate: number | null = null;
+    let taxRate: number | null = null;
 
     try {
       eventTs = parseOptionalDateTimeInput(ledgerForm.eventTime, "事件时间");
@@ -797,6 +850,10 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       cashAmount = parseOptionalNumberInput(ledgerForm.cashAmount, "现金腿");
       fee = parseOptionalNumberInput(ledgerForm.fee, "费用");
       tax = parseOptionalNumberInput(ledgerForm.tax, "税费");
+      if (autoFeeTaxEnabled) {
+        feeRate = parseOptionalNumberInput(ledgerForm.feeRate, "费用费率");
+        taxRate = parseOptionalNumberInput(ledgerForm.taxRate, "税费率");
+      }
     } catch (err) {
       setError(toUserErrorMessage(err));
       return;
@@ -826,9 +883,30 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       setError("税费必须为非负数。");
       return;
     }
+    if (autoFeeTaxEnabled) {
+      if (feeRate === null || taxRate === null) {
+        setError("请填写费用费率与税费率。");
+        return;
+      }
+      if (feeRate < 0 || taxRate < 0) {
+        setError("费率与税率不能为负数。");
+        return;
+      }
+      if (quantity === null || price === null || quantity <= 0 || price < 0) {
+        setError("自动计算费用/税费需要填写有效的数量与价格。");
+        return;
+      }
+      const baseAmount = quantity * price;
+      if (!Number.isFinite(baseAmount)) {
+        setError("自动计算费用/税费需要有效的数量与价格。");
+        return;
+      }
+      fee = Number((baseAmount * (feeRate / 100)).toFixed(2));
+      tax = Number((baseAmount * (taxRate / 100)).toFixed(2));
+    }
 
     if (
-      ["trade", "dividend", "adjustment", "corporate_action"].includes(eventType) &&
+      ["trade", "dividend", "adjustment", "corporate_action"].includes(effectiveEventType) &&
       !symbol &&
       !instrumentId
     ) {
@@ -841,7 +919,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       return;
     }
 
-    if (eventType === "trade") {
+    if (effectiveEventType === "trade") {
       if (!side) {
         setError("交易需要填写方向。");
         return;
@@ -868,40 +946,40 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       }
     }
 
-    if (eventType === "cash") {
+    if (effectiveEventType === "cash") {
       if (cashAmount === null || cashAmount === 0) {
         setError("现金流需要填写金额。");
         return;
       }
-      if (!cashCurrency) {
+      if (!normalizedCashCurrency) {
         setError("现金流需要填写币种。");
         return;
       }
     }
 
-    if (eventType === "fee" || eventType === "tax") {
+    if (effectiveEventType === "fee" || effectiveEventType === "tax") {
       if (cashAmount === null || cashAmount >= 0) {
-        setError(`${formatLedgerEventType(eventType)} 需要填写负数金额。`);
+        setError(`${formatLedgerEventType(effectiveEventType)} 需要填写负数金额。`);
         return;
       }
-      if (!cashCurrency) {
-        setError(`${formatLedgerEventType(eventType)} 需要填写币种。`);
+      if (!normalizedCashCurrency) {
+        setError(`${formatLedgerEventType(effectiveEventType)} 需要填写币种。`);
         return;
       }
     }
 
-    if (eventType === "dividend") {
+    if (effectiveEventType === "dividend") {
       if (cashAmount === null || cashAmount <= 0) {
         setError("分红需要填写正数金额。");
         return;
       }
-      if (!cashCurrency) {
+      if (!normalizedCashCurrency) {
         setError("分红需要填写币种。");
         return;
       }
     }
 
-    if (eventType === "adjustment") {
+    if (effectiveEventType === "adjustment") {
       if (!side) {
         setError("持仓调整需要填写方向。");
         return;
@@ -913,46 +991,30 @@ export function Dashboard({ account, onLock }: DashboardProps) {
     }
 
     let meta: CreateLedgerEntryInput["meta"] = null;
-    if (eventType === "corporate_action") {
+    if (eventType === "corporate_action" && !isCorporateDividend) {
       if (ledgerForm.corporateKind === "info") {
-        const title = ledgerForm.corporateTitle.trim();
-        if (!title) {
-          setError("公司行为信息需要填写标题。");
-          return;
-        }
-        meta = {
-          kind: "info",
-          category: ledgerForm.corporateCategory,
-          title,
-          description: ledgerForm.corporateDescription.trim() || null
-        };
-      } else {
-        const numerator = Number(ledgerForm.corporateNumerator);
-        const denominator = Number(ledgerForm.corporateDenominator);
-        if (!Number.isFinite(numerator) || !Number.isInteger(numerator) || numerator <= 0) {
-          setError("拆合股分子需要为正整数。");
-          return;
-        }
-        if (
-          !Number.isFinite(denominator) ||
-          !Number.isInteger(denominator) ||
-          denominator <= 0
-        ) {
-          setError("拆合股分母需要为正整数。");
-          return;
-        }
-        meta = {
-          kind: ledgerForm.corporateKind,
-          numerator,
-          denominator
-        };
+        setError("公司行为不支持信息类型。");
+        return;
       }
+      let ratio: { numerator: number; denominator: number };
+      try {
+        ratio = parseCorporateAfterShares(ledgerForm.corporateAfterShares);
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+        return;
+      }
+      meta = {
+        kind: ledgerForm.corporateKind,
+        numerator: ratio.numerator,
+        denominator: ratio.denominator
+      };
     }
 
+    const payloadEventType = isCorporateDividend ? "dividend" : eventType;
     const payload: CreateLedgerEntryInput = {
       portfolioId: activePortfolio.id,
       accountKey: ledgerForm.accountKey.trim() || null,
-      eventType,
+      eventType: payloadEventType,
       tradeDate,
       eventTs,
       sequence,
@@ -961,9 +1023,9 @@ export function Dashboard({ account, onLock }: DashboardProps) {
       side,
       quantity,
       price,
-      priceCurrency: priceCurrency || null,
+      priceCurrency: normalizedPriceCurrency || null,
       cashAmount,
-      cashCurrency: cashCurrency || null,
+      cashCurrency: normalizedCashCurrency || null,
       fee,
       tax,
       note: ledgerForm.note.trim() || null,
@@ -1563,6 +1625,57 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         <EmptyState message="暂无收益曲线。" />
                       )}
 
+                      {contributionBreakdown ? (
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-xs uppercase tracking-wider text-slate-500">
+                                收益贡献
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                区间 {contributionBreakdown.startDate} ~ {contributionBreakdown.endDate}
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              默认展示 Top {CONTRIBUTION_TOP_N}
+                            </div>
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            按区间起止价格与期末持仓估算。
+                          </div>
+                          {contributionBreakdown.reason && (
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              {contributionBreakdown.reason}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <ContributionTable
+                              title="标的贡献"
+                              entries={contributionBreakdown.bySymbol}
+                              showAll={showAllSymbolContribution}
+                              topCount={CONTRIBUTION_TOP_N}
+                              onToggle={() =>
+                                setShowAllSymbolContribution((prev) => !prev)
+                              }
+                              showMarketValue={showAllSymbolContribution}
+                            />
+                            <ContributionTable
+                              title="资产类别贡献"
+                              labelHeader="类别"
+                              entries={contributionBreakdown.byAssetClass}
+                              showAll={showAllAssetContribution}
+                              topCount={CONTRIBUTION_TOP_N}
+                              onToggle={() =>
+                                setShowAllAssetContribution((prev) => !prev)
+                              }
+                              showMarketValue={showAllAssetContribution}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <EmptyState message="暂无贡献数据。" />
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
                           <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">TWR</div>
@@ -1613,7 +1726,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
               {portfolioTab === "trades" && (
                 <Panel>
                   <div className="mb-2 rounded-none border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 overflow-hidden">
-                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-700">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-200 dark:border-slate-700">
                       <div className="flex items-center gap-2">
                         <span className="material-icons-outlined text-base text-primary">
                           swap_horiz
@@ -1622,8 +1735,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                           交易流水
                         </h3>
                       </div>
-                      <div className="flex items-center gap-2 rounded-none bg-transparent px-2 py-1">
-                        <span className="text-xs text-slate-400">开始日期</span>
+                      <div className="flex items-center gap-2 rounded-none bg-transparent px-2 py-0.5">
                         <Input
                           type="date"
                           value={ledgerStartDate}
@@ -1632,7 +1744,6 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                           disabled={!activePortfolio}
                         />
                         <span className="text-xs text-slate-400">至</span>
-                        <span className="text-xs text-slate-400">结束日期</span>
                         <Input
                           type="date"
                           value={ledgerEndDate}
@@ -1642,19 +1753,16 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                         />
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5">
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
                         <Select
                           value={ledgerFilter}
                           onChange={(e) => setLedgerFilter(e.target.value as LedgerFilter)}
                           options={[
                             { value: "all", label: "全部交易类型" },
-                            ...Object.entries(ledgerEventTypeLabels).map(([value, label]) => ({
-                              value,
-                              label
-                            }))
+                            ...ledgerEventTypeOptions
                           ]}
-                          className="text-[11px] w-40 rounded-none border-0 bg-transparent focus:ring-0 focus:border-transparent px-0"
+                          className="text-[11px] w-40 rounded-none border-0 !bg-transparent dark:!bg-transparent text-primary focus:ring-0 focus:border-transparent pl-2 pr-6"
                           disabled={!activePortfolio}
                         />
                         <span className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
@@ -1688,9 +1796,13 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                           variant="primary"
                           size="sm"
                           icon="add"
-                          className="rounded-none px-2 py-1 text-[11px]"
+                          className={`rounded-none px-2 py-1 text-[11px] ${
+                            isLedgerFormOpen || Boolean(ledgerForm.id)
+                              ? "bg-slate-400 border-slate-400 hover:bg-slate-400 text-white"
+                              : ""
+                          }`}
                           onClick={handleOpenLedgerForm}
-                          disabled={!activePortfolio}
+                          disabled={!activePortfolio || isLedgerFormOpen || Boolean(ledgerForm.id)}
                         >
                           录入
                         </Button>
@@ -1713,7 +1825,7 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                   )}
 
                   {activePortfolio && (isLedgerFormOpen || Boolean(ledgerForm.id)) && (
-                    <div className="mb-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-lg p-4">
+                    <div className="mb-3 bg-cyan-50/45 dark:bg-cyan-950/20 border border-slate-200 dark:border-slate-800 border-t-0 border-l-2 border-r-2 border-b-2 border-l-cyan-300 border-r-cyan-300 border-b-cyan-300 dark:border-l-cyan-800 dark:border-r-cyan-800 dark:border-b-cyan-800 rounded-none p-3">
                       <LedgerForm
                         form={ledgerForm}
                         baseCurrency={activePortfolio.baseCurrency}
@@ -1740,7 +1852,111 @@ export function Dashboard({ account, onLock }: DashboardProps) {
                 </Panel>
               )}
 
-              {["risk", "allocation", "corporate"].includes(portfolioTab) && (
+              {portfolioTab === "risk" && (
+                <Panel>
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">风险指标</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        波动率与最大回撤基于区间曲线计算。
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {performanceRanges.map((range) => {
+                        const isActive = performanceRange === range.key;
+                        return (
+                          <button
+                            key={range.key}
+                            type="button"
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                              isActive
+                                ? "bg-primary text-white border-primary"
+                                : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white"
+                            }`}
+                            onClick={() => setPerformanceRange(range.key)}
+                          >
+                            {range.label}
+                          </button>
+                        );
+                      })}
+                      <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300 ml-2">
+                        <input
+                          type="checkbox"
+                          checked={riskAnnualized}
+                          onChange={(e) => setRiskAnnualized(e.target.checked)}
+                          className="h-3.5 w-3.5 rounded-none border-slate-300 text-primary focus:ring-primary"
+                        />
+                        年化波动
+                      </label>
+                    </div>
+                  </div>
+
+                  {performanceLoading && <EmptyState message="正在加载风险指标..." />}
+                  {!performanceLoading && performanceError && (
+                    <ErrorState
+                      message={performanceError}
+                      onRetry={() => {
+                        if (!activePortfolioId) return;
+                        loadPerformance(activePortfolioId, performanceRange).catch((err) =>
+                          setPerformanceError(toUserErrorMessage(err))
+                        );
+                      }}
+                    />
+                  )}
+                  {!performanceLoading && !performanceError && !activePortfolio && (
+                    <EmptyState message="请先选择或创建组合。" />
+                  )}
+                  {!performanceLoading &&
+                    !performanceError &&
+                    activePortfolio &&
+                    !performanceResult && <EmptyState message="暂无风险数据。" />}
+
+                  {!performanceLoading &&
+                    !performanceError &&
+                    activePortfolio && (
+                      <div className="space-y-4">
+                        {riskMetrics ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <RiskMetricCard
+                              title="估值曲线"
+                              metrics={riskMetrics.nav}
+                              annualized={riskAnnualized}
+                            />
+                            <RiskMetricCard
+                              title="TWR 曲线"
+                              metrics={riskMetrics.twr}
+                              annualized={riskAnnualized}
+                            />
+                          </div>
+                        ) : (
+                          <EmptyState message="暂无风险指标。" />
+                        )}
+                        {snapshot && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-700/60 rounded-lg p-4">
+                              <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">
+                                集中度 (HHI)
+                              </div>
+                              <div className="text-2xl font-mono text-slate-800 dark:text-slate-100">
+                                {hhiValue === null ? "--" : hhiValue.toFixed(3)}
+                              </div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                阈值 {HHI_WARN_THRESHOLD.toFixed(2)}
+                              </div>
+                              {hhiValue !== null && hhiValue >= HHI_WARN_THRESHOLD && (
+                                <div className="mt-2 text-xs text-rose-600 dark:text-rose-400">
+                                  集中度偏高，请关注单一标的风险。
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                </Panel>
+              )}
+
+              {["allocation", "corporate"].includes(portfolioTab) && (
                 <PlaceholderPanel
                   title={portfolioTabs.find((tab) => tab.key === portfolioTab)?.label ?? ""}
                   description={portfolioTabs.find((tab) => tab.key === portfolioTab)?.description ?? ""}
@@ -2001,7 +2217,7 @@ function PlaceholderPanel({ title, description }: { title: string, description: 
 function FormGroup({ label, children }: { label: React.ReactNode, children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{label}</label>
+      <label className="block text-sm font-medium text-slate-500 dark:text-slate-400">{label}</label>
       {children}
     </div>
   );
@@ -2156,13 +2372,54 @@ function ErrorState({ message, onRetry }: { message: string; onRetry?: () => voi
 }
 
 function HelpHint({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleOpen = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+    timerRef.current = setTimeout(() => setOpen(true), 500);
+  };
+
+  const closeHint = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setOpen(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
   return (
     <span
-      className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-300 dark:border-slate-600 text-[10px] text-slate-500 dark:text-slate-300 cursor-help"
-      title={text}
-      aria-label={text}
+      className="relative inline-flex items-center"
+      onMouseEnter={scheduleOpen}
+      onMouseLeave={closeHint}
+      onFocus={scheduleOpen}
+      onBlur={closeHint}
     >
-      ?
+      <span
+        className="inline-flex items-center justify-center w-4 h-4 rounded-none border border-slate-300 dark:border-slate-600 text-[10px] text-slate-500 dark:text-slate-300 cursor-help"
+        aria-label={text}
+      >
+        ?
+      </span>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-1/2 top-full z-20 mt-1 w-max max-w-xs -translate-x-1/2 whitespace-normal rounded-none border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-white shadow-lg"
+        >
+          {text}
+        </span>
+      )}
     </span>
   );
 }
@@ -2381,53 +2638,500 @@ interface LedgerFormProps {
 
 function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: LedgerFormProps) {
   const isEditing = Boolean(form.id);
+  const isCorporateDividend =
+    form.eventType === "corporate_action" && form.corporateKind === "dividend";
+  const effectiveEventType: LedgerEventType = isCorporateDividend
+    ? "dividend"
+    : form.eventType;
   const usesInstrument = [
     "trade",
     "dividend",
     "adjustment",
     "corporate_action"
-  ].includes(form.eventType);
-  const usesSide = ["trade", "adjustment"].includes(form.eventType);
-  const usesQuantity = ["trade", "adjustment"].includes(form.eventType);
-  const usesPrice = ["trade", "adjustment"].includes(form.eventType);
+  ].includes(effectiveEventType);
+  const usesSide = ["trade", "adjustment"].includes(effectiveEventType);
+  const usesQuantity = ["trade", "adjustment"].includes(effectiveEventType);
+  const usesPrice = ["trade", "adjustment"].includes(effectiveEventType);
   const usesCash = ["trade", "cash", "fee", "tax", "dividend"].includes(
-    form.eventType
+    effectiveEventType
   );
   const usesFeeTax = form.eventType === "trade";
+  const tradeDateMissing = form.tradeDate.trim() === "";
+  const instrumentMissing =
+    usesInstrument &&
+    form.symbol.trim() === "" &&
+    form.instrumentId.trim() === "";
+  const sideMissing = usesSide && !form.side;
+  const quantityMissing = usesQuantity && form.quantity.trim() === "";
+  const priceMissing = usesPrice && form.price.trim() === "";
+  const cashAmountMissing = usesCash && form.cashAmount.trim() === "";
+  const corporateAfterSharesMissing =
+    form.eventType === "corporate_action" &&
+    form.corporateKind !== "info" &&
+    form.corporateKind !== "dividend" &&
+    form.corporateAfterShares.trim() === "";
+  const missingHintClass =
+    "text-rose-600 dark:text-rose-400 placeholder:text-rose-500 dark:placeholder:text-rose-400";
+  const compactInputClass = "h-8 py-1 text-xs sm:text-xs rounded-none";
+  const compactSelectClass = "h-8 py-1 text-xs sm:text-xs rounded-none";
+  const isDeprecatedEventType =
+    form.eventType === "fee" ||
+    form.eventType === "tax" ||
+    form.eventType === "adjustment";
+  const showCorporateControls = form.eventType === "corporate_action";
+  const corporateKindOptions =
+    form.corporateKind === "info"
+      ? [
+          { value: "split", label: corporateActionKindLabels.split },
+          { value: "reverse_split", label: corporateActionKindLabels.reverse_split },
+          { value: "info", label: "信息（历史）", disabled: true }
+        ]
+      : [
+          { value: "split", label: corporateActionKindLabels.split },
+          { value: "reverse_split", label: corporateActionKindLabels.reverse_split },
+          { value: "dividend", label: corporateActionKindLabels.dividend }
+        ];
+  const eventTypeOptions = isDeprecatedEventType
+    ? [
+        ...ledgerEventTypeOptions,
+        {
+          value: form.eventType,
+          label: ledgerEventTypeLabels[form.eventType],
+          disabled: true
+        }
+      ]
+    : ledgerEventTypeOptions;
+  const showPrimaryInstrumentRow =
+    usesInstrument || usesSide || usesQuantity || usesPrice;
+  const shouldAutoFeeTax = form.eventType === "trade";
+  const shouldAutoCashAmount = form.eventType === "trade" && form.cashAmountAuto;
+
+  useEffect(() => {
+    if (!shouldAutoFeeTax) return;
+    const quantity = Number(form.quantity);
+    const price = Number(form.price);
+    if (!Number.isFinite(quantity) || !Number.isFinite(price) || quantity <= 0 || price < 0) {
+      return;
+    }
+    const feeRateRaw =
+      form.feeRate.trim() === "" ? null : Number(form.feeRate);
+    const taxRateRaw =
+      form.taxRate.trim() === "" ? null : Number(form.taxRate);
+    const updates: Partial<LedgerFormState> = {};
+
+    if (feeRateRaw !== null && Number.isFinite(feeRateRaw) && feeRateRaw >= 0) {
+      const feeValue = (quantity * price * (feeRateRaw / 100)).toFixed(2);
+      if (feeValue !== form.fee) {
+        updates.fee = feeValue;
+      }
+    }
+    if (taxRateRaw !== null && Number.isFinite(taxRateRaw) && taxRateRaw >= 0) {
+      const taxValue = (quantity * price * (taxRateRaw / 100)).toFixed(2);
+      if (taxValue !== form.tax) {
+        updates.tax = taxValue;
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      onChange(updates);
+    }
+  }, [
+    shouldAutoFeeTax,
+    form.quantity,
+    form.price,
+    form.feeRate,
+    form.taxRate,
+    form.fee,
+    form.tax,
+    onChange
+  ]);
+
+  useEffect(() => {
+    if (!shouldAutoCashAmount) return;
+    if (!form.side) return;
+    const quantity = Number(form.quantity);
+    const price = Number(form.price);
+    if (!Number.isFinite(quantity) || !Number.isFinite(price) || quantity <= 0 || price < 0) {
+      return;
+    }
+    const feeRaw = Number(form.fee);
+    const taxRaw = Number(form.tax);
+    const feeValue = Number.isFinite(feeRaw) ? feeRaw : 0;
+    const taxValue = Number.isFinite(taxRaw) ? taxRaw : 0;
+    const baseAmount = quantity * price;
+    const signedAmount = form.side === "buy" ? -baseAmount : baseAmount;
+    const nextCashAmount = (signedAmount - feeValue - taxValue).toFixed(2);
+    if (nextCashAmount !== form.cashAmount) {
+      onChange({ cashAmount: nextCashAmount });
+    }
+  }, [
+    shouldAutoCashAmount,
+    form.side,
+    form.quantity,
+    form.price,
+    form.fee,
+    form.tax,
+    form.cashAmount,
+    onChange
+  ]);
+
+  useEffect(() => {
+    if (form.eventType !== "trade") return;
+    if (form.feeRate.trim() || form.taxRate.trim()) return;
+    const storedRates = loadStoredRates(form.eventType);
+    if (storedRates.feeRate || storedRates.taxRate) {
+      onChange({
+        feeRate: storedRates.feeRate,
+        taxRate: storedRates.taxRate
+      });
+    }
+  }, [form.eventType, form.feeRate, form.taxRate, onChange]);
+
+  useEffect(() => {
+    if (form.eventType !== "trade") return;
+    const feeRateValue =
+      form.feeRate.trim() === "" ? null : Number(form.feeRate);
+    const taxRateValue =
+      form.taxRate.trim() === "" ? null : Number(form.taxRate);
+    if (
+      feeRateValue === null ||
+      taxRateValue === null ||
+      !Number.isFinite(feeRateValue) ||
+      !Number.isFinite(taxRateValue) ||
+      feeRateValue < 0 ||
+      taxRateValue < 0
+    ) {
+      return;
+    }
+    saveStoredRates(form.eventType, form.feeRate.trim(), form.taxRate.trim());
+  }, [form.eventType, form.feeRate, form.taxRate]);
+
+  useEffect(() => {
+    if (form.eventType !== "trade") return;
+    if (!form.priceCurrency) return;
+    if (form.cashCurrency !== form.priceCurrency) {
+      onChange({ cashCurrency: form.priceCurrency });
+    }
+  }, [form.eventType, form.priceCurrency, form.cashCurrency, onChange]);
+
+  const corporateKindField = showCorporateControls ? (
+    <FormGroup label="事件类型">
+      <Select
+        value={form.corporateKind}
+        onChange={(e) =>
+          onChange({ corporateKind: e.target.value as CorporateActionKindUi })
+        }
+        options={corporateKindOptions}
+        className={compactSelectClass}
+      />
+    </FormGroup>
+  ) : null;
+
+  const cashLegField = usesCash ? (
+    <FormGroup
+      label={
+        <span className="inline-flex items-center gap-1">
+          现金腿
+          <HelpHint text="买入为负，卖出为正；费用/税费为负；分红为正。" />
+        </span>
+      }
+    >
+      <Input
+        type="number"
+        value={form.cashAmount}
+        onChange={(e) => {
+          const nextValue = e.target.value;
+          onChange({
+            cashAmount: nextValue,
+            cashAmountAuto: nextValue.trim() === ""
+          });
+        }}
+        placeholder="0.00"
+        className={`${cashAmountMissing ? missingHintClass : ""} ${compactInputClass}`}
+      />
+    </FormGroup>
+  ) : null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
-          <span className="material-icons-outlined text-primary text-base">
-            edit_note
-          </span>
-          {isEditing ? "编辑流水" : "新增流水"}
-        </h3>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <FormGroup label="事件类型">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-primary flex items-center gap-2">
+            <span
+              className="material-icons-outlined text-primary text-base"
+              aria-label={isEditing ? "编辑流水" : "新增流水"}
+            >
+              edit_note
+            </span>
+            <span className="sr-only">
+              {isEditing ? "编辑流水" : "新增流水"}
+            </span>
+          </h3>
           <Select
             value={form.eventType}
             onChange={(e) =>
-              onChange({
-                eventType: e.target.value as LedgerEventType,
-                cashCurrency: form.cashCurrency || baseCurrency,
-                priceCurrency: form.priceCurrency || baseCurrency
-              })
+              {
+                const nextCurrency =
+                  form.priceCurrency || form.cashCurrency || baseCurrency;
+                const nextEventType = e.target.value as LedgerEventType;
+                onChange({
+                  eventType: nextEventType,
+                  cashCurrency: nextCurrency,
+                  priceCurrency: nextCurrency,
+                  cashAmountAuto: true
+                });
+              }
             }
-            options={Object.entries(ledgerEventTypeLabels).map(([value, label]) => ({
-              value,
-              label
-            }))}
+            options={eventTypeOptions}
+            className="h-6 w-32 rounded-none border-0 !bg-transparent dark:!bg-transparent py-0 pl-2 pr-6 text-[11px] focus:ring-0 focus:border-transparent"
           />
-        </FormGroup>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            className="rounded-none px-2 py-1 text-[11px]"
+            onClick={onSubmit}
+          >
+            保存
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="rounded-none px-2 py-1 text-[11px]"
+            onClick={onCancel}
+          >
+            取消
+          </Button>
+        </div>
+      </div>
+      <div className="border-t border-slate-200 dark:border-slate-800" />
+
+      <div className="space-y-2">
+        {showPrimaryInstrumentRow && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+            {usesInstrument && (
+              <FormGroup label="代码">
+                <Input
+                  value={form.symbol}
+                  onChange={(e) => onChange({ symbol: e.target.value })}
+                  placeholder="例如: 600519.SH"
+                  className={`${instrumentMissing ? missingHintClass : ""} ${compactInputClass}`}
+                />
+              </FormGroup>
+            )}
+              {usesSide && (
+                <FormGroup label="方向">
+                  <div
+                    role="group"
+                    aria-label="方向"
+                    className={`grid grid-cols-2 overflow-hidden rounded-none border ${
+                      sideMissing
+                        ? "border-rose-500"
+                        : "border-slate-300 dark:border-slate-700"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={form.side === "buy"}
+                      onClick={() => onChange({ side: "buy" })}
+                      className={`h-8 px-2 text-xs ${
+                        form.side === "buy"
+                          ? "bg-primary text-white"
+                          : "bg-transparent text-slate-500 dark:text-slate-400"
+                      } border-r border-slate-300 dark:border-slate-700`}
+                    >
+                      买入
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={form.side === "sell"}
+                      onClick={() => onChange({ side: "sell" })}
+                      className={`h-8 px-2 text-xs ${
+                        form.side === "sell"
+                          ? "bg-primary text-white"
+                          : "bg-transparent text-slate-500 dark:text-slate-400"
+                      }`}
+                    >
+                      卖出
+                    </button>
+                  </div>
+                </FormGroup>
+              )}
+              {usesQuantity && (
+                <FormGroup label="数量">
+                  <Input
+                    type="number"
+                    value={form.quantity}
+                    onChange={(e) => onChange({ quantity: e.target.value })}
+                    placeholder="0"
+                    className={`${quantityMissing ? missingHintClass : ""} ${compactInputClass}`}
+                  />
+                </FormGroup>
+              )}
+              {usesPrice && (
+                <FormGroup label="价格">
+                  <Input
+                    type="number"
+                    value={form.price}
+                    onChange={(e) => onChange({ price: e.target.value })}
+                    placeholder="0.00"
+                    className={`${priceMissing ? missingHintClass : ""} ${compactInputClass}`}
+                  />
+                </FormGroup>
+              )}
+              {usesPrice && (
+                <FormGroup label="价格币种">
+                  <Input
+                    value={form.priceCurrency}
+                    onChange={(e) => {
+                      const nextCurrency = e.target.value;
+                      onChange({ priceCurrency: nextCurrency, cashCurrency: nextCurrency });
+                    }}
+                    placeholder={baseCurrency}
+                    className={compactInputClass}
+                  />
+                </FormGroup>
+              )}
+              {usesInstrument && (
+                <FormGroup
+                  label={
+                    <span className="inline-flex items-center gap-1">
+                      标的标识
+                      <HelpHint text="用于绑定稳定标的编号；可选，留空时使用代码。"/>
+                    </span>
+                  }
+                >
+                  <Input
+                    value={form.instrumentId}
+                    onChange={(e) => onChange({ instrumentId: e.target.value })}
+                    placeholder="可选"
+                    className={compactInputClass}
+                  />
+              </FormGroup>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+          {isCorporateDividend ? (
+            <>
+              {corporateKindField}
+              {cashLegField}
+            </>
+          ) : (
+            <>
+              {cashLegField}
+              {corporateKindField}
+            </>
+          )}
+          {showCorporateControls &&
+            !isCorporateDividend &&
+            form.corporateKind !== "info" && (
+            <FormGroup
+              label={
+                <span className="inline-flex items-center gap-1">
+                  调整后股数
+                  <HelpHint text="当前 1 股调整后变为多少股。" />
+                </span>
+              }
+            >
+              <Input
+                type="number"
+                value={form.corporateAfterShares}
+                onChange={(e) => onChange({ corporateAfterShares: e.target.value })}
+                placeholder="例如: 2 或 0.5"
+                className={`${corporateAfterSharesMissing ? missingHintClass : ""} ${compactInputClass}`}
+              />
+            </FormGroup>
+          )}
+          {usesFeeTax && (
+            <FormGroup label="费率 %">
+              <Input
+                type="number"
+                value={form.feeRate}
+                onChange={(e) => onChange({ feeRate: e.target.value })}
+                placeholder="0.03"
+                className={compactInputClass}
+              />
+            </FormGroup>
+          )}
+          {usesFeeTax && (
+            <FormGroup label="税率 %">
+              <Input
+                type="number"
+                value={form.taxRate}
+                onChange={(e) => onChange({ taxRate: e.target.value })}
+                placeholder="0.1"
+                className={compactInputClass}
+              />
+            </FormGroup>
+          )}
+          {usesFeeTax && (
+            <FormGroup
+              label={
+                <span className="inline-flex items-center gap-1">
+                  费用
+                  <HelpHint text="交易手续费或佣金，通常为正数。"/>
+                </span>
+              }
+            >
+              <Input
+                type="number"
+                value={form.fee}
+                onChange={(e) => onChange({ fee: e.target.value })}
+                placeholder="0.00"
+                disabled
+                className={compactInputClass}
+              />
+            </FormGroup>
+          )}
+          {usesFeeTax && (
+            <FormGroup
+              label={
+                <span className="inline-flex items-center gap-1">
+                  税费
+                  <HelpHint text="交易相关税费，通常为正数。"/>
+                </span>
+              }
+            >
+              <Input
+                type="number"
+                value={form.tax}
+                onChange={(e) => onChange({ tax: e.target.value })}
+                placeholder="0.00"
+                disabled
+                className={compactInputClass}
+              />
+            </FormGroup>
+          )}
+          <FormGroup
+            label={
+              <span className="inline-flex items-center gap-1">
+                外部标识
+                <HelpHint text="用于导入对账或去重的外部流水编号，可选。"/>
+              </span>
+            }
+          >
+            <Input
+              value={form.externalId}
+              onChange={(e) => onChange({ externalId: e.target.value })}
+              placeholder="可选"
+              className={compactInputClass}
+            />
+          </FormGroup>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-200 dark:border-slate-800" />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
         <FormGroup label="交易日期">
           <Input
             type="date"
             value={form.tradeDate}
             onChange={(e) => onChange({ tradeDate: e.target.value })}
+            className={`${tradeDateMissing ? missingHintClass : ""} ${compactInputClass}`}
           />
         </FormGroup>
         <FormGroup label="事件时间">
@@ -2435,6 +3139,7 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
             type="datetime-local"
             value={form.eventTime}
             onChange={(e) => onChange({ eventTime: e.target.value })}
+            className={compactInputClass}
           />
         </FormGroup>
         <FormGroup label="排序序号">
@@ -2443,139 +3148,22 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
             value={form.sequence}
             onChange={(e) => onChange({ sequence: e.target.value })}
             placeholder="同日顺序"
+            className={compactInputClass}
           />
         </FormGroup>
-
-        {usesInstrument && (
-          <FormGroup label="代码">
-            <Input
-              value={form.symbol}
-              onChange={(e) => onChange({ symbol: e.target.value })}
-              placeholder="例如: 600519.SH"
-            />
-          </FormGroup>
-        )}
-        {usesInstrument && (
-          <FormGroup label="标的标识">
-            <Input
-              value={form.instrumentId}
-              onChange={(e) => onChange({ instrumentId: e.target.value })}
-              placeholder="可选"
-            />
-          </FormGroup>
-        )}
-        {usesSide && (
-          <FormGroup label="方向">
-            <Select
-              value={form.side}
-              onChange={(e) => onChange({ side: e.target.value as LedgerSide })}
-              options={[
-                { value: "", label: "请选择", disabled: true },
-                { value: "buy", label: ledgerSideLabels.buy },
-                { value: "sell", label: ledgerSideLabels.sell }
-              ]}
-            />
-          </FormGroup>
-        )}
-        {usesQuantity && (
-          <FormGroup label="数量">
-            <Input
-              type="number"
-              value={form.quantity}
-              onChange={(e) => onChange({ quantity: e.target.value })}
-              placeholder="0"
-            />
-          </FormGroup>
-        )}
-        {usesPrice && (
-          <FormGroup label="价格">
-            <Input
-              type="number"
-              value={form.price}
-              onChange={(e) => onChange({ price: e.target.value })}
-              placeholder="0.00"
-            />
-          </FormGroup>
-        )}
-        {usesPrice && (
-          <FormGroup label="价格币种">
-            <Input
-              value={form.priceCurrency}
-              onChange={(e) => onChange({ priceCurrency: e.target.value })}
-              placeholder={baseCurrency}
-            />
-          </FormGroup>
-        )}
-        {usesCash && (
-          <FormGroup
-            label={
-              <span className="inline-flex items-center gap-1">
-                现金腿
-                <HelpHint text="买入为负，卖出为正；费用/税费为负；分红为正。" />
-              </span>
-            }
-          >
-            <Input
-              type="number"
-              value={form.cashAmount}
-              onChange={(e) => onChange({ cashAmount: e.target.value })}
-              placeholder="0.00"
-            />
-          </FormGroup>
-        )}
-        {usesCash && (
-          <FormGroup label="现金币种">
-            <Input
-              value={form.cashCurrency}
-              onChange={(e) => onChange({ cashCurrency: e.target.value })}
-              placeholder={baseCurrency}
-            />
-          </FormGroup>
-        )}
-        {usesFeeTax && (
-          <FormGroup label="费用">
-            <Input
-              type="number"
-              value={form.fee}
-              onChange={(e) => onChange({ fee: e.target.value })}
-              placeholder="0.00"
-            />
-          </FormGroup>
-        )}
-        {usesFeeTax && (
-          <FormGroup label="税费">
-            <Input
-              type="number"
-              value={form.tax}
-              onChange={(e) => onChange({ tax: e.target.value })}
-              placeholder="0.00"
-            />
-          </FormGroup>
-        )}
-        <FormGroup label="来源">
-          <Select
-            value={form.source}
-            onChange={(e) => onChange({ source: e.target.value as LedgerSource })}
-            options={[
-              { value: "manual", label: ledgerSourceLabels.manual },
-              { value: "csv", label: ledgerSourceLabels.csv },
-              { value: "broker_import", label: ledgerSourceLabels.broker_import },
-              { value: "system", label: ledgerSourceLabels.system, disabled: true }
-            ]}
-          />
-        </FormGroup>
-        <FormGroup label="外部标识">
-          <Input
-            value={form.externalId}
-            onChange={(e) => onChange({ externalId: e.target.value })}
-            placeholder="可选"
-          />
-        </FormGroup>
-        <FormGroup label="账户标识">
+        <FormGroup
+          label={
+            <span className="inline-flex items-center gap-1">
+              账户标识
+              <HelpHint text="多账户预留字段，当前可留空。"/>
+            </span>
+          }
+        >
           <Input
             value={form.accountKey}
             onChange={(e) => onChange({ accountKey: e.target.value })}
             placeholder="可选"
+            className={compactInputClass}
           />
         </FormGroup>
         <FormGroup label="备注">
@@ -2583,96 +3171,11 @@ function LedgerForm({ form, baseCurrency, onChange, onSubmit, onCancel }: Ledger
             value={form.note}
             onChange={(e) => onChange({ note: e.target.value })}
             placeholder="可选"
+            className={compactInputClass}
           />
         </FormGroup>
       </div>
 
-      {form.eventType === "corporate_action" && (
-        <div className="mt-4 border-t border-slate-200 dark:border-slate-800 pt-4">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
-            公司行为详情
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <FormGroup label="事件类型">
-              <Select
-                value={form.corporateKind}
-                onChange={(e) =>
-                  onChange({ corporateKind: e.target.value as CorporateActionKind })
-                }
-                options={Object.entries(corporateActionKindLabels).map(
-                  ([value, label]) => ({
-                    value,
-                    label
-                  })
-                )}
-              />
-            </FormGroup>
-
-            {form.corporateKind === "info" ? (
-              <>
-                <FormGroup label="分类">
-                  <Select
-                    value={form.corporateCategory}
-                    onChange={(e) =>
-                      onChange({
-                        corporateCategory: e.target.value as CorporateActionCategory
-                      })
-                    }
-                    options={Object.entries(corporateActionCategoryLabels).map(
-                      ([value, label]) => ({
-                        value,
-                        label
-                      })
-                    )}
-                  />
-                </FormGroup>
-                <FormGroup label="标题">
-                  <Input
-                    value={form.corporateTitle}
-                    onChange={(e) => onChange({ corporateTitle: e.target.value })}
-                    placeholder="例如：董事会决议"
-                  />
-                </FormGroup>
-                <FormGroup label="描述">
-                  <Input
-                    value={form.corporateDescription}
-                    onChange={(e) => onChange({ corporateDescription: e.target.value })}
-                    placeholder="可选"
-                  />
-                </FormGroup>
-              </>
-            ) : (
-              <>
-                <FormGroup label="分子">
-                  <Input
-                    type="number"
-                    value={form.corporateNumerator}
-                    onChange={(e) => onChange({ corporateNumerator: e.target.value })}
-                    placeholder="2"
-                  />
-                </FormGroup>
-                <FormGroup label="分母">
-                  <Input
-                    type="number"
-                    value={form.corporateDenominator}
-                    onChange={(e) => onChange({ corporateDenominator: e.target.value })}
-                    placeholder="1"
-                  />
-                </FormGroup>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="flex gap-2 pt-2">
-        <Button variant="primary" onClick={onSubmit} icon="save">
-          保存
-        </Button>
-        <Button variant="secondary" onClick={onCancel}>
-          取消
-        </Button>
-      </div>
     </div>
   );
 }
@@ -2771,6 +3274,15 @@ function formatPerformanceMethod(value: PerformanceMethod): string {
 function formatDateRange(start: string | null | undefined, end: string | null | undefined): string {
   if (!start || !end) return "--";
   return `${start} ~ ${end}`;
+}
+
+function sortContributionEntries(entries: ContributionEntry[]): ContributionEntry[] {
+  return [...entries].sort((a, b) => {
+    const aScore = a.contribution === null ? -Infinity : Math.abs(a.contribution);
+    const bScore = b.contribution === null ? -Infinity : Math.abs(b.contribution);
+    if (aScore !== bScore) return bScore - aScore;
+    return b.marketValue - a.marketValue;
+  });
 }
 
 function formatAssetClassLabel(value: string): string {
@@ -2888,6 +3400,54 @@ function formatInputDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+const LEDGER_RATE_STORAGE_PREFIX = "mytrader:ledger:rates:";
+
+function loadStoredRates(eventType: LedgerEventType): { feeRate: string; taxRate: string } {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return { feeRate: "", taxRate: "" };
+  }
+  try {
+    const raw = window.localStorage.getItem(`${LEDGER_RATE_STORAGE_PREFIX}${eventType}`);
+    if (!raw) return { feeRate: "", taxRate: "" };
+    const parsed = JSON.parse(raw) as { feeRate?: string; taxRate?: string };
+    return {
+      feeRate: typeof parsed.feeRate === "string" ? parsed.feeRate : "",
+      taxRate: typeof parsed.taxRate === "string" ? parsed.taxRate : ""
+    };
+  } catch {
+    return { feeRate: "", taxRate: "" };
+  }
+}
+
+function saveStoredRates(eventType: LedgerEventType, feeRate: string, taxRate: string) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(
+      `${LEDGER_RATE_STORAGE_PREFIX}${eventType}`,
+      JSON.stringify({ feeRate, taxRate })
+    );
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function deriveRateValue(
+  amount: number | null | undefined,
+  quantity: number | null | undefined,
+  price: number | null | undefined
+): string {
+  if (amount === null || amount === undefined) return "";
+  if (quantity === null || quantity === undefined) return "";
+  if (price === null || price === undefined) return "";
+  const base = quantity * price;
+  if (!Number.isFinite(base) || base === 0) return "";
+  const rate = (amount / base) * 100;
+  if (!Number.isFinite(rate)) return "";
+  return rate
+    .toFixed(4)
+    .replace(/\.?0+$/, "");
+}
+
 function parseOptionalNumberInput(value: string, field: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -2908,6 +3468,47 @@ function parseOptionalIntegerInput(value: string, field: string): number | null 
   return num;
 }
 
+function formatCorporateAfterShares(numerator: number, denominator: number): string {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return "";
+  }
+  const value = numerator / denominator;
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return value.toFixed(4).replace(/\.?0+$/, "");
+}
+
+function parseCorporateAfterShares(value: string): { numerator: number; denominator: number } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("调整后股数不能为空。");
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error("调整后股数必须为正数。");
+  }
+  const scale = 10000;
+  const scaled = Math.round(parsed * scale);
+  if (!Number.isFinite(scaled) || scaled <= 0) {
+    throw new Error("调整后股数必须为正数。");
+  }
+  const divisor = greatestCommonDivisor(scaled, scale);
+  return {
+    numerator: scaled / divisor,
+    denominator: scale / divisor
+  };
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a));
+  let y = Math.abs(Math.trunc(b));
+  while (y !== 0) {
+    const temp = y;
+    y = x % y;
+    x = temp;
+  }
+  return x || 1;
+}
+
 function parseOptionalDateTimeInput(value: string, field: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -2919,6 +3520,7 @@ function parseOptionalDateTimeInput(value: string, field: string): number | null
 }
 
 function createEmptyLedgerForm(baseCurrency: string): LedgerFormState {
+  const storedRates = loadStoredRates("trade");
   return {
     eventType: "trade",
     tradeDate: formatInputDate(new Date()),
@@ -2935,15 +3537,14 @@ function createEmptyLedgerForm(baseCurrency: string): LedgerFormState {
     cashCurrency: baseCurrency,
     fee: "",
     tax: "",
+    feeRate: storedRates.feeRate,
+    taxRate: storedRates.taxRate,
+    cashAmountAuto: true,
     note: "",
     source: "manual",
     externalId: "",
     corporateKind: "split",
-    corporateNumerator: "",
-    corporateDenominator: "",
-    corporateCategory: "decision",
-    corporateTitle: "",
-    corporateDescription: ""
+    corporateAfterShares: ""
   };
 }
 
@@ -3007,6 +3608,139 @@ function PerformanceChart({ series }: { series: PortfolioPerformanceSeries }) {
       </div>
       {series.reason && (
         <p className="text-xs text-slate-400 mt-2">{series.reason}</p>
+      )}
+    </div>
+  );
+}
+
+interface ContributionTableProps {
+  title: string;
+  entries: ContributionEntry[];
+  labelHeader?: string;
+  showAll: boolean;
+  topCount: number;
+  showMarketValue: boolean;
+  onToggle: () => void;
+}
+
+function ContributionTable({
+  title,
+  entries,
+  labelHeader,
+  showAll,
+  topCount,
+  showMarketValue,
+  onToggle
+}: ContributionTableProps) {
+  const sorted = sortContributionEntries(entries);
+  const visible = showAll ? sorted : sorted.slice(0, topCount);
+  const canToggle = entries.length > topCount;
+
+  return (
+    <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-700/60 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs uppercase tracking-wider text-slate-500">{title}</div>
+        {canToggle && (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="text-xs text-primary hover:text-primary/80"
+          >
+            {showAll ? "收起" : "展开全部"}
+          </button>
+        )}
+      </div>
+      {visible.length === 0 ? (
+        <div className="text-xs text-slate-400">暂无数据</div>
+      ) : (
+        <div className="overflow-hidden border border-slate-200 dark:border-slate-800">
+          <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
+            <thead className="bg-slate-50 dark:bg-slate-900">
+              <tr>
+                <th className="px-3 py-2 text-left text-[11px] font-semibold text-slate-500 uppercase">
+                  {labelHeader ?? "标的"}
+                </th>
+                <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-500 uppercase">
+                  权重
+                </th>
+                <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-500 uppercase">
+                  区间涨跌
+                </th>
+                <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-500 uppercase">
+                  贡献
+                </th>
+                {showMarketValue && (
+                  <th className="px-3 py-2 text-right text-[11px] font-semibold text-slate-500 uppercase">
+                    市值
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="bg-white dark:bg-surface-dark/70 divide-y divide-slate-200 dark:divide-border-dark">
+              {visible.map((entry) => (
+                <tr key={entry.key}>
+                  <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200">
+                    {entry.label}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-right font-mono text-slate-600 dark:text-slate-300">
+                    {formatPct(entry.weight)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-right font-mono text-slate-600 dark:text-slate-300">
+                    {formatPctNullable(entry.returnPct)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-right font-mono text-slate-700 dark:text-slate-100">
+                    {formatPctNullable(entry.contribution)}
+                  </td>
+                  {showMarketValue && (
+                    <td className="px-3 py-2 text-xs text-right font-mono text-slate-600 dark:text-slate-300">
+                      {formatCurrency(entry.marketValue)}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface RiskMetricCardProps {
+  title: string;
+  metrics: RiskSeriesMetrics;
+  annualized: boolean;
+}
+
+function RiskMetricCard({ title, metrics, annualized }: RiskMetricCardProps) {
+  const volatility = annualized ? metrics.volatilityAnnualized : metrics.volatility;
+  return (
+    <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-700/60 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs uppercase tracking-wider text-slate-500">{title}</div>
+        <div className="text-[11px] text-slate-400">{metrics.points} 点</div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-[11px] text-slate-500">
+            波动率{annualized ? "（年化）" : ""}
+          </div>
+          <div className="text-lg font-mono text-slate-800 dark:text-slate-100">
+            {formatPctNullable(volatility)}
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] text-slate-500">最大回撤</div>
+          <div className="text-lg font-mono text-slate-800 dark:text-slate-100">
+            {formatPctNullable(metrics.maxDrawdown)}
+          </div>
+        </div>
+      </div>
+      <div className="text-[11px] text-slate-400 mt-2">
+        区间 {formatDateRange(metrics.startDate, metrics.endDate)}
+      </div>
+      {metrics.reason && (
+        <div className="text-[11px] text-slate-400 mt-1">{metrics.reason}</div>
       )}
     </div>
   );

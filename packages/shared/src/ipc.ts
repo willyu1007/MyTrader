@@ -159,6 +159,47 @@ export interface PortfolioPerformanceRangeInput {
 export interface PortfolioPerformanceRangeResult {
   performance: PortfolioPerformance;
   series: PortfolioPerformanceSeries | null;
+  analysis: PortfolioPerformanceAnalysis | null;
+}
+
+export interface ContributionEntry {
+  key: string;
+  label: string;
+  weight: number;
+  marketValue: number;
+  returnPct: number | null;
+  contribution: number | null;
+  priceStart: number | null;
+  priceEnd: number | null;
+}
+
+export interface ContributionBreakdown {
+  startDate: string;
+  endDate: string;
+  bySymbol: ContributionEntry[];
+  byAssetClass: ContributionEntry[];
+  missingSymbols: string[];
+  reason: string | null;
+}
+
+export interface RiskSeriesMetrics {
+  volatility: number | null;
+  volatilityAnnualized: number | null;
+  maxDrawdown: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  points: number;
+  reason: string | null;
+}
+
+export interface PortfolioRiskMetrics {
+  nav: RiskSeriesMetrics;
+  twr: RiskSeriesMetrics;
+}
+
+export interface PortfolioPerformanceAnalysis {
+  contributions: ContributionBreakdown;
+  riskMetrics: PortfolioRiskMetrics;
 }
 
 export interface CreatePortfolioInput {
