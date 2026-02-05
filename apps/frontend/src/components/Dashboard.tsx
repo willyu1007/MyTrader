@@ -5571,13 +5571,22 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-center">
-                          <Input
-                            type="password"
-                            value={marketTokenDraft}
-                            onChange={(e) => setMarketTokenDraft(e.target.value)}
-                            placeholder="输入数据源令牌"
-                            className="font-mono text-xs"
-                          />
+                          <div className="relative">
+                            <Input
+                              type="password"
+                              value={marketTokenDraft}
+                              onChange={(e) => setMarketTokenDraft(e.target.value)}
+                              placeholder="输入数据源令牌"
+                              className="font-mono text-xs pr-8"
+                            />
+                            <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
+                              <HelpHint
+                                text={
+                                  "需要接口权限：\n股票列表（stock_basic）\n基金/ETF 列表（fund_basic）\n交易日历（trade_cal）\n日线行情（daily）\n每日指标（daily_basic）\n资金流（moneyflow）"
+                                }
+                              />
+                            </div>
+                          </div>
                           <div className="flex items-center justify-end gap-2">
                             <Button
                               variant="secondary"
@@ -7010,7 +7019,7 @@ function HelpHint({ text }: { text: string }) {
       {open && (
         <span
           role="tooltip"
-          className="absolute left-1/2 top-full z-20 mt-1 w-max max-w-xs -translate-x-1/2 whitespace-normal rounded-none border border-border-dark bg-surface-dark px-2 py-1 text-[11px] text-white shadow-lg"
+          className="absolute left-1/2 top-full z-20 mt-1 w-max max-w-xs -translate-x-1/2 whitespace-pre-line rounded-none border border-border-dark bg-surface-dark px-2 py-1 text-[11px] leading-snug text-white shadow-lg"
         >
           {text}
         </span>
