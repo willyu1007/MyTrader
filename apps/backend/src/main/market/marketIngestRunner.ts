@@ -35,6 +35,20 @@ type IngestTotals = {
   errors: number;
 };
 
+export type IngestCheckpointResult = "continue" | "cancel";
+
+export interface IngestExecutionControl {
+  onRunCreated?: (runId: string) => void | Promise<void>;
+  checkpoint?: () => IngestCheckpointResult | Promise<IngestCheckpointResult>;
+}
+
+export class IngestCanceledError extends Error {
+  constructor(message = "ingest canceled") {
+    super(message);
+    this.name = "IngestCanceledError";
+  }
+}
+
 export async function runTargetsDailyIngest(input: {
   businessDb: SqliteDatabase;
   marketDb: SqliteDatabase;
@@ -55,6 +69,7 @@ export async function runTargetsIngest(input: {
   mode: IngestRunMode;
   meta?: Record<string, unknown> | null;
   now?: Date;
+  control?: IngestExecutionControl;
 }): Promise<void> {
   await ingestLock.runExclusive(async () => {
     const runId = await createIngestRun(input.marketDb, {
@@ -62,8 +77,12 @@ export async function runTargetsIngest(input: {
       mode: input.mode,
       meta: input.meta ?? null
     });
+    if (input.control?.onRunCreated) {
+      await input.control.onRunCreated(runId);
+    }
 
     try {
+      await checkpointOrThrow(input.control);
       const token = input.token?.trim() ?? "";
       if (!token) {
         throw new Error("未配置 Tushare token。");
@@ -84,7 +103,14 @@ export async function runTargetsIngest(input: {
       });
 
       const totals: IngestTotals = { inserted: 0, updated: 0, errors: 0 };
-      await ingestTargetsRange(input.marketDb, token, items, asOfTradeDate, totals);
+      await ingestTargetsRange(
+        input.marketDb,
+        token,
+        items,
+        asOfTradeDate,
+        totals,
+        input.control
+      );
 
       await finishIngestRun(input.marketDb, {
         id: runId,
@@ -97,6 +123,16 @@ export async function runTargetsIngest(input: {
         meta: { ...(input.meta ?? {}), kind: "targets" }
       });
     } catch (err) {
+      if (err instanceof IngestCanceledError) {
+        await finishIngestRun(input.marketDb, {
+          id: runId,
+          status: "canceled",
+          errors: 0,
+          errorMessage: null,
+          meta: { ...(input.meta ?? {}), kind: "targets" }
+        });
+        return;
+      }
       await finishIngestRun(input.marketDb, {
         id: runId,
         status: "failed",
@@ -131,6 +167,7 @@ export async function runUniverseIngest(input: {
   mode: IngestRunMode;
   meta?: Record<string, unknown> | null;
   now?: Date;
+  control?: IngestExecutionControl;
 }): Promise<void> {
   await ingestLock.runExclusive(async () => {
     const runId = await createIngestRun(input.marketDb, {
@@ -138,9 +175,13 @@ export async function runUniverseIngest(input: {
       mode: input.mode,
       meta: input.meta ?? null
     });
+    if (input.control?.onRunCreated) {
+      await input.control.onRunCreated(runId);
+    }
 
     let handle: Awaited<ReturnType<typeof openAnalysisDuckdb>> | null = null;
     try {
+      await checkpointOrThrow(input.control);
       const token = input.token?.trim() ?? "";
       if (!token) {
         throw new Error("未配置 Tushare token。");
@@ -164,7 +205,8 @@ export async function runUniverseIngest(input: {
         await syncUniverseInstrumentMeta(
         input.marketDb,
         handle,
-        token
+        token,
+        input.control
       );
 
       const windowStart = formatDate(addDays(parseDate(asOfTradeDate) ?? now, -365 * 3));
@@ -180,7 +222,15 @@ export async function runUniverseIngest(input: {
       let lastDone: string | null = null;
 
       for (const tradeDate of tradeDates) {
-        await ingestUniverseTradeDate(handle, token, tradeDate, stockSymbols, etfSymbols, totals);
+        await checkpointOrThrow(input.control);
+        await ingestUniverseTradeDate(
+          handle,
+          token,
+          tradeDate,
+          stockSymbols,
+          etfSymbols,
+          totals
+        );
         lastDone = tradeDate;
         await setUniverseCursorDate(handle, tradeDate);
         await yieldToEventLoop();
@@ -203,6 +253,16 @@ export async function runUniverseIngest(input: {
         }
       });
     } catch (err) {
+      if (err instanceof IngestCanceledError) {
+        await finishIngestRun(input.marketDb, {
+          id: runId,
+          status: "canceled",
+          errors: 0,
+          errorMessage: null,
+          meta: { ...(input.meta ?? {}), windowYears: 3 }
+        });
+        return;
+      }
       await finishIngestRun(input.marketDb, {
         id: runId,
         status: "failed",
@@ -222,7 +282,8 @@ async function ingestTargetsRange(
   token: string,
   items: TushareIngestItem[],
   endDate: string,
-  totals: IngestTotals
+  totals: IngestTotals,
+  control?: IngestExecutionControl
 ): Promise<void> {
   if (items.length === 0) return;
   const provider = getMarketProvider("tushare");
@@ -242,6 +303,7 @@ async function ingestTargetsRange(
   const lookbackDate = formatDate(addDays(parseDate(end) ?? new Date(), -config.autoIngest.lookbackDays));
 
   for (const item of items) {
+    await checkpointOrThrow(control);
     const symbol = item.symbol;
     const latest = await getLatestPriceDate(marketDb, symbol);
     const startDate = latest ? nextDate(latest) : lookbackDate;
@@ -363,7 +425,8 @@ async function syncDuckdbTradeCalendar(
 async function syncUniverseInstrumentMeta(
   marketDb: SqliteDatabase,
   analysisHandle: Awaited<ReturnType<typeof openAnalysisDuckdb>>,
-  token: string
+  token: string,
+  control?: IngestExecutionControl
 ): Promise<{
   stockSymbols: Set<string>;
   etfSymbols: Set<string>;
@@ -395,6 +458,7 @@ async function syncUniverseInstrumentMeta(
     const now = Date.now();
 
     for (const profile of [...stocks, ...etfs]) {
+      await checkpointOrThrow(control);
       await conn.query(
         `
           insert into instrument_meta (symbol, kind, name, market, currency, asset_class, updated_at)
@@ -708,6 +772,16 @@ async function getLatestPriceDate(
 
 function escapeSql(value: string): string {
   return value.replace(/'/g, "''");
+}
+
+async function checkpointOrThrow(
+  control?: IngestExecutionControl
+): Promise<void> {
+  if (!control?.checkpoint) return;
+  const result = await control.checkpoint();
+  if (result === "cancel") {
+    throw new IngestCanceledError();
+  }
 }
 
 function toErrorMessage(error: unknown): string {

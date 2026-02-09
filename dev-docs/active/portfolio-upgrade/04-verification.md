@@ -57,3 +57,9 @@
 - 2026-02-05: `pnpm -C apps/frontend typecheck`（通过）
 - 2026-02-05: `pnpm typecheck`（通过）
 - 2026-02-05: `pnpm typecheck`（通过，手动主题 + SW 层级维护）
+- 2026-02-05: （未执行）UI 变更（数据分析视图）未跑新增验证；需在下次联调时补充前端 typecheck/手工验收
+- 2026-02-05: `pnpm -C apps/frontend typecheck`（通过，Data Analysis 场景切分 + Portfolio 概要/详版边界）
+- 2026-02-05: `pnpm typecheck`（通过）
+- 2026-02-06: `pnpm -C apps/frontend typecheck`（通过，Data Analysis 顶部 Tab 样式对齐 Portfolio 顶部 Tab）
+- 2026-02-07: `pnpm -C apps/frontend typecheck`（通过，Data Analysis -> Instrument MVP）
+- 2026-02-07: `pnpm typecheck`（通过）

@@ -2,7 +2,7 @@
 
 ## Status
 - Current status: in_progress
-- Last updated: 2026-02-04
+- Last updated: 2026-02-08
 
 ## Notes (append-only)
 - 2026-01-28：创建任务包 `dev-docs/active/real-data-auto-fetch/`，并确认 v1 数据范围采用方案 B（日线价格 + 元数据 + 交易日历）。
@@ -30,6 +30,11 @@
 - 2026-02-03：Targets 增强：增加“临时目标池”机制（搜索选中但不在 Targets 的标的会临时加入，TTL 自动清理，可一键转为长期 explicitSymbols），并将 UI 文案从“自动拉取范围”调整为“目标池编辑”。
 - 2026-02-04：按用户确认的方案 B，移除侧边栏「数据状态」入口，仅保留「其他 / 数据状态」。
 - 2026-02-04：修复 `pnpm dev` 启动冲突：前端 Vite 不再强制绑定 5173；`apps/backend/scripts/dev.mjs` 直接使用 `pnpm exec vite -- --port <port>` 启动，从而在 5173 被占用时可自动切换端口（例如 5174）。
+- 2026-02-08：扩展 shared IPC 契约：新增 `MarketIngestSchedulerConfig`、`MarketIngestControlStatus`、`PreviewTargetsDraftInput/PreviewTargetsDiffResult`、注册标的分页查询与批量 auto_ingest 控制、run 详情查询接口。
+- 2026-02-08：新增后端 `ingestOrchestrator`（统一编排 manual/schedule/startup/auto），支持队列去重、暂停/恢复、协作式取消；runner 在 symbol / tradeDate 边界增加 checkpoint，取消任务写入 `ingest_runs.status=canceled`。
+- 2026-02-08：调度器改为读 `market_settings.ingest_scheduler_config_v1`（enabled/runAt/timezone/scope/runOnStartup/catchUpMissed）；控制状态持久化 `ingest_control_state_v1`（paused）。
+- 2026-02-08：Other/数据管理 UI 重构：新增“调度与运行控制”区、Targets 草稿编辑（重置/保存/差异预览/批量粘贴导入/结构化标签选择/临时标的批量操作）、注册标的管理（搜索/筛选/单条与批量 auto_ingest）、Data Status 的 run 详情侧栏。
+- 2026-02-08：离开「其他/数据管理」时，若 Targets 草稿未保存会弹确认，避免误操作丢失编辑上下文。
 
 ## Pending decisions / TODO
 - trading_calendar 的 market 维度与来源（v1 先 CN；后续预留多市场）。

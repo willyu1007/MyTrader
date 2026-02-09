@@ -76,3 +76,13 @@
 - [ ] 单标的：日期/价格行左侧展示「持仓价 / 目标价」（目标价可用用户标签 `target:xx.xx` 设置；持仓价优先 `Position.cost`，否则 FIFO）
 - [ ] 单标的：右侧不滚动，图表+统计在一屏内
 - [ ] 标的详情弹层：自选分组/标签/原始字段可用
+
+### 2026-02-09
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` ✅（目标池编辑 1:1 布局 + 数据同步范围下拉 + 当前目标池弹窗）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（目标池编辑 1:1 布局 + 数据同步范围下拉 + 当前目标池弹窗）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` ✅（手动添加标的流程重构：解析预览/部分应用/保留输入）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（手动添加标的流程重构：解析预览/部分应用/保留输入）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` ✅（“解析预览”改为输入框内“解析”，并保留应用流程）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（“解析预览”改为输入框内“解析”，并保留应用流程）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend typecheck` ✅（手动区去重：移除“当前手动标的”，按钮位置重排为输入/预览框右下角）
+- `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/frontend build` ✅（手动区去重：移除“当前手动标的”，按钮位置重排为输入/预览框右下角）

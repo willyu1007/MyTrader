@@ -30,10 +30,14 @@ import type {
   MarketQuote,
   MarketDailyBar,
   MarketDataQuality,
+  MarketIngestControlStatus,
   MarketIngestRun,
+  MarketIngestSchedulerConfig,
   MarketTagSeriesResult,
   MarketTokenStatus,
+  PreviewTargetsDiffResult,
   TempTargetSymbol,
+  ListInstrumentRegistryResult,
   PerformanceMethod,
   PerformanceRangeKey,
   PreviewTargetsResult,
@@ -230,7 +234,7 @@ const navItems = [
     key: "data-analysis",
     label: "\u6570\u636e\u5206\u6790",
     meta: "\u5206\u6790/\u6d1e\u5bdf",
-    description: "\u5bf9\u7ec4\u5408\u4e0e\u884c\u60c5\u8fdb\u884c\u6307\u6807\u5206\u6790\u3002",
+    description: "\u66f4\u5168\u9762\u7684\u591a\u60c5\u666f\u5206\u6790\u5165\u53e3\uff08\u7ec4\u5408/\u4e2a\u80a1/\u6307\u6570/\u677f\u5757\uff09\u3002",
     icon: "functions"
   },
   {
@@ -289,6 +293,7 @@ const portfolioTabs = [
 
 const otherTabs = [
   { key: "data-management", label: "数据管理", icon: "settings_suggest" },
+  { key: "instrument-management", label: "标的管理", icon: "inventory_2" },
   { key: "data-status", label: "数据状态", icon: "monitoring" },
   { key: "test", label: "测试", icon: "science" }
 ] as const;
@@ -302,6 +307,13 @@ const performanceRanges = [
   { key: "ALL", label: "\u5168\u90e8" }
 ] as const;
 
+const analysisTabs: { key: AnalysisTab; label: string; icon: string; description: string }[] = [
+  { key: "portfolio", label: "组合", icon: "pie_chart", description: "组合收益、贡献与风险的详细分析。" },
+  { key: "instrument", label: "个股", icon: "candlestick_chart", description: "个股走势、指标与事件分析（待实现）。" },
+  { key: "index", label: "指数", icon: "show_chart", description: "指数趋势、区间对比与成分分析（待实现）。" },
+  { key: "sector", label: "板块", icon: "grid_view", description: "板块热度、走势与聚合对比（待实现）。" }
+];
+
 const marketChartRanges = [
   { key: "1W", label: "1周" },
   { key: "1M", label: "1个月" },
@@ -314,6 +326,16 @@ const marketChartRanges = [
   { key: "10Y", label: "10年" }
 ] as const;
 
+const schedulerTimezoneDefaults = [
+  "Asia/Shanghai",
+  "Asia/Hong_Kong",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "America/New_York",
+  "Europe/London",
+  "UTC"
+];
+
 const CONTRIBUTION_TOP_N = 5;
 const HHI_WARN_THRESHOLD = 0.25;
 
@@ -321,6 +343,7 @@ type OtherTab = (typeof otherTabs)[number]["key"];
 
 type WorkspaceView = (typeof navItems)[number]["key"];
 type PortfolioTab = (typeof portfolioTabs)[number]["key"];
+type AnalysisTab = "portfolio" | "instrument" | "index" | "sector";
 
 export function Dashboard({ account, onLock, onActivePortfolioChange }: DashboardProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -331,6 +354,31 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   const [notice, setNotice] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<WorkspaceView>("portfolio");
   const [otherTab, setOtherTab] = useState<OtherTab>("data-management");
+  const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("portfolio");
+  const [analysisInstrumentQuery, setAnalysisInstrumentQuery] = useState("");
+  const [analysisInstrumentSearchResults, setAnalysisInstrumentSearchResults] =
+    useState<InstrumentProfileSummary[]>([]);
+  const [analysisInstrumentSearchLoading, setAnalysisInstrumentSearchLoading] =
+    useState(false);
+  const [analysisInstrumentSymbol, setAnalysisInstrumentSymbol] =
+    useState<string | null>(null);
+  const [analysisInstrumentRange, setAnalysisInstrumentRange] =
+    useState<MarketChartRangeKey>("6M");
+  const [analysisInstrumentProfile, setAnalysisInstrumentProfile] =
+    useState<InstrumentProfile | null>(null);
+  const [analysisInstrumentUserTags, setAnalysisInstrumentUserTags] = useState<
+    string[]
+  >([]);
+  const [analysisInstrumentQuote, setAnalysisInstrumentQuote] =
+    useState<MarketQuote | null>(null);
+  const [analysisInstrumentBars, setAnalysisInstrumentBars] = useState<
+    MarketDailyBar[]
+  >([]);
+  const [analysisInstrumentLoading, setAnalysisInstrumentLoading] =
+    useState(false);
+  const [analysisInstrumentError, setAnalysisInstrumentError] = useState<
+    string | null
+  >(null);
   const [isNavCollapsed, setIsNavCollapsed] = useState(false);
   const navCollapsedBeforeMarketRef = useRef<boolean | null>(null);
   const navAutoCollapsedActiveRef = useRef(false);
@@ -375,8 +423,15 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   const [holdingsCsvPath, setHoldingsCsvPath] = useState<string | null>(null);
   const [pricesCsvPath, setPricesCsvPath] = useState<string | null>(null);
 
+  const analysisInstrumentSearchTimerRef = useRef<number | null>(null);
+  const analysisInstrumentSearchRequestIdRef = useRef(0);
+  const analysisInstrumentLoadRequestIdRef = useRef(0);
+
   const marketSearchTimerRef = useRef<number | null>(null);
   const marketSearchRequestIdRef = useRef(0);
+  const marketDataManagementPrevViewRef = useRef(activeView);
+  const marketDataManagementPrevOtherTabRef = useRef(otherTab);
+  const marketDataManagementNavigationGuardRef = useRef(false);
 
   const [marketCatalogSyncing, setMarketCatalogSyncing] = useState(false);
   const [marketCatalogSyncSummary, setMarketCatalogSyncSummary] = useState<
@@ -522,85 +577,174 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       explicitSymbols: [],
       tagFilters: []
     }));
+  const [marketTargetsSavedConfig, setMarketTargetsSavedConfig] =
+    useState<MarketTargetsConfig | null>(null);
   const [marketTargetsPreview, setMarketTargetsPreview] =
     useState<PreviewTargetsResult | null>(null);
+  const [marketTargetsDiffPreview, setMarketTargetsDiffPreview] =
+    useState<PreviewTargetsDiffResult | null>(null);
   const [marketTargetsLoading, setMarketTargetsLoading] = useState(false);
   const [marketTargetsSaving, setMarketTargetsSaving] = useState(false);
   const [marketTargetsSymbolDraft, setMarketTargetsSymbolDraft] = useState("");
+  const [marketManualSymbolPreview, setMarketManualSymbolPreview] = useState<{
+    addable: string[];
+    existing: string[];
+    invalid: string[];
+    duplicates: number;
+  }>({
+    addable: [],
+    existing: [],
+    invalid: [],
+    duplicates: 0
+  });
   const [marketTargetsTagDraft, setMarketTargetsTagDraft] = useState("");
+  const [marketTagManagementQuery, setMarketTagManagementQuery] = useState("");
+  const [marketTargetsPreviewFilter, setMarketTargetsPreviewFilter] = useState("");
+  const [marketCurrentTargetsModalOpen, setMarketCurrentTargetsModalOpen] =
+    useState(false);
+  const [marketCurrentTargetsFilter, setMarketCurrentTargetsFilter] = useState("");
+  const [marketTargetsSectionOpen, setMarketTargetsSectionOpen] = useState({
+    scope: true,
+    symbols: true
+  });
   const [marketTempTargets, setMarketTempTargets] = useState<TempTargetSymbol[]>([]);
   const [marketTempTargetsLoading, setMarketTempTargetsLoading] = useState(false);
+  const [marketSelectedTempTargetSymbols, setMarketSelectedTempTargetSymbols] =
+    useState<string[]>([]);
+  const [marketIngestControlStatus, setMarketIngestControlStatus] =
+    useState<MarketIngestControlStatus | null>(null);
+  const [marketIngestControlUpdating, setMarketIngestControlUpdating] =
+    useState(false);
+  const [marketSchedulerConfig, setMarketSchedulerConfig] =
+    useState<MarketIngestSchedulerConfig | null>(null);
+  const [marketSchedulerSavedConfig, setMarketSchedulerSavedConfig] =
+    useState<MarketIngestSchedulerConfig | null>(null);
+  const [marketSchedulerLoading, setMarketSchedulerLoading] = useState(false);
+  const [marketSchedulerSaving, setMarketSchedulerSaving] = useState(false);
+  const [marketSchedulerAdvancedOpen, setMarketSchedulerAdvancedOpen] =
+    useState(false);
+  const [marketTriggerIngestBlockedOpen, setMarketTriggerIngestBlockedOpen] =
+    useState(false);
+  const [marketTriggerIngestBlockedMessage, setMarketTriggerIngestBlockedMessage] =
+    useState("");
+  const [marketRegistryResult, setMarketRegistryResult] =
+    useState<ListInstrumentRegistryResult | null>(null);
+  const [marketRegistryLoading, setMarketRegistryLoading] = useState(false);
+  const [marketRegistryQuery, setMarketRegistryQuery] = useState("");
+  const [marketRegistryAutoFilter, setMarketRegistryAutoFilter] = useState<
+    "all" | "enabled" | "disabled"
+  >("all");
+  const [marketRegistrySelectedSymbols, setMarketRegistrySelectedSymbols] =
+    useState<string[]>([]);
+  const [marketRegistryUpdating, setMarketRegistryUpdating] = useState(false);
+  const [marketSelectedIngestRunId, setMarketSelectedIngestRunId] = useState<
+    string | null
+  >(null);
+  const [marketSelectedIngestRun, setMarketSelectedIngestRun] =
+    useState<MarketIngestRun | null>(null);
+  const [marketSelectedIngestRunLoading, setMarketSelectedIngestRunLoading] =
+    useState(false);
 
-  const autoIngestScopeValue = useMemo(() => {
-    const { includeHoldings, includeWatchlist, includeRegistryAutoIngest } =
-      marketTargetsConfig;
-    if (includeHoldings && includeWatchlist && includeRegistryAutoIngest) {
-      return "holdings+watchlist+registry";
-    }
-    if (includeHoldings && includeWatchlist && !includeRegistryAutoIngest) {
-      return "holdings+watchlist";
-    }
-    if (includeHoldings && !includeWatchlist && includeRegistryAutoIngest) {
-      return "holdings+registry";
-    }
-    if (!includeHoldings && includeWatchlist && includeRegistryAutoIngest) {
-      return "watchlist+registry";
-    }
-    if (includeHoldings && !includeWatchlist && !includeRegistryAutoIngest) {
-      return "holdings";
-    }
-    if (!includeHoldings && includeWatchlist && !includeRegistryAutoIngest) {
-      return "watchlist";
-    }
-    if (!includeHoldings && !includeWatchlist && includeRegistryAutoIngest) {
-      return "registry";
-    }
-    return "holdings+watchlist+registry";
-  }, [marketTargetsConfig]);
+  const marketTargetsDirty = useMemo(() => {
+    if (!marketTargetsSavedConfig) return false;
+    return !isSameTargetsConfig(marketTargetsSavedConfig, marketTargetsConfig);
+  }, [marketTargetsConfig, marketTargetsSavedConfig]);
 
-  const handleChangeAutoIngestScope = useCallback((value: string) => {
-    const next = {
-      includeHoldings: false,
-      includeWatchlist: false,
-      includeRegistryAutoIngest: false
-    };
-    switch (value) {
-      case "holdings+watchlist+registry":
-        next.includeHoldings = true;
-        next.includeWatchlist = true;
-        next.includeRegistryAutoIngest = true;
-        break;
-      case "holdings+watchlist":
-        next.includeHoldings = true;
-        next.includeWatchlist = true;
-        break;
-      case "holdings+registry":
-        next.includeHoldings = true;
-        next.includeRegistryAutoIngest = true;
-        break;
-      case "watchlist+registry":
-        next.includeWatchlist = true;
-        next.includeRegistryAutoIngest = true;
-        break;
-      case "holdings":
-        next.includeHoldings = true;
-        break;
-      case "watchlist":
-        next.includeWatchlist = true;
-        break;
-      case "registry":
-        next.includeRegistryAutoIngest = true;
-        break;
-      default:
-        next.includeHoldings = true;
-        next.includeWatchlist = true;
-        next.includeRegistryAutoIngest = true;
+  const marketSchedulerDirty = useMemo(() => {
+    if (!marketSchedulerConfig || !marketSchedulerSavedConfig) return false;
+    return !isSameSchedulerConfig(marketSchedulerSavedConfig, marketSchedulerConfig);
+  }, [marketSchedulerConfig, marketSchedulerSavedConfig]);
+
+  const marketIngestControlState = marketIngestControlStatus?.state ?? "idle";
+  const marketCanTriggerIngestNow =
+    !marketIngestControlUpdating && Boolean(marketTokenStatus?.configured);
+  const marketCanPauseIngest =
+    !marketIngestControlUpdating && marketIngestControlState === "running";
+  const marketCanResumeIngest =
+    !marketIngestControlUpdating && marketIngestControlState === "paused";
+  const marketCanCancelIngest =
+    !marketIngestControlUpdating &&
+    (marketIngestControlState === "running" ||
+      marketIngestControlState === "paused");
+
+  const marketSchedulerTimezoneOptions = useMemo(() => {
+    const values = [...schedulerTimezoneDefaults];
+    const current = marketSchedulerConfig?.timezone?.trim();
+    if (current && !values.includes(current)) {
+      values.unshift(current);
     }
-    setMarketTargetsConfig((prev) => ({
-      ...prev,
-      ...next
-    }));
-  }, []);
+    return values.map((value) => ({ value, label: value }));
+  }, [marketSchedulerConfig?.timezone]);
+
+  const marketPortfolioScopeSelectOptions = useMemo(
+    () => [
+      { value: "__all__", label: "全部组合" },
+      ...portfolios.map((portfolio) => ({
+        value: portfolio.id,
+        label: portfolio.name
+      }))
+    ],
+    [portfolios]
+  );
+
+  const marketPortfolioScopeValue = useMemo(() => {
+    const selected = marketTargetsConfig.portfolioIds ?? [];
+    return selected.length > 0 ? selected[0] : "__all__";
+  }, [marketTargetsConfig.portfolioIds]);
+
+  const marketTargetsPreviewKeyword = marketTargetsPreviewFilter
+    .trim()
+    .toLowerCase();
+
+  const marketCurrentTargetsSource = useMemo(
+    () => marketTargetsDiffPreview?.draft.symbols ?? marketTargetsPreview?.symbols ?? [],
+    [marketTargetsDiffPreview?.draft.symbols, marketTargetsPreview?.symbols]
+  );
+
+  const marketCurrentTargetsKeyword = marketCurrentTargetsFilter
+    .trim()
+    .toLowerCase();
+
+  const marketFilteredCurrentTargets = useMemo(() => {
+    if (!marketCurrentTargetsKeyword) return marketCurrentTargetsSource;
+    return marketCurrentTargetsSource.filter((row) =>
+      row.symbol.toLowerCase().includes(marketCurrentTargetsKeyword)
+    );
+  }, [marketCurrentTargetsKeyword, marketCurrentTargetsSource]);
+
+  const marketFilteredAddedSymbols = useMemo(() => {
+    const source = marketTargetsDiffPreview?.addedSymbols ?? [];
+    if (!marketTargetsPreviewKeyword) return source;
+    return source.filter((row) =>
+      row.symbol.toLowerCase().includes(marketTargetsPreviewKeyword)
+    );
+  }, [marketTargetsDiffPreview?.addedSymbols, marketTargetsPreviewKeyword]);
+
+  const marketFilteredRemovedSymbols = useMemo(() => {
+    const source = marketTargetsDiffPreview?.removedSymbols ?? [];
+    if (!marketTargetsPreviewKeyword) return source;
+    return source.filter((row) =>
+      row.symbol.toLowerCase().includes(marketTargetsPreviewKeyword)
+    );
+  }, [marketTargetsDiffPreview?.removedSymbols, marketTargetsPreviewKeyword]);
+
+  const marketFilteredReasonChangedSymbols = useMemo(() => {
+    const source = marketTargetsDiffPreview?.reasonChangedSymbols ?? [];
+    if (!marketTargetsPreviewKeyword) return source;
+    return source.filter((row) =>
+      row.symbol.toLowerCase().includes(marketTargetsPreviewKeyword)
+    );
+  }, [marketTargetsDiffPreview?.reasonChangedSymbols, marketTargetsPreviewKeyword]);
+
+  const handleToggleTargetsSection = useCallback(
+    (section: "scope" | "symbols") => {
+      setMarketTargetsSectionOpen((prev) => ({
+        ...prev,
+        [section]: !prev[section]
+      }));
+    },
+    []
+  );
 
   const [marketChartHoverDate, setMarketChartHoverDate] = useState<string | null>(
     null
@@ -618,6 +762,13 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setMarketTagChartHoverDate(null);
     setMarketTagChartHoverPrice(null);
   }, [marketSelectedTag, marketChartRange]);
+
+  useEffect(() => {
+    const symbolSet = new Set(marketTempTargets.map((item) => item.symbol));
+    setMarketSelectedTempTargetSymbols((prev) =>
+      prev.filter((symbol) => symbolSet.has(symbol))
+    );
+  }, [marketTempTargets]);
 
   const activePortfolio = useMemo(
     () => portfolios.find((portfolio) => portfolio.id === activePortfolioId) ?? null,
@@ -902,6 +1053,125 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     return parseTargetPriceFromTags(marketSelectedUserTags);
   }, [marketSelectedUserTags]);
 
+  const analysisInstrumentNameBySymbol = useMemo(() => {
+    const map = new Map<string, string>();
+    snapshot?.positions.forEach((pos) => {
+      const symbol = pos.position.symbol;
+      if (symbol) map.set(symbol, pos.position.name ?? symbol);
+    });
+    marketWatchlistItems.forEach((item) => {
+      map.set(item.symbol, item.name ?? item.symbol);
+    });
+    analysisInstrumentSearchResults.forEach((item) => {
+      map.set(item.symbol, item.name ?? item.symbol);
+    });
+    if (analysisInstrumentProfile) {
+      map.set(
+        analysisInstrumentProfile.symbol,
+        analysisInstrumentProfile.name ?? analysisInstrumentProfile.symbol
+      );
+    }
+    return map;
+  }, [
+    analysisInstrumentProfile,
+    analysisInstrumentSearchResults,
+    marketWatchlistItems,
+    snapshot
+  ]);
+
+  const analysisInstrumentQuickSymbols = useMemo(() => {
+    const set = new Set<string>();
+    snapshot?.positions.forEach((pos) => {
+      if (pos.position.assetClass === "cash") return;
+      if (!pos.position.symbol) return;
+      set.add(pos.position.symbol);
+    });
+    marketWatchlistItems.forEach((item) => {
+      if (item.symbol) set.add(item.symbol);
+    });
+    return Array.from(set).slice(0, 16);
+  }, [marketWatchlistItems, snapshot]);
+
+  const analysisInstrumentLatestBar = useMemo(() => {
+    for (let idx = analysisInstrumentBars.length - 1; idx >= 0; idx -= 1) {
+      const bar = analysisInstrumentBars[idx];
+      if (bar.close !== null) return bar;
+    }
+    return null;
+  }, [analysisInstrumentBars]);
+
+  const analysisInstrumentHasEnoughData = useMemo(() => {
+    let count = 0;
+    for (const bar of analysisInstrumentBars) {
+      if (bar.close !== null && Number.isFinite(bar.close)) {
+        count += 1;
+      }
+      if (count >= 2) return true;
+    }
+    return false;
+  }, [analysisInstrumentBars]);
+
+  const analysisInstrumentRangeSummary = useMemo(() => {
+    const closes = analysisInstrumentBars
+      .map((bar) => bar.close)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const highs = analysisInstrumentBars
+      .map((bar) => bar.high)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const lows = analysisInstrumentBars
+      .map((bar) => bar.low)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const volumes = analysisInstrumentBars
+      .map((bar) => bar.volume)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const firstClose = closes.length > 0 ? closes[0] : null;
+    const lastClose = closes.length > 0 ? closes[closes.length - 1] : null;
+    const rangeReturn =
+      firstClose !== null && lastClose !== null && firstClose !== 0
+        ? (lastClose - firstClose) / firstClose
+        : null;
+    const rangeHigh = highs.length > 0 ? Math.max(...highs) : null;
+    const rangeLow = lows.length > 0 ? Math.min(...lows) : null;
+    const avgVolume =
+      volumes.length > 0
+        ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length
+        : null;
+    const startDate = analysisInstrumentBars[0]?.date ?? null;
+    const endDate = analysisInstrumentBars[analysisInstrumentBars.length - 1]?.date ?? null;
+    return { rangeHigh, rangeLow, avgVolume, rangeReturn, startDate, endDate };
+  }, [analysisInstrumentBars]);
+
+  const analysisInstrumentPositionValuation = useMemo(() => {
+    if (!snapshot || !analysisInstrumentSymbol) return null;
+    return (
+      snapshot.positions.find((pos) => pos.position.symbol === analysisInstrumentSymbol) ??
+      null
+    );
+  }, [analysisInstrumentSymbol, snapshot]);
+
+  const analysisInstrumentHoldingUnitCost = useMemo(() => {
+    if (!analysisInstrumentSymbol) return null;
+    const position = analysisInstrumentPositionValuation?.position ?? null;
+    if (!position || position.quantity <= 0) return null;
+
+    const direct = position.cost;
+    if (direct !== null && Number.isFinite(direct) && direct > 0) return direct;
+
+    const fifo = computeFifoUnitCost(ledgerEntries, analysisInstrumentSymbol);
+    if (fifo !== null && Number.isFinite(fifo) && fifo > 0) return fifo;
+    return null;
+  }, [analysisInstrumentPositionValuation, analysisInstrumentSymbol, ledgerEntries]);
+
+  const analysisInstrumentTargetPrice = useMemo(() => {
+    return parseTargetPriceFromTags(analysisInstrumentUserTags);
+  }, [analysisInstrumentUserTags]);
+
+  const analysisInstrumentTone = useMemo(() => {
+    return getCnChangeTone(
+      analysisInstrumentQuote?.changePct ?? analysisInstrumentRangeSummary.rangeReturn
+    );
+  }, [analysisInstrumentQuote?.changePct, analysisInstrumentRangeSummary.rangeReturn]);
+
   const cashTotal = useMemo(() => {
     if (!snapshot) return 0;
     return snapshot.positions.reduce((sum, valuation) => {
@@ -1059,6 +1329,63 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     []
   );
 
+  const loadAnalysisInstrument = useCallback(
+    async (symbol: string) => {
+      if (!window.mytrader) {
+        setAnalysisInstrumentError("未检测到桌面端后端接口。");
+        return;
+      }
+      const key = symbol.trim();
+      if (!key) return;
+
+      const requestId = analysisInstrumentLoadRequestIdRef.current + 1;
+      analysisInstrumentLoadRequestIdRef.current = requestId;
+
+      setAnalysisInstrumentLoading(true);
+      setAnalysisInstrumentError(null);
+
+      try {
+        const [profile, tags, quotes] = await Promise.all([
+          window.mytrader.market.getInstrumentProfile(key),
+          window.mytrader.market.listInstrumentTags(key),
+          window.mytrader.market.getQuotes({ symbols: [key] })
+        ]);
+        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
+
+        const quote = quotes[0] ?? null;
+        setAnalysisInstrumentProfile(profile);
+        setAnalysisInstrumentUserTags(tags);
+        setAnalysisInstrumentQuote(quote);
+
+        const endDate =
+          quote?.tradeDate ?? snapshot?.priceAsOf ?? formatInputDate(new Date());
+        const { startDate, endDate: resolvedEndDate } = resolveMarketChartDateRange(
+          analysisInstrumentRange,
+          endDate
+        );
+        const bars = await window.mytrader.market.getDailyBars({
+          symbol: key,
+          startDate,
+          endDate: resolvedEndDate,
+          includeMoneyflow: false
+        });
+        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
+        setAnalysisInstrumentBars(bars);
+      } catch (err) {
+        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
+        setAnalysisInstrumentError(toUserErrorMessage(err));
+        setAnalysisInstrumentProfile(null);
+        setAnalysisInstrumentUserTags([]);
+        setAnalysisInstrumentQuote(null);
+        setAnalysisInstrumentBars([]);
+      } finally {
+        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
+        setAnalysisInstrumentLoading(false);
+      }
+    },
+    [analysisInstrumentRange, snapshot?.priceAsOf]
+  );
+
   useEffect(() => {
     loadPortfolios().catch((err) => setError(toUserErrorMessage(err)));
   }, [loadPortfolios]);
@@ -1078,11 +1405,24 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setPerformanceResult(null);
       return;
     }
-    if (portfolioTab !== "performance" && portfolioTab !== "risk") return;
+
+    const shouldLoadPerformance =
+      (activeView === "data-analysis" && analysisTab === "portfolio") ||
+      (activeView === "portfolio" &&
+        (portfolioTab === "performance" || portfolioTab === "risk"));
+    if (!shouldLoadPerformance) return;
+
     loadPerformance(activePortfolioId, performanceRange).catch((err) =>
       setPerformanceError(toUserErrorMessage(err))
     );
-  }, [activePortfolioId, loadPerformance, performanceRange, portfolioTab]);
+  }, [
+    activePortfolioId,
+    activeView,
+    analysisTab,
+    loadPerformance,
+    performanceRange,
+    portfolioTab
+  ]);
 
   useEffect(() => {
     if (!activePortfolioId) {
@@ -1094,6 +1434,66 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setLedgerError(toUserErrorMessage(err))
     );
   }, [activePortfolioId, loadLedgerEntries, portfolioTab]);
+
+  useEffect(() => {
+    if (activeView !== "data-analysis" || analysisTab !== "instrument") return;
+    if (!window.mytrader) return;
+    const query = analysisInstrumentQuery.trim();
+    if (!query) {
+      setAnalysisInstrumentSearchResults([]);
+      setAnalysisInstrumentSearchLoading(false);
+      return;
+    }
+
+    setAnalysisInstrumentSearchLoading(true);
+    const requestId = analysisInstrumentSearchRequestIdRef.current + 1;
+    analysisInstrumentSearchRequestIdRef.current = requestId;
+
+    if (analysisInstrumentSearchTimerRef.current !== null) {
+      window.clearTimeout(analysisInstrumentSearchTimerRef.current);
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const results = await window.mytrader!.market.searchInstruments({
+            query,
+            limit: 50
+          });
+          if (analysisInstrumentSearchRequestIdRef.current !== requestId) return;
+          setAnalysisInstrumentSearchResults(results);
+        } catch (err) {
+          if (analysisInstrumentSearchRequestIdRef.current !== requestId) return;
+          setAnalysisInstrumentError(toUserErrorMessage(err));
+          setAnalysisInstrumentSearchResults([]);
+        } finally {
+          if (analysisInstrumentSearchRequestIdRef.current !== requestId) return;
+          setAnalysisInstrumentSearchLoading(false);
+        }
+      })();
+    }, 250);
+
+    analysisInstrumentSearchTimerRef.current = timer;
+    return () => window.clearTimeout(timer);
+  }, [activeView, analysisTab, analysisInstrumentQuery]);
+
+  useEffect(() => {
+    if (activeView !== "data-analysis" || analysisTab !== "instrument") return;
+    if (!analysisInstrumentSymbol) return;
+    void loadAnalysisInstrument(analysisInstrumentSymbol);
+  }, [activeView, analysisTab, analysisInstrumentSymbol, loadAnalysisInstrument]);
+
+  useEffect(() => {
+    if (activeView !== "data-analysis" || analysisTab !== "instrument") return;
+    if (analysisInstrumentSymbol) return;
+    if (analysisInstrumentQuickSymbols.length === 0) return;
+    setAnalysisInstrumentSymbol(analysisInstrumentQuickSymbols[0]);
+  }, [
+    activeView,
+    analysisTab,
+    analysisInstrumentQuickSymbols,
+    analysisInstrumentSymbol
+  ]);
 
   useEffect(() => {
     if (!activePortfolio) return;
@@ -1828,12 +2228,26 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setMarketTargetsLoading(true);
     try {
       const config = await window.mytrader.market.getTargets();
-      setMarketTargetsConfig(config);
-      const preview = await window.mytrader.market.previewTargets();
-      setMarketTargetsPreview(preview);
+      const normalizedConfig: MarketTargetsConfig = {
+        ...config,
+        tagFilters: []
+      };
+      setMarketTargetsSavedConfig(normalizedConfig);
+      setMarketTargetsConfig(normalizedConfig);
+      const diff = await window.mytrader.market.previewTargetsDraft({
+        config: normalizedConfig
+      });
+      setMarketTargetsDiffPreview(diff);
+      setMarketTargetsPreview(diff.draft);
       setMarketTempTargetsLoading(true);
       const temp = await window.mytrader.market.listTempTargets();
       setMarketTempTargets(temp);
+      setMarketManualSymbolPreview({
+        addable: [],
+        existing: [],
+        invalid: [],
+        duplicates: 0
+      });
     } catch (err) {
       setError(toUserErrorMessage(err));
     } finally {
@@ -1874,6 +2288,75 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setMarketIngestRuns([]);
     } finally {
       setMarketIngestRunsLoading(false);
+    }
+  }, []);
+
+  const refreshMarketIngestControl = useCallback(async () => {
+    if (!window.mytrader) return;
+    try {
+      const status = await window.mytrader.market.getIngestControlStatus();
+      setMarketIngestControlStatus(status);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    }
+  }, []);
+
+  const refreshMarketSchedulerConfig = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketSchedulerLoading(true);
+    try {
+      const config = await window.mytrader.market.getIngestSchedulerConfig();
+      setMarketSchedulerConfig(config);
+      setMarketSchedulerSavedConfig(config);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketSchedulerLoading(false);
+    }
+  }, []);
+
+  const refreshMarketRegistry = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketRegistryLoading(true);
+    try {
+      const result = await window.mytrader.market.listInstrumentRegistry({
+        query: marketRegistryQuery.trim() ? marketRegistryQuery.trim() : null,
+        autoIngest: marketRegistryAutoFilter,
+        limit: 200,
+        offset: 0
+      });
+      setMarketRegistryResult(result);
+      setMarketRegistrySelectedSymbols((prev) =>
+        prev.filter((symbol) =>
+          result.items.some((item) => item.symbol === symbol)
+        )
+      );
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      setMarketRegistryResult(null);
+    } finally {
+      setMarketRegistryLoading(false);
+    }
+  }, [marketRegistryAutoFilter, marketRegistryQuery]);
+
+  const refreshMarketIngestRunDetail = useCallback(async (runId: string) => {
+    if (!window.mytrader) return;
+    const id = runId.trim();
+    if (!id) {
+      setMarketSelectedIngestRunId(null);
+      setMarketSelectedIngestRun(null);
+      return;
+    }
+    setMarketSelectedIngestRunId(id);
+    setMarketSelectedIngestRunLoading(true);
+    try {
+      const detail = await window.mytrader.market.getIngestRunDetail({ id });
+      setMarketSelectedIngestRun(detail);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      setMarketSelectedIngestRun(null);
+    } finally {
+      setMarketSelectedIngestRunLoading(false);
     }
   }, []);
 
@@ -1939,16 +2422,22 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setMarketIngestTriggering(true);
       try {
         await window.mytrader.market.triggerIngest({ scope });
-        setNotice("拉取任务已执行完成。");
-        await refreshMarketIngestRuns();
+        setNotice("拉取任务已加入队列。");
+        await Promise.all([
+          refreshMarketIngestRuns(),
+          refreshMarketIngestControl()
+        ]);
       } catch (err) {
         setError(toUserErrorMessage(err));
-        await refreshMarketIngestRuns();
+        await Promise.all([
+          refreshMarketIngestRuns(),
+          refreshMarketIngestControl()
+        ]);
       } finally {
         setMarketIngestTriggering(false);
       }
     },
-    [refreshMarketIngestRuns]
+    [refreshMarketIngestControl, refreshMarketIngestRuns]
   );
 
   const handleSyncInstrumentCatalog = useCallback(async () => {
@@ -2203,46 +2692,103 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     [refreshMarketWatchlist]
   );
 
-  const handleAddTargetSymbol = useCallback(() => {
-    const symbol = marketTargetsSymbolDraft.trim();
-    if (!symbol) return;
-    setMarketTargetsConfig((prev) => {
-      if (prev.explicitSymbols.includes(symbol)) return prev;
-      return { ...prev, explicitSymbols: [...prev.explicitSymbols, symbol] };
-    });
-    setMarketTargetsSymbolDraft("");
-  }, [marketTargetsSymbolDraft]);
+  const handlePreviewManualTargetSymbols = useCallback(() => {
+    const preview = buildManualTargetsPreview(
+      marketTargetsSymbolDraft,
+      marketTargetsConfig.explicitSymbols
+    );
+    setMarketManualSymbolPreview(preview);
+    setError(null);
+  }, [marketTargetsConfig.explicitSymbols, marketTargetsSymbolDraft]);
 
-  const handleRemoveTargetSymbol = useCallback((symbol: string) => {
-    const key = symbol.trim();
-    if (!key) return;
+  const handleApplyManualTargetSymbols = useCallback(() => {
+    setError(null);
+    const hasPreview =
+      marketManualSymbolPreview.addable.length +
+        marketManualSymbolPreview.existing.length +
+        marketManualSymbolPreview.invalid.length +
+        marketManualSymbolPreview.duplicates >
+      0;
+
+    if (!hasPreview) {
+      setNotice("请先解析输入内容。");
+      return;
+    }
+
+    if (marketManualSymbolPreview.addable.length === 0) {
+      setNotice(
+        `没有可新增标的。已存在 ${marketManualSymbolPreview.existing.length} 个，无效 ${marketManualSymbolPreview.invalid.length} 个。`
+      );
+      return;
+    }
+
+    const nextExplicitSymbols = Array.from(
+      new Set([
+        ...marketTargetsConfig.explicitSymbols,
+        ...marketManualSymbolPreview.addable
+      ])
+    ).sort((left, right) => left.localeCompare(right));
+
     setMarketTargetsConfig((prev) => ({
       ...prev,
-      explicitSymbols: prev.explicitSymbols.filter((item) => item !== key)
+      explicitSymbols: nextExplicitSymbols
     }));
-  }, []);
+
+    const nextPreview = buildManualTargetsPreview(
+      marketTargetsSymbolDraft,
+      nextExplicitSymbols
+    );
+    setMarketManualSymbolPreview(nextPreview);
+
+    setNotice(
+      `已应用 ${marketManualSymbolPreview.addable.length} 个有效标的；无效 ${marketManualSymbolPreview.invalid.length} 个。${
+        marketManualSymbolPreview.existing.length > 0
+          ? `已存在 ${marketManualSymbolPreview.existing.length} 个。`
+          : ""
+      }`
+    );
+  }, [
+    marketManualSymbolPreview,
+    marketTargetsConfig.explicitSymbols,
+    marketTargetsSymbolDraft
+  ]);
+
+  const handleRemoveManualPreviewSymbol = useCallback(
+    (token: string, mode: "addable" | "existing" | "invalid") => {
+      const nextTokens = splitSymbolInputTokens(marketTargetsSymbolDraft).filter(
+        (item) => {
+          if (mode === "addable" || mode === "existing") {
+            return normalizeMarketSymbol(item) !== token;
+          }
+          return item.trim().toUpperCase() !== token.trim().toUpperCase();
+        }
+      );
+      const nextInput = nextTokens.join("\n");
+      setMarketTargetsSymbolDraft(nextInput);
+      setMarketManualSymbolPreview(
+        buildManualTargetsPreview(nextInput, marketTargetsConfig.explicitSymbols)
+      );
+    },
+    [marketTargetsConfig.explicitSymbols, marketTargetsSymbolDraft]
+  );
 
   const handleAddTargetTag = useCallback(
     (raw?: string) => {
       const tag = (raw ?? marketTargetsTagDraft).trim();
       if (!tag) return;
+      if (!tag.includes(":")) {
+        setError("标签必须包含命名空间，例如 industry:白酒。");
+        return;
+      }
       setMarketTargetsConfig((prev) => {
         if (prev.tagFilters.includes(tag)) return prev;
         return { ...prev, tagFilters: [...prev.tagFilters, tag] };
       });
+      setError(null);
       if (raw === undefined) setMarketTargetsTagDraft("");
     },
     [marketTargetsTagDraft]
   );
-
-  const handleRemoveTargetTag = useCallback((tag: string) => {
-    const key = tag.trim();
-    if (!key) return;
-    setMarketTargetsConfig((prev) => ({
-      ...prev,
-      tagFilters: prev.tagFilters.filter((item) => item !== key)
-    }));
-  }, []);
 
   const handleRemoveTempTarget = useCallback(
     async (symbol: string) => {
@@ -2255,8 +2801,11 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       try {
         const next = await window.mytrader.market.removeTempTarget({ symbol: key });
         setMarketTempTargets(next);
-        const preview = await window.mytrader.market.previewTargets();
-        setMarketTargetsPreview(preview);
+        const diff = await window.mytrader.market.previewTargetsDraft({
+          config: marketTargetsConfig
+        });
+        setMarketTargetsDiffPreview(diff);
+        setMarketTargetsPreview(diff.draft);
         setNotice(`已移除临时标的：${key}`);
       } catch (err) {
         setError(toUserErrorMessage(err));
@@ -2264,7 +2813,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
         setMarketTempTargetsLoading(false);
       }
     },
-    []
+    [marketTargetsConfig]
   );
 
   const handlePromoteTempTarget = useCallback(
@@ -2277,10 +2826,20 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setMarketTempTargetsLoading(true);
       setMarketTargetsSaving(true);
       try {
-        const saved = await window.mytrader.market.promoteTempTarget({ symbol: key });
+        const savedRaw = await window.mytrader.market.promoteTempTarget({
+          symbol: key
+        });
+        const saved: MarketTargetsConfig = {
+          ...savedRaw,
+          tagFilters: []
+        };
+        setMarketTargetsSavedConfig(saved);
         setMarketTargetsConfig(saved);
-        const preview = await window.mytrader.market.previewTargets();
-        setMarketTargetsPreview(preview);
+        const diff = await window.mytrader.market.previewTargetsDraft({
+          config: saved
+        });
+        setMarketTargetsDiffPreview(diff);
+        setMarketTargetsPreview(diff.draft);
         const temp = await window.mytrader.market.listTempTargets();
         setMarketTempTargets(temp);
         setNotice(`已转为长期目标：${key}`);
@@ -2300,10 +2859,22 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setNotice(null);
     setMarketTargetsSaving(true);
     try {
-      const saved = await window.mytrader.market.setTargets(marketTargetsConfig);
+      const payload: MarketTargetsConfig = {
+        ...marketTargetsConfig,
+        tagFilters: []
+      };
+      const savedRaw = await window.mytrader.market.setTargets(payload);
+      const saved: MarketTargetsConfig = {
+        ...savedRaw,
+        tagFilters: []
+      };
+      setMarketTargetsSavedConfig(saved);
       setMarketTargetsConfig(saved);
-      const preview = await window.mytrader.market.previewTargets();
-      setMarketTargetsPreview(preview);
+      const diff = await window.mytrader.market.previewTargetsDraft({
+        config: saved
+      });
+      setMarketTargetsDiffPreview(diff);
+      setMarketTargetsPreview(diff.draft);
       setNotice("目标池已保存。");
     } catch (err) {
       setError(toUserErrorMessage(err));
@@ -2311,6 +2882,295 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       setMarketTargetsSaving(false);
     }
   }, [marketTargetsConfig]);
+
+  const refreshMarketTargetsDiff = useCallback(async () => {
+    if (!window.mytrader) return;
+    try {
+      const diff = await window.mytrader.market.previewTargetsDraft({
+        config: marketTargetsConfig
+      });
+      setMarketTargetsDiffPreview(diff);
+      setMarketTargetsPreview(diff.draft);
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    }
+  }, [marketTargetsConfig]);
+
+  const handleResetTargetsDraft = useCallback(() => {
+    if (!marketTargetsSavedConfig) return;
+    setMarketTargetsConfig(marketTargetsSavedConfig);
+    setMarketTargetsSymbolDraft("");
+    setMarketManualSymbolPreview({
+      addable: [],
+      existing: [],
+      invalid: [],
+      duplicates: 0
+    });
+    setNotice("已重置为最近一次已保存配置。");
+  }, [marketTargetsSavedConfig]);
+
+  const handleToggleTempTargetSelection = useCallback((symbol: string) => {
+    const key = symbol.trim();
+    if (!key) return;
+    setMarketSelectedTempTargetSymbols((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    );
+  }, []);
+
+  const handleSelectAllTempTargets = useCallback(() => {
+    if (marketTempTargets.length === 0) {
+      setMarketSelectedTempTargetSymbols([]);
+      return;
+    }
+    const all = marketTempTargets.map((item) => item.symbol);
+    setMarketSelectedTempTargetSymbols((prev) =>
+      prev.length === all.length ? [] : all
+    );
+  }, [marketTempTargets]);
+
+  const handleBatchPromoteTempTargets = useCallback(async () => {
+    if (!window.mytrader) return;
+    if (marketSelectedTempTargetSymbols.length === 0) return;
+    setMarketTargetsSaving(true);
+    setMarketTempTargetsLoading(true);
+    setError(null);
+    try {
+      let promoted = 0;
+      for (const symbol of marketSelectedTempTargetSymbols) {
+        await window.mytrader.market.promoteTempTarget({ symbol });
+        promoted += 1;
+      }
+      setNotice(`已批量转长期：${promoted} 个标的。`);
+      await refreshMarketTargets();
+      await refreshMarketTargetsDiff();
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTargetsSaving(false);
+      setMarketTempTargetsLoading(false);
+      setMarketSelectedTempTargetSymbols([]);
+    }
+  }, [
+    marketSelectedTempTargetSymbols,
+    refreshMarketTargets,
+    refreshMarketTargetsDiff
+  ]);
+
+  const handleBatchRemoveTempTargets = useCallback(async () => {
+    if (!window.mytrader) return;
+    if (marketSelectedTempTargetSymbols.length === 0) return;
+    setMarketTempTargetsLoading(true);
+    setError(null);
+    try {
+      let removed = 0;
+      for (const symbol of marketSelectedTempTargetSymbols) {
+        await window.mytrader.market.removeTempTarget({ symbol });
+        removed += 1;
+      }
+      setNotice(`已批量移除：${removed} 个临时标的。`);
+      await refreshMarketTargets();
+      await refreshMarketTargetsDiff();
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTempTargetsLoading(false);
+      setMarketSelectedTempTargetSymbols([]);
+    }
+  }, [
+    marketSelectedTempTargetSymbols,
+    refreshMarketTargets,
+    refreshMarketTargetsDiff
+  ]);
+
+  const handleBatchExtendTempTargets = useCallback(async () => {
+    if (!window.mytrader) return;
+    if (marketSelectedTempTargetSymbols.length === 0) return;
+    setMarketTempTargetsLoading(true);
+    setError(null);
+    try {
+      for (const symbol of marketSelectedTempTargetSymbols) {
+        await window.mytrader.market.touchTempTarget({ symbol, ttlDays: 7 });
+      }
+      setNotice(`已续期 ${marketSelectedTempTargetSymbols.length} 个临时标的（7天）。`);
+      await refreshMarketTargets();
+      await refreshMarketTargetsDiff();
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketTempTargetsLoading(false);
+    }
+  }, [
+    marketSelectedTempTargetSymbols,
+    refreshMarketTargets,
+    refreshMarketTargetsDiff
+  ]);
+
+  const handlePauseMarketIngest = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketIngestControlUpdating(true);
+    setError(null);
+    try {
+      const status = await window.mytrader.market.pauseIngest();
+      setMarketIngestControlStatus(status);
+      setNotice("已暂停自动拉取。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketIngestControlUpdating(false);
+    }
+  }, []);
+
+  const handleResumeMarketIngest = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketIngestControlUpdating(true);
+    setError(null);
+    try {
+      const status = await window.mytrader.market.resumeIngest();
+      setMarketIngestControlStatus(status);
+      setNotice("已继续执行当前拉取任务。");
+      await refreshMarketIngestRuns();
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketIngestControlUpdating(false);
+    }
+  }, [refreshMarketIngestRuns]);
+
+  const handleCancelMarketIngest = useCallback(async () => {
+    if (!window.mytrader) return;
+    setMarketIngestControlUpdating(true);
+    setError(null);
+    try {
+      const status = await window.mytrader.market.cancelIngest();
+      setMarketIngestControlStatus(status);
+      setNotice("已请求取消当前拉取任务。");
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+    } finally {
+      setMarketIngestControlUpdating(false);
+    }
+  }, []);
+
+  const updateMarketSchedulerConfig = useCallback(
+    (patch: Partial<MarketIngestSchedulerConfig>) => {
+      setMarketSchedulerConfig((prev) => (prev ? { ...prev, ...patch } : prev));
+    },
+    []
+  );
+
+  const handleSaveMarketSchedulerConfig = useCallback(async () => {
+    if (!window.mytrader || !marketSchedulerConfig) return;
+    setError(null);
+    setMarketSchedulerSaving(true);
+    try {
+      const saved = await window.mytrader.market.setIngestSchedulerConfig(
+        marketSchedulerConfig
+      );
+      setMarketSchedulerConfig(saved);
+      setMarketSchedulerSavedConfig(saved);
+      setNotice("调度配置已保存。");
+      return true;
+    } catch (err) {
+      setError(toUserErrorMessage(err));
+      return false;
+    } finally {
+      setMarketSchedulerSaving(false);
+    }
+  }, [marketSchedulerConfig]);
+
+  const handleRunMarketIngestNow = useCallback(() => {
+    if (!marketSchedulerConfig) return;
+    if (marketIngestTriggering) {
+      setMarketTriggerIngestBlockedMessage("正在提交拉取请求，请稍后再试。");
+      setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    if (marketIngestControlState === "running") {
+      setMarketTriggerIngestBlockedMessage(
+        "当前已有拉取任务正在执行，请等待完成后再执行拉取。"
+      );
+      setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    if (marketIngestControlState === "paused") {
+      setMarketTriggerIngestBlockedMessage(
+        "当前任务已暂停，请先继续或取消后再执行拉取。"
+      );
+      setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    if (marketIngestControlState === "canceling") {
+      setMarketTriggerIngestBlockedMessage("当前任务正在取消中，请稍后再试。");
+      setMarketTriggerIngestBlockedOpen(true);
+      return;
+    }
+    void handleTriggerMarketIngest(marketSchedulerConfig.scope);
+  }, [
+    handleTriggerMarketIngest,
+    marketIngestControlState,
+    marketIngestTriggering,
+    marketSchedulerConfig
+  ]);
+
+  const handleToggleRegistrySymbol = useCallback((symbol: string) => {
+    const key = symbol.trim();
+    if (!key) return;
+    setMarketRegistrySelectedSymbols((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    );
+  }, []);
+
+  const handleToggleSelectAllRegistry = useCallback(() => {
+    const symbols = marketRegistryResult?.items.map((item) => item.symbol) ?? [];
+    if (symbols.length === 0) return;
+    setMarketRegistrySelectedSymbols((prev) =>
+      prev.length === symbols.length ? [] : symbols
+    );
+  }, [marketRegistryResult?.items]);
+
+  const handleSetRegistryAutoIngest = useCallback(
+    async (symbol: string, enabled: boolean) => {
+      if (!window.mytrader) return;
+      setMarketRegistryUpdating(true);
+      try {
+        await window.mytrader.market.setInstrumentAutoIngest({ symbol, enabled });
+        await Promise.all([refreshMarketRegistry(), refreshMarketTargetsDiff()]);
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+      } finally {
+        setMarketRegistryUpdating(false);
+      }
+    },
+    [refreshMarketRegistry, refreshMarketTargetsDiff]
+  );
+
+  const handleBatchSetRegistryAutoIngest = useCallback(
+    async (enabled: boolean) => {
+      if (!window.mytrader) return;
+      if (marketRegistrySelectedSymbols.length === 0) return;
+      setMarketRegistryUpdating(true);
+      setError(null);
+      try {
+        await window.mytrader.market.batchSetInstrumentAutoIngest({
+          symbols: marketRegistrySelectedSymbols,
+          enabled
+        });
+        setNotice(
+          `已批量${enabled ? "启用" : "禁用"}自动拉取：${marketRegistrySelectedSymbols.length} 个标的。`
+        );
+        await Promise.all([refreshMarketRegistry(), refreshMarketTargetsDiff()]);
+      } catch (err) {
+        setError(toUserErrorMessage(err));
+      } finally {
+        setMarketRegistryUpdating(false);
+      }
+    },
+    [
+      marketRegistrySelectedSymbols,
+      refreshMarketRegistry,
+      refreshMarketTargetsDiff
+    ]
+  );
 
   const handleMarketExplorerResizePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -2362,6 +3222,18 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   }, [activeView, refreshMarketTags, refreshMarketWatchlist]);
 
   useEffect(() => {
+    if (activeView !== "data-analysis" || analysisTab !== "instrument") return;
+    if (!window.mytrader) return;
+    if (marketWatchlistItems.length > 0) return;
+    refreshMarketWatchlist().catch(() => undefined);
+  }, [
+    activeView,
+    analysisTab,
+    marketWatchlistItems.length,
+    refreshMarketWatchlist
+  ]);
+
+  useEffect(() => {
     if (!marketInstrumentDetailsOpen) return;
     refreshManualThemeOptions().catch(() => undefined);
   }, [marketInstrumentDetailsOpen, refreshManualThemeOptions]);
@@ -2374,20 +3246,126 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
       refreshMarketTokenStatus().catch(() => undefined);
       refreshMarketTargets().catch(() => undefined);
       refreshMarketIngestRuns().catch(() => undefined);
+      refreshMarketIngestControl().catch(() => undefined);
+      refreshMarketSchedulerConfig().catch(() => undefined);
+      refreshMarketRegistry().catch(() => undefined);
+      return;
+    }
+
+    if (otherTab === "instrument-management") {
+      refreshMarketTargets().catch(() => undefined);
+      refreshMarketTags(marketTagManagementQuery).catch(() => undefined);
       return;
     }
 
     if (otherTab === "data-status") {
       refreshMarketTokenStatus().catch(() => undefined);
       refreshMarketIngestRuns().catch(() => undefined);
+      refreshMarketIngestControl().catch(() => undefined);
     }
   }, [
     activeView,
     otherTab,
+    refreshMarketIngestControl,
     refreshMarketIngestRuns,
+    refreshMarketRegistry,
+    refreshMarketSchedulerConfig,
+    refreshMarketTags,
+    marketTagManagementQuery,
     refreshMarketTargets,
     refreshMarketTokenStatus
   ]);
+
+  useEffect(() => {
+    if (activeView !== "other" || otherTab !== "data-management") return;
+    if (!window.mytrader) return;
+    const timer = window.setTimeout(() => {
+      refreshMarketTargetsDiff().catch(() => undefined);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [activeView, otherTab, marketTargetsConfig, refreshMarketTargetsDiff]);
+
+  useEffect(() => {
+    if (activeView !== "other" || otherTab !== "instrument-management") return;
+    if (!window.mytrader) return;
+    const timer = window.setTimeout(() => {
+      refreshMarketTags(marketTagManagementQuery).catch(() => undefined);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [activeView, otherTab, marketTagManagementQuery, refreshMarketTags]);
+
+  useEffect(() => {
+    if (activeView !== "other" || otherTab !== "data-management") return;
+    if (!window.mytrader) return;
+    const timer = window.setTimeout(() => {
+      refreshMarketRegistry().catch(() => undefined);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeView,
+    otherTab,
+    marketRegistryAutoFilter,
+    marketRegistryQuery,
+    refreshMarketRegistry
+  ]);
+
+  useEffect(() => {
+    if (activeView !== "other") return;
+    if (otherTab !== "data-management" && otherTab !== "data-status") return;
+    if (!window.mytrader) return;
+    const interval = window.setInterval(() => {
+      refreshMarketIngestControl().catch(() => undefined);
+      refreshMarketIngestRuns().catch(() => undefined);
+    }, 8000);
+    return () => window.clearInterval(interval);
+  }, [activeView, otherTab, refreshMarketIngestControl, refreshMarketIngestRuns]);
+
+  useEffect(() => {
+    if (!marketSelectedIngestRunId) return;
+    if (marketIngestRuns.some((run) => run.id === marketSelectedIngestRunId)) return;
+    setMarketSelectedIngestRunId(null);
+    setMarketSelectedIngestRun(null);
+  }, [marketIngestRuns, marketSelectedIngestRunId]);
+
+  useEffect(() => {
+    if (!marketSelectedIngestRunId) return;
+    if (activeView !== "other" || otherTab !== "data-status") return;
+    refreshMarketIngestRunDetail(marketSelectedIngestRunId).catch(() => undefined);
+  }, [
+    activeView,
+    marketSelectedIngestRunId,
+    otherTab,
+    refreshMarketIngestRunDetail
+  ]);
+
+  useEffect(() => {
+    const previousView = marketDataManagementPrevViewRef.current;
+    const previousOtherTab = marketDataManagementPrevOtherTabRef.current;
+    const leftDataManagement =
+      previousView === "other" &&
+      previousOtherTab === "data-management" &&
+      (activeView !== "other" || otherTab !== "data-management");
+
+    marketDataManagementPrevViewRef.current = activeView;
+    marketDataManagementPrevOtherTabRef.current = otherTab;
+
+    if (!leftDataManagement || !marketTargetsDirty) {
+      marketDataManagementNavigationGuardRef.current = false;
+      return;
+    }
+
+    if (marketDataManagementNavigationGuardRef.current) {
+      marketDataManagementNavigationGuardRef.current = false;
+      return;
+    }
+
+    const confirmed = window.confirm("目标池有未保存修改，确定离开吗？");
+    if (confirmed) return;
+
+    marketDataManagementNavigationGuardRef.current = true;
+    setActiveView("other");
+    setOtherTab("data-management");
+  }, [activeView, marketTargetsDirty, otherTab]);
 
   useEffect(() => {
     if (activeView !== "market") return;
@@ -3096,56 +4074,29 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                         <EmptyState message="暂无收益曲线。" />
                       )}
 
-                      {contributionBreakdown ? (
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <div className="text-xs uppercase tracking-wider text-slate-500">
-                                收益贡献
-                              </div>
-                              <div className="text-[11px] text-slate-400">
-                                区间 {contributionBreakdown.startDate} ~ {contributionBreakdown.endDate}
-                              </div>
+                      <div className="bg-slate-50 dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <div className="text-xs uppercase tracking-wider text-slate-500">
+                              深入分析
                             </div>
-                            <div className="text-[11px] text-slate-400">
-                              默认展示 Top {CONTRIBUTION_TOP_N}
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                              贡献分解、风险拆解等详细分析请在「数据分析」中查看。
                             </div>
                           </div>
-                          <div className="text-[11px] text-slate-400">
-                            按区间起止价格与期末持仓估算。
-                          </div>
-                          {contributionBreakdown.reason && (
-                            <div className="text-xs text-slate-500 dark:text-slate-400">
-                              {contributionBreakdown.reason}
-                            </div>
-                          )}
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            <ContributionTable
-                              title="标的贡献"
-                              entries={contributionBreakdown.bySymbol}
-                              showAll={showAllSymbolContribution}
-                              topCount={CONTRIBUTION_TOP_N}
-                              onToggle={() =>
-                                setShowAllSymbolContribution((prev) => !prev)
-                              }
-                              showMarketValue={showAllSymbolContribution}
-                            />
-                            <ContributionTable
-                              title="资产类别贡献"
-                              labelHeader="类别"
-                              entries={contributionBreakdown.byAssetClass}
-                              showAll={showAllAssetContribution}
-                              topCount={CONTRIBUTION_TOP_N}
-                              onToggle={() =>
-                                setShowAllAssetContribution((prev) => !prev)
-                              }
-                              showMarketValue={showAllAssetContribution}
-                            />
-                          </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="functions"
+                            onClick={() => {
+                              setActiveView("data-analysis");
+                              setAnalysisTab("portfolio");
+                            }}
+                          >
+                            打开数据分析
+                          </Button>
                         </div>
-                      ) : (
-                        <EmptyState message="暂无贡献数据。" />
-                      )}
+                      </div>
 
 	                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 	                        <div className="bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark rounded-lg p-4">
@@ -3526,6 +4477,571 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                 </div>
               )}
             </Panel>
+          )}
+
+          {/* View: Data Analysis */}
+          {activeView === "data-analysis" && (
+            <div className="space-y-6">
+              <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
+                <div className="flex items-center gap-0 overflow-x-auto px-3">
+                  {analysisTabs.map((tab) => {
+                    const isActive = analysisTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors border-b-2 ${
+                          isActive
+                            ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-surface-dark"
+                            : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
+                        }`}
+                        onClick={() => setAnalysisTab(tab.key)}
+                        title={tab.description}
+                      >
+                        <span className="material-icons-outlined text-base">{tab.icon}</span>
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="px-3 py-4 space-y-6 max-w-6xl">
+                <Panel>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">数据分析</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      更全面的分析入口：组合 / 个股 / 指数 / 板块。
+                    </p>
+                  </div>
+
+                  {analysisTab === "portfolio" && (
+                    <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        当前组合：{" "}
+                        <span className="font-medium text-slate-700 dark:text-slate-200">
+                          {activePortfolio?.name ?? "--"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {performanceRanges.map((range) => {
+                          const isActive = performanceRange === range.key;
+                          return (
+                            <button
+                              key={range.key}
+                              type="button"
+                              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                                isActive
+                                  ? "bg-primary text-white border-primary"
+                                  : "bg-white dark:bg-surface-dark text-slate-500 dark:text-slate-300 border-slate-200 dark:border-border-dark hover:text-slate-900 dark:hover:text-white"
+                              }`}
+                              onClick={() => setPerformanceRange(range.key)}
+                            >
+                              {range.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </Panel>
+
+                {(analysisTab === "index" || analysisTab === "sector") && (
+                  <PlaceholderPanel
+                    title={`数据分析 · ${analysisTabs.find((tab) => tab.key === analysisTab)?.label ?? ""}`}
+                    description={analysisTabs.find((tab) => tab.key === analysisTab)?.description ?? ""}
+                  />
+                )}
+
+                {analysisTab === "instrument" && (
+                  <>
+                    <Panel>
+                      <div className="space-y-3">
+                        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                          <div className="w-full xl:max-w-2xl space-y-2">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              搜索标的（代码/名称）
+                            </div>
+                            <Input
+                              value={analysisInstrumentQuery}
+                              onChange={(event) => setAnalysisInstrumentQuery(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key !== "Enter") return;
+                                if (analysisInstrumentSearchResults.length === 0) return;
+                                event.preventDefault();
+                                setAnalysisInstrumentSymbol(
+                                  analysisInstrumentSearchResults[0].symbol
+                                );
+                              }}
+                              placeholder="例如：600519 / 贵州茅台 / 510300"
+                            />
+                            {analysisInstrumentSearchLoading && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                搜索中...
+                              </div>
+                            )}
+                            {!analysisInstrumentSearchLoading &&
+                              analysisInstrumentQuery.trim() !== "" &&
+                              analysisInstrumentSearchResults.length === 0 && (
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                  未找到匹配标的。
+                                </div>
+                              )}
+                            {!analysisInstrumentSearchLoading &&
+                              analysisInstrumentSearchResults.length > 0 && (
+                                <div className="max-h-56 overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
+                                  {analysisInstrumentSearchResults.slice(0, 20).map((item) => {
+                                    const selected =
+                                      analysisInstrumentSymbol === item.symbol;
+                                    return (
+                                      <button
+                                        key={item.symbol}
+                                        type="button"
+                                        className={`w-full text-left px-3 py-2 border-b border-slate-200 dark:border-border-dark last:border-b-0 text-sm ${
+                                          selected
+                                            ? "bg-slate-100 dark:bg-background-dark text-slate-900 dark:text-white"
+                                            : "hover:bg-slate-50 dark:hover:bg-background-dark/80 text-slate-700 dark:text-slate-200"
+                                        }`}
+                                        onClick={() =>
+                                          setAnalysisInstrumentSymbol(item.symbol)
+                                        }
+                                      >
+                                        <div className="font-mono">{item.symbol}</div>
+                                        <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                                          {item.name ?? "--"} · {item.market} · {item.assetClass}
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                          </div>
+
+                          <div className="space-y-2 xl:pl-2">
+                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                              区间
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {marketChartRanges.map((range) => {
+                                const isActive = analysisInstrumentRange === range.key;
+                                return (
+                                  <button
+                                    key={range.key}
+                                    type="button"
+                                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                                      isActive
+                                        ? "bg-primary text-white border-primary"
+                                        : "bg-white dark:bg-surface-dark text-slate-500 dark:text-slate-300 border-slate-200 dark:border-border-dark hover:text-slate-900 dark:hover:text-white"
+                                    }`}
+                                    onClick={() => setAnalysisInstrumentRange(range.key)}
+                                  >
+                                    {range.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                            快捷标的（持仓 + 自选）
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {analysisInstrumentQuickSymbols.length === 0 && (
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                暂无快捷标的，可先在上方搜索。
+                              </span>
+                            )}
+                            {analysisInstrumentQuickSymbols.map((symbol) => {
+                              const selected = analysisInstrumentSymbol === symbol;
+                              return (
+                                <button
+                                  key={symbol}
+                                  type="button"
+                                  className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                                    selected
+                                      ? "border-primary bg-primary/10 text-primary dark:bg-primary/20"
+                                      : "border-slate-200 dark:border-border-dark text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
+                                  }`}
+                                  onClick={() => setAnalysisInstrumentSymbol(symbol)}
+                                  title={analysisInstrumentNameBySymbol.get(symbol) ?? symbol}
+                                >
+                                  {symbol}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </Panel>
+
+                    {!analysisInstrumentSymbol && (
+                      <EmptyState message="请选择一个标的以查看分析结果。" />
+                    )}
+
+                    {analysisInstrumentSymbol && analysisInstrumentLoading && (
+                      <EmptyState message="正在加载个股分析..." />
+                    )}
+
+                    {analysisInstrumentSymbol &&
+                      !analysisInstrumentLoading &&
+                      analysisInstrumentError && (
+                        <ErrorState
+                          message={analysisInstrumentError}
+                          onRetry={() => void loadAnalysisInstrument(analysisInstrumentSymbol)}
+                        />
+                      )}
+
+                    {analysisInstrumentSymbol &&
+                      !analysisInstrumentLoading &&
+                      !analysisInstrumentError && (
+                        <>
+                          <Panel>
+                            <div className="space-y-4">
+                              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                                <div>
+                                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                                    {analysisInstrumentSymbol}
+                                  </h3>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    {analysisInstrumentProfile?.name ?? "--"} ·{" "}
+                                    {analysisInstrumentProfile?.market ?? "--"} ·{" "}
+                                    {analysisInstrumentProfile?.currency ?? "--"}
+                                  </p>
+                                </div>
+                                <Badge>
+                                  区间 {formatDateRange(
+                                    analysisInstrumentRangeSummary.startDate,
+                                    analysisInstrumentRangeSummary.endDate
+                                  )}
+                                </Badge>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <SummaryCard
+                                  label="最新价"
+                                  value={formatNumber(analysisInstrumentQuote?.close ?? null, 2)}
+                                />
+                                <SummaryCard
+                                  label="当日涨跌"
+                                  value={formatSignedPctNullable(
+                                    analysisInstrumentQuote?.changePct ?? null
+                                  )}
+                                  trend={
+                                    analysisInstrumentQuote?.changePct === null ||
+                                    analysisInstrumentQuote?.changePct === undefined
+                                      ? undefined
+                                      : analysisInstrumentQuote.changePct >= 0
+                                        ? "up"
+                                        : "down"
+                                  }
+                                />
+                                <SummaryCard
+                                  label="区间收益"
+                                  value={formatSignedPctNullable(
+                                    analysisInstrumentRangeSummary.rangeReturn
+                                  )}
+                                  trend={
+                                    analysisInstrumentRangeSummary.rangeReturn === null
+                                      ? undefined
+                                      : analysisInstrumentRangeSummary.rangeReturn >= 0
+                                        ? "up"
+                                        : "down"
+                                  }
+                                />
+                                <SummaryCard
+                                  label="持仓成本"
+                                  value={formatNumber(analysisInstrumentHoldingUnitCost, 2)}
+                                />
+                              </div>
+                            </div>
+                          </Panel>
+
+                          <Panel>
+                            <div className="space-y-3">
+                              <div className="text-xs uppercase tracking-wider text-slate-500">
+                                价格走势
+                              </div>
+                              <div className="h-[300px] rounded-md border border-slate-200 dark:border-border-dark overflow-hidden bg-white dark:bg-background-dark/40">
+                                {!analysisInstrumentHasEnoughData ? (
+                                  <EmptyState message="暂无足够行情数据。" />
+                                ) : (
+                                  <ChartErrorBoundary
+                                    resetKey={`${analysisInstrumentSymbol}:${analysisInstrumentRange}:${analysisInstrumentBars.length}`}
+                                  >
+                                    <MarketAreaChart
+                                      bars={analysisInstrumentBars}
+                                      tone={analysisInstrumentTone}
+                                    />
+                                  </ChartErrorBoundary>
+                                )}
+                              </div>
+                            </div>
+                          </Panel>
+
+                          <Panel>
+                            <div className="text-xs uppercase tracking-wider text-slate-500 mb-3">
+                              分析明细
+                            </div>
+                            <div className="overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
+                              <table className="w-full text-sm">
+                                <tbody className="divide-y divide-slate-200 dark:divide-border-dark">
+                                  <tr>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                                      区间最高价
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-900 dark:text-white">
+                                      {formatNumber(analysisInstrumentRangeSummary.rangeHigh, 2)}
+                                    </td>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                      区间最低价
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-900 dark:text-white">
+                                      {formatNumber(analysisInstrumentRangeSummary.rangeLow, 2)}
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                                      最新开/高/低/收
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-900 dark:text-white">
+                                      {`${formatNumber(analysisInstrumentLatestBar?.open ?? null, 2)} / ${formatNumber(analysisInstrumentLatestBar?.high ?? null, 2)} / ${formatNumber(analysisInstrumentLatestBar?.low ?? null, 2)} / ${formatNumber(analysisInstrumentLatestBar?.close ?? null, 2)}`}
+                                    </td>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                      平均成交量
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-900 dark:text-white">
+                                      {formatCnWanYiNullable(
+                                        analysisInstrumentRangeSummary.avgVolume,
+                                        2,
+                                        0
+                                      )}
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                                      持仓数量
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-900 dark:text-white">
+                                      {formatNumber(
+                                        analysisInstrumentPositionValuation?.position.quantity ?? null,
+                                        2
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                      目标价
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-900 dark:text-white">
+                                      {formatNumber(analysisInstrumentTargetPrice, 2)}
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+                                      标签
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-slate-700 dark:text-slate-200">
+                                      {analysisInstrumentUserTags.length > 0
+                                        ? analysisInstrumentUserTags.slice(0, 8).join("、")
+                                        : "--"}
+                                    </td>
+                                    <td className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-border-dark">
+                                      最新交易日
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono text-slate-900 dark:text-white">
+                                      {analysisInstrumentQuote?.tradeDate ?? "--"}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </Panel>
+                        </>
+                      )}
+                  </>
+                )}
+
+                {analysisTab === "portfolio" && (
+                  <>
+                    <Panel>
+                  <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between mb-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">组合分析概览</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        组合收益、贡献与风险共享同一计算区间（详版入口）。
+                      </p>
+                    </div>
+                  </div>
+
+                {performanceLoading && <EmptyState message="正在加载分析数据..." />}
+                {!performanceLoading && performanceError && (
+                  <ErrorState
+                    message={performanceError}
+                    onRetry={() => {
+                      if (!activePortfolioId) return;
+                      loadPerformance(activePortfolioId, performanceRange).catch((err) =>
+                        setPerformanceError(toUserErrorMessage(err))
+                      );
+                    }}
+                  />
+                )}
+                {!performanceLoading && !performanceError && !activePortfolio && (
+                  <EmptyState message="请先选择或创建组合。" />
+                )}
+                {!performanceLoading &&
+                  !performanceError &&
+                  activePortfolio &&
+                  !performanceResult && <EmptyState message="暂无分析数据。" />}
+
+                {!performanceLoading &&
+                  !performanceError &&
+                  performanceResult && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <SummaryCard
+                          label="当前口径"
+                          value={formatPerformanceMethod(performance?.selectedMethod ?? "none")}
+                        />
+                        <SummaryCard
+                          label="区间"
+                          value={formatDateRange(
+                            selectedPerformance?.startDate ?? performanceSeries?.startDate ?? null,
+                            selectedPerformance?.endDate ?? performanceSeries?.endDate ?? null
+                          )}
+                        />
+                        <SummaryCard
+                          label="总收益率"
+                          value={formatPctNullable(selectedPerformance?.totalReturn ?? null)}
+                          trend={selectedPerformance && selectedPerformance.totalReturn >= 0 ? "up" : "down"}
+                        />
+                        <SummaryCard
+                          label="年化收益率"
+                          value={formatPctNullable(selectedPerformance?.annualizedReturn ?? null)}
+                          trend={
+                            selectedPerformance &&
+                            selectedPerformance.annualizedReturn !== null &&
+                            selectedPerformance.annualizedReturn >= 0
+                              ? "up"
+                              : "down"
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
+              </Panel>
+
+                    {!performanceLoading &&
+                !performanceError &&
+                performanceResult &&
+                performanceSeries && (
+                  <Panel>
+                    <PerformanceChart series={performanceSeries} />
+                  </Panel>
+                )}
+
+                    {!performanceLoading &&
+                !performanceError &&
+                performanceResult && (
+                  <Panel>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-2">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">贡献分解</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          标的与资产类别贡献，按当前区间计算。
+                        </p>
+                      </div>
+                      {contributionBreakdown && (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                          {contributionBreakdown.startDate} ~ {contributionBreakdown.endDate}
+                        </span>
+                      )}
+                    </div>
+
+                    {!contributionBreakdown && <EmptyState message="暂无贡献数据。" />}
+
+                    {contributionBreakdown && (
+                      <div className="space-y-4">
+                        {contributionBreakdown.reason && (
+                          <div className="text-[11px] text-amber-600 dark:text-amber-400">
+                            {contributionBreakdown.reason}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          <ContributionTable
+                            title="标的贡献"
+                            entries={contributionBreakdown.bySymbol}
+                            showAll={showAllSymbolContribution}
+                            topCount={CONTRIBUTION_TOP_N}
+                            showMarketValue={showAllSymbolContribution}
+                            onToggle={() => setShowAllSymbolContribution((prev) => !prev)}
+                          />
+                          <ContributionTable
+                            title="资产类别贡献"
+                            entries={contributionBreakdown.byAssetClass}
+                            labelHeader="资产类别"
+                            showAll={showAllAssetContribution}
+                            topCount={CONTRIBUTION_TOP_N}
+                            showMarketValue={showAllAssetContribution}
+                            onToggle={() => setShowAllAssetContribution((prev) => !prev)}
+                          />
+                        </div>
+                        {contributionBreakdown.missingSymbols.length > 0 && (
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            缺少行情：{contributionBreakdown.missingSymbols.slice(0, 6).join(", ")}
+                            {contributionBreakdown.missingSymbols.length > 6 ? " ..." : ""}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Panel>
+                )}
+
+                    {!performanceLoading &&
+                !performanceError &&
+                performanceResult && (
+                  <Panel>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-2">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">风险与回撤</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          基于 NAV 与 TWR 序列计算的波动率与最大回撤。
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300 ml-2">
+                        <input
+                          type="checkbox"
+                          checked={riskAnnualized}
+                          onChange={(e) => setRiskAnnualized(e.target.checked)}
+                          className="h-3.5 w-3.5 rounded-none border-slate-300 text-primary focus:ring-primary"
+                        />
+                        年化波动
+                      </label>
+                    </div>
+
+                    {!riskMetrics && <EmptyState message="暂无风险数据。" />}
+
+                    {riskMetrics && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <RiskMetricCard
+                          title="NAV 序列"
+                          metrics={riskMetrics.nav}
+                          annualized={riskAnnualized}
+                        />
+                        <RiskMetricCard
+                          title="TWR 序列"
+                          metrics={riskMetrics.twr}
+                          annualized={riskAnnualized}
+                        />
+                      </div>
+                    )}
+                  </Panel>
+                )}
+                  </>
+                )}
+              </div>
+            </div>
           )}
 
           {/* View: Market */}
@@ -5598,7 +7114,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                 </div>
               </div>
 
-              <div className="pt-6 space-y-6 max-w-5xl">
+              <div className="pt-6 space-y-6 w-full max-w-none">
                 {otherTab === "data-management" && (
                   <>
                     <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark overflow-hidden">
@@ -5704,10 +7220,47 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                           </div>
                           <div className="px-3 py-2">
                             <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                              标签筛选
+                              临时标的
                             </div>
                             <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
-                              {marketTargetsConfig.tagFilters.length}
+                              {marketTempTargets.length}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              运行控制
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketIngestControlStatus
+                                ? formatIngestControlStateLabel(
+                                    marketIngestControlStatus.state
+                                  )
+                                : "--"}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              队列长度
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketIngestControlStatus
+                                ? marketIngestControlStatus.queueLength
+                                : "--"}
+                            </div>
+                          </div>
+                          <div className="px-3 py-2">
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              当前任务
+                            </div>
+                            <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                              {marketIngestControlStatus?.currentJob
+                                ? formatIngestRunScopeLabel(
+                                    marketIngestControlStatus.currentJob.scope
+                                  )
+                                : "--"}
                             </div>
                           </div>
                         </div>
@@ -5803,219 +7356,961 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                     <section className="space-y-3">
                       <div className="flex items-center justify-between gap-3">
                         <h3 className="font-bold text-slate-900 dark:text-white">
+                          调度与运行控制
+                        </h3>
+                      </div>
+
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3">
+                        {!marketSchedulerConfig && !marketSchedulerLoading && (
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            --
+                          </div>
+                        )}
+                        {marketSchedulerLoading && !marketSchedulerConfig && (
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            加载中...
+                          </div>
+                        )}
+                        {marketSchedulerConfig && (
+                          <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_1.35fr] gap-3">
+                            <div className="space-y-3 xl:pr-5 xl:border-r border-slate-200/70 dark:border-border-dark/70">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <FormGroup
+                                  label={
+                                    <span className="inline-flex items-center gap-1">
+                                      执行时间
+                                      <HelpHint text="每天在该时间触发自动拉取（24小时制，格式 HH:mm）。" />
+                                    </span>
+                                  }
+                                >
+                                  <Input
+                                    value={marketSchedulerConfig.runAt}
+                                    onChange={(event) =>
+                                      updateMarketSchedulerConfig({
+                                        runAt: event.target.value
+                                      })
+                                    }
+                                    placeholder="19:30"
+                                    className="h-8 font-mono text-sm"
+                                  />
+                                </FormGroup>
+                                <FormGroup
+                                  label={
+                                    <span className="inline-flex items-center gap-1">
+                                      拉取范围
+                                      <HelpHint text={"控制每次定时任务拉取对象：\n目标池 + 全市场：先维护目标池，再维护全市场。\n仅目标池：只更新目标池标的。\n仅全市场：只执行全市场维护。"} />
+                                    </span>
+                                  }
+                                >
+                                  <PopoverSelect
+                                    value={marketSchedulerConfig.scope}
+                                    onChangeValue={(value) =>
+                                      updateMarketSchedulerConfig({
+                                        scope: value as "targets" | "universe" | "both"
+                                      })
+                                    }
+                                    options={[
+                                      { value: "both", label: "目标池 + 全市场" },
+                                      { value: "targets", label: "仅目标池" },
+                                      { value: "universe", label: "仅全市场" }
+                                    ]}
+                                    buttonClassName="h-8 pl-3 text-sm"
+                                  />
+                                </FormGroup>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon="tune"
+                                  onClick={() => setMarketSchedulerAdvancedOpen(true)}
+                                  className="min-w-[120px] justify-center"
+                                >
+                                  更多设置
+                                </Button>
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  icon="save"
+                                  onClick={handleSaveMarketSchedulerConfig}
+                                  disabled={
+                                    marketSchedulerSaving ||
+                                    !marketSchedulerConfig ||
+                                    !marketSchedulerDirty
+                                  }
+                                  className="min-w-[136px] justify-center"
+                                >
+                                  保存调度
+                                </Button>
+                              </div>
+                              {marketSchedulerDirty && (
+                                <div className="text-xs text-amber-600 dark:text-amber-300">
+                                  存在未保存变更
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="space-y-3 xl:pl-0">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div className="space-y-1.5">
+                                  <div className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 dark:text-slate-400">
+                                    状态
+                                    <HelpHint text="当前拉取执行状态：空闲 / 运行中 / 已暂停 / 取消中。" />
+                                  </div>
+                                  <div className="h-8 rounded-md border border-slate-200 dark:border-border-dark px-3 flex items-center">
+                                    <span className="inline-flex items-center gap-2 font-mono text-sm text-slate-700 dark:text-slate-200">
+                                      <span>
+                                        {marketIngestControlStatus
+                                          ? formatIngestControlStateLabel(
+                                              marketIngestControlStatus.state
+                                            )
+                                          : "--"}
+                                      </span>
+                                      <span
+                                        className={`inline-block h-2.5 w-2.5 rounded-full ${getIngestControlStateDotClass(
+                                          marketIngestControlStatus?.state ?? null
+                                        )}`}
+                                      />
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <div className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 dark:text-slate-400">
+                                    队列
+                                    <HelpHint text="等待执行的拉取任务数量（含当前排队项）。" />
+                                  </div>
+                                  <div className="h-8 rounded-md border border-slate-200 dark:border-border-dark px-3 flex items-center font-mono text-sm text-slate-700 dark:text-slate-200">
+                                    {marketIngestControlStatus?.queueLength ?? "--"}
+                                  </div>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <div className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 dark:text-slate-400">
+                                    Run ID
+                                    <HelpHint text="当前运行任务的唯一标识；空闲时为空。" />
+                                  </div>
+                                  <div className="h-8 rounded-md border border-slate-200 dark:border-border-dark px-3 flex items-center font-mono text-sm text-slate-700 dark:text-slate-200 truncate">
+                                    {marketIngestControlStatus?.currentRunId ?? "--"}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon="pause"
+                                  onClick={handlePauseMarketIngest}
+                                  disabled={!marketCanPauseIngest}
+                                  className="min-w-[108px] justify-center"
+                                >
+                                  暂停
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  icon="play_arrow"
+                                  onClick={handleResumeMarketIngest}
+                                  disabled={!marketCanResumeIngest}
+                                  className="min-w-[108px] justify-center"
+                                >
+                                  继续
+                                </Button>
+                                <span className="hidden md:block h-6 w-px mx-1 bg-slate-200 dark:bg-border-dark" />
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  icon="play_circle"
+                                  onClick={handleRunMarketIngestNow}
+                                  disabled={!marketCanTriggerIngestNow}
+                                  className="min-w-[124px] justify-center"
+                                >
+                                  执行拉取
+                                </Button>
+                                <Button
+                                  variant="danger"
+                                  size="sm"
+                                  icon="cancel"
+                                  onClick={handleCancelMarketIngest}
+                                  disabled={!marketCanCancelIngest}
+                                  className="min-w-[124px] justify-center"
+                                >
+                                  取消
+                                </Button>
+                              </div>
+                              {!marketTokenStatus?.configured && (
+                                <div className="text-[11px] text-amber-600 dark:text-amber-300">
+                                  执行拉取需要先配置可用的数据源令牌。
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    <Modal
+                      open={marketSchedulerAdvancedOpen}
+                      title="调度高级设置"
+                      onClose={() => setMarketSchedulerAdvancedOpen(false)}
+                    >
+                      {marketSchedulerConfig ? (
+                        <div className="space-y-4">
+                          <div className="rounded-lg border border-slate-200 dark:border-border-dark bg-slate-50/80 dark:bg-background-dark/40 p-4">
+                            <div className="text-base font-semibold text-slate-900 dark:text-white">
+                              自动调度补充项
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-slate-200 dark:border-border-dark p-4 space-y-4">
+                            <label className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-4 w-4 accent-primary"
+                                checked={marketSchedulerConfig.enabled}
+                                onChange={(event) =>
+                                  updateMarketSchedulerConfig({
+                                    enabled: event.target.checked
+                                  })
+                                }
+                              />
+                              <span className="space-y-1">
+                                <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900 dark:text-white">
+                                  启用定时调度
+                                  <HelpHint text="关闭后不会按计划自动触发，但不影响手动拉取。" />
+                                </span>
+                              </span>
+                            </label>
+
+                            <FormGroup
+                              label={
+                                <span className="inline-flex items-center gap-1">时区</span>
+                              }
+                            >
+                              <PopoverSelect
+                                value={marketSchedulerConfig.timezone}
+                                onChangeValue={(value) =>
+                                  updateMarketSchedulerConfig({ timezone: value })
+                                }
+                                options={marketSchedulerTimezoneOptions}
+                                className="w-full"
+                                buttonClassName="h-10 pl-3 pr-14 text-sm font-mono"
+                                rightAccessory={
+                                  <HelpHint text="执行时间解释所使用的时区，例如 Asia/Shanghai。" />
+                                }
+                              />
+                            </FormGroup>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <label className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/35 p-3">
+                                <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 accent-primary"
+                                    checked={marketSchedulerConfig.runOnStartup}
+                                    onChange={(event) =>
+                                      updateMarketSchedulerConfig({
+                                        runOnStartup: event.target.checked
+                                      })
+                                    }
+                                  />
+                                  启动后立即执行
+                                  <HelpHint text="应用启动后触发一次拉取，无需等待当天定时时间。" />
+                                </span>
+                                <span className="mt-1 block pl-6 text-xs text-slate-500 dark:text-slate-400">
+                                  适合长时间离线后快速补齐最新数据。
+                                </span>
+                              </label>
+
+                              <label className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/35 p-3">
+                                <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 accent-primary"
+                                    checked={marketSchedulerConfig.catchUpMissed}
+                                    onChange={(event) =>
+                                      updateMarketSchedulerConfig({
+                                        catchUpMissed: event.target.checked
+                                      })
+                                    }
+                                  />
+                                  补跑错过的当日任务
+                                  <HelpHint text="若应用在执行时段离线，恢复后会补一次当日任务。" />
+                                </span>
+                                <span className="mt-1 block pl-6 text-xs text-slate-500 dark:text-slate-400">
+                                  减少因离线导致的数据缺口。
+                                </span>
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-border-dark">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setMarketSchedulerAdvancedOpen(false)}
+                            >
+                              取消
+                            </Button>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              icon="save"
+                              onClick={async () => {
+                                const saved = await handleSaveMarketSchedulerConfig();
+                                if (saved) {
+                                  setMarketSchedulerAdvancedOpen(false);
+                                }
+                              }}
+                              disabled={
+                                marketSchedulerSaving ||
+                                !marketSchedulerConfig ||
+                                !marketSchedulerDirty
+                              }
+                            >
+                              保存更改
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                          暂无调度配置。
+                        </div>
+                      )}
+                    </Modal>
+
+                    <Modal
+                      open={marketTriggerIngestBlockedOpen}
+                      title="无法执行拉取"
+                      onClose={() => setMarketTriggerIngestBlockedOpen(false)}
+                    >
+                      <div className="space-y-4">
+                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                          {marketTriggerIngestBlockedMessage}
+                        </p>
+                        <div className="flex justify-end">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => setMarketTriggerIngestBlockedOpen(false)}
+                          >
+                            我知道了
+                          </Button>
+                        </div>
+                      </div>
+                    </Modal>
+
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-bold text-slate-900 dark:text-white">
                           目标池编辑
                         </h3>
                       </div>
 
-                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-4">
-                        <div className="text-xs text-slate-500 dark:text-slate-400">
-                          说明：目标池用于组合估值/缺口回补的快速路径；全市场（Universe，近 3 年）由定时跑批维护，也可在下方「手动拉取」触发。
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark overflow-hidden">
+                        <div className="border-b border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/45 px-3 py-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span
+                                className={`inline-flex items-center rounded-full border px-2 py-0.5 ${
+                                  marketTargetsDirty
+                                    ? "border-amber-300 text-amber-700 dark:text-amber-300"
+                                    : "border-emerald-300 text-emerald-700 dark:text-emerald-300"
+                                }`}
+                              >
+                                {marketTargetsDirty ? "草稿未保存" : "草稿已同步"}
+                              </span>
+                              <span className="text-slate-500 dark:text-slate-400">
+                                预览标的：
+                                <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+                                  {marketTargetsDiffPreview
+                                    ? marketTargetsDiffPreview.draft.symbols.length
+                                    : marketTargetsPreview
+                                      ? marketTargetsPreview.symbols.length
+                                      : "--"}
+                                </span>
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon="restart_alt"
+                                onClick={handleResetTargetsDraft}
+                                disabled={!marketTargetsDirty}
+                              >
+                                重置草稿
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon="refresh"
+                                onClick={() => {
+                                  void refreshMarketTargets();
+                                  void refreshMarketTargetsDiff();
+                                }}
+                                disabled={marketTargetsLoading}
+                              >
+                                刷新基线
+                              </Button>
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                icon="save"
+                                onClick={handleSaveTargets}
+                                disabled={marketTargetsSaving || !marketTargetsDirty}
+                              >
+                                保存
+                              </Button>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-end gap-2">
+
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 p-3 items-start">
+                          <div className="space-y-3">
+                            <div className="rounded-md border border-slate-200 dark:border-border-dark">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTargetsSection("scope")}
+                                className="w-full flex items-center justify-between px-3 py-2 text-left"
+                              >
+                                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  A. 数据同步范围
+                                </span>
+                                <span className="material-icons-outlined text-sm text-slate-500 dark:text-slate-400">
+                                  {marketTargetsSectionOpen.scope
+                                    ? "expand_less"
+                                    : "expand_more"}
+                                </span>
+                              </button>
+                              {marketTargetsSectionOpen.scope && (
+                                <div className="px-3 pb-3 space-y-3">
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-slate-700 dark:text-slate-200">
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={marketTargetsConfig.includeHoldings}
+                                        onChange={(e) =>
+                                          setMarketTargetsConfig((prev) => ({
+                                            ...prev,
+                                            includeHoldings: e.target.checked
+                                          }))
+                                        }
+                                      />
+                                      <span>包含持仓</span>
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={marketTargetsConfig.includeWatchlist}
+                                        onChange={(e) =>
+                                          setMarketTargetsConfig((prev) => ({
+                                            ...prev,
+                                            includeWatchlist: e.target.checked
+                                          }))
+                                        }
+                                      />
+                                      <span>包含自选</span>
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          marketTargetsConfig.includeRegistryAutoIngest
+                                        }
+                                        onChange={(e) =>
+                                          setMarketTargetsConfig((prev) => ({
+                                            ...prev,
+                                            includeRegistryAutoIngest: e.target.checked
+                                          }))
+                                        }
+                                      />
+                                      <span>包含注册标的</span>
+                                    </label>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                                      组合选择
+                                    </div>
+                                    <Select
+                                      value={marketPortfolioScopeValue}
+                                      onChange={(event) => {
+                                        const value = event.target.value;
+                                        setMarketTargetsConfig((prev) => ({
+                                          ...prev,
+                                          portfolioIds:
+                                            value === "__all__" ? null : [value]
+                                        }));
+                                      }}
+                                      options={marketPortfolioScopeSelectOptions}
+                                      className="text-xs"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="rounded-md border border-slate-200 dark:border-border-dark">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTargetsSection("symbols")}
+                                className="w-full flex items-center justify-between px-3 py-2 text-left"
+                              >
+                                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                  B. 手动添加标的
+                                </span>
+                                <span className="material-icons-outlined text-sm text-slate-500 dark:text-slate-400">
+                                  {marketTargetsSectionOpen.symbols
+                                    ? "expand_less"
+                                    : "expand_more"}
+                                </span>
+                              </button>
+                              {marketTargetsSectionOpen.symbols && (
+                                <div className="px-3 pb-3 space-y-3">
+                                  <div className="relative">
+                                    <textarea
+                                      value={marketTargetsSymbolDraft}
+                                      onChange={(event) => {
+                                        setMarketTargetsSymbolDraft(event.target.value);
+                                        setMarketManualSymbolPreview({
+                                          addable: [],
+                                          existing: [],
+                                          invalid: [],
+                                          duplicates: 0
+                                        });
+                                      }}
+                                      placeholder="输入标的代码，支持逗号/空格/换行/分号分隔"
+                                      rows={4}
+                                      className="block w-full rounded-md border-slate-300 dark:border-border-dark bg-white dark:bg-field-dark py-1.5 pl-2 pr-16 pb-9 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-primary focus:border-primary text-xs font-mono"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={handlePreviewManualTargetSymbols}
+                                      disabled={!marketTargetsSymbolDraft.trim()}
+                                      className="absolute right-2 bottom-2 h-7 px-3 rounded-[4px] border border-primary/70 bg-primary/90 text-[11px] font-semibold text-white shadow-[0_6px_14px_rgba(8,24,28,0.3)] hover:bg-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                      解析
+                                    </button>
+                                  </div>
+
+                                  <div className="rounded-md border border-slate-200 dark:border-border-dark p-2 space-y-2">
+                                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                                      <span>预览</span>
+                                      <span className="font-mono">
+                                        新增有效 {marketManualSymbolPreview.addable.length} /
+                                        已存在 {marketManualSymbolPreview.existing.length} /
+                                        无效 {marketManualSymbolPreview.invalid.length} / 重复{" "}
+                                        {marketManualSymbolPreview.duplicates}
+                                      </span>
+                                    </div>
+                                    <div className="max-h-28 overflow-auto space-y-1">
+                                      {marketManualSymbolPreview.addable.map((symbol) => (
+                                        <div
+                                          key={`preview-addable-${symbol}`}
+                                          className="flex items-center justify-between gap-2 rounded border border-emerald-200 dark:border-emerald-800/50 px-2 py-1"
+                                        >
+                                          <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                            {symbol}
+                                          </span>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                                              有效
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleRemoveManualPreviewSymbol(
+                                                  symbol,
+                                                  "addable"
+                                                )
+                                              }
+                                              className="text-slate-400 hover:text-red-500"
+                                              aria-label={`移除预览 symbol ${symbol}`}
+                                              title="移除"
+                                            >
+                                              ×
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {marketManualSymbolPreview.existing.map((symbol) => (
+                                        <div
+                                          key={`preview-existing-${symbol}`}
+                                          className="flex items-center justify-between gap-2 rounded border border-amber-200 dark:border-amber-800/50 px-2 py-1"
+                                        >
+                                          <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                            {symbol}
+                                          </span>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-amber-700 dark:text-amber-300">
+                                              已存在
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleRemoveManualPreviewSymbol(
+                                                  symbol,
+                                                  "existing"
+                                                )
+                                              }
+                                              className="text-slate-400 hover:text-red-500"
+                                              aria-label={`移除已存在 symbol ${symbol}`}
+                                              title="移除"
+                                            >
+                                              ×
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {marketManualSymbolPreview.invalid.map((symbol) => (
+                                        <div
+                                          key={`preview-invalid-${symbol}`}
+                                          className="flex items-center justify-between gap-2 rounded border border-rose-200 dark:border-rose-800/50 px-2 py-1"
+                                        >
+                                          <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                            {symbol}
+                                          </span>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[11px] text-rose-700 dark:text-rose-300">
+                                              无效
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleRemoveManualPreviewSymbol(
+                                                  symbol,
+                                                  "invalid"
+                                                )
+                                              }
+                                              className="text-slate-400 hover:text-red-500"
+                                              aria-label={`移除无效 symbol ${symbol}`}
+                                              title="移除"
+                                            >
+                                              ×
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {marketManualSymbolPreview.addable.length === 0 &&
+                                        marketManualSymbolPreview.existing.length === 0 &&
+                                        marketManualSymbolPreview.invalid.length === 0 &&
+                                        marketManualSymbolPreview.duplicates === 0 && (
+                                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                                            输入后点击右下角“解析”查看结果
+                                          </div>
+                                        )}
+                                    </div>
+                                    <div className="flex justify-end pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={handleApplyManualTargetSymbols}
+                                        disabled={marketManualSymbolPreview.addable.length === 0}
+                                        className="h-7 px-3 rounded-[4px] border border-primary/70 bg-primary/90 text-[11px] font-semibold text-white shadow-[0_6px_14px_rgba(8,24,28,0.3)] hover:bg-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        加入目标池（{marketManualSymbolPreview.addable.length}）
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                          </div>
+
+                          <div className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50 dark:bg-background-dark p-3 space-y-3 xl:sticky xl:top-3">
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
+                                <div className="text-slate-400">总数</div>
+                                <div className="font-mono text-slate-700 dark:text-slate-200">
+                                  {marketTargetsDiffPreview
+                                    ? marketTargetsDiffPreview.draft.symbols.length
+                                    : marketTargetsPreview
+                                      ? marketTargetsPreview.symbols.length
+                                      : "--"}
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
+                                <div className="text-slate-400">新增</div>
+                                <div className="font-mono text-slate-700 dark:text-slate-200">
+                                  {marketTargetsDiffPreview?.addedSymbols.length ?? "--"}
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
+                                <div className="text-slate-400">移除</div>
+                                <div className="font-mono text-slate-700 dark:text-slate-200">
+                                  {marketTargetsDiffPreview?.removedSymbols.length ?? "--"}
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1">
+                                <div className="text-slate-400">来源变化</div>
+                                <div className="font-mono text-slate-700 dark:text-slate-200">
+                                  {marketTargetsDiffPreview?.reasonChangedSymbols.length ??
+                                    "--"}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="h-8 rounded-md border border-primary bg-primary/15 text-slate-900 dark:text-white text-xs font-medium flex items-center justify-center">
+                                差异预览
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!marketTargetsDiffPreview && !marketTargetsPreview) {
+                                    void refreshMarketTargetsDiff();
+                                  }
+                                  setMarketCurrentTargetsModalOpen(true);
+                                }}
+                                className="h-8 rounded-md border border-slate-200 dark:border-border-dark text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-background-dark/70 transition-colors"
+                              >
+                                当前目标池
+                              </button>
+                            </div>
+
+                            <Input
+                              value={marketTargetsPreviewFilter}
+                              onChange={(event) =>
+                                setMarketTargetsPreviewFilter(event.target.value)
+                              }
+                              placeholder="按代码过滤差异"
+                              className="font-mono text-xs"
+                            />
+
+                            <div className="max-h-[520px] overflow-auto space-y-3">
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                                    新增
+                                  </div>
+                                  {marketFilteredAddedSymbols.length === 0 ? (
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                                      --
+                                    </div>
+                                  ) : (
+                                    marketFilteredAddedSymbols.slice(0, 100).map((row) => (
+                                      <div
+                                        key={`added-${row.symbol}`}
+                                        className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                                      >
+                                        <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                          {row.symbol}
+                                        </span>
+                                        <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                                          {formatTargetsReasons(row.reasons)}
+                                        </span>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+                                    移除
+                                  </div>
+                                  {marketFilteredRemovedSymbols.length === 0 ? (
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                                      --
+                                    </div>
+                                  ) : (
+                                    marketFilteredRemovedSymbols.slice(0, 100).map((row) => (
+                                      <div
+                                        key={`removed-${row.symbol}`}
+                                        className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                                      >
+                                        <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                          {row.symbol}
+                                        </span>
+                                        <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                                          {formatTargetsReasons(row.reasons)}
+                                        </span>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                    来源变化
+                                  </div>
+                                  {marketFilteredReasonChangedSymbols.length === 0 ? (
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                                      --
+                                    </div>
+                                  ) : (
+                                    marketFilteredReasonChangedSymbols
+                                      .slice(0, 100)
+                                      .map((row) => (
+                                        <div
+                                          key={`changed-${row.symbol}`}
+                                          className="py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                                        >
+                                          <div className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                            {row.symbol}
+                                          </div>
+                                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                            旧：{formatTargetsReasons(row.baselineReasons)}
+                                          </div>
+                                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                            新：{formatTargetsReasons(row.draftReasons)}
+                                          </div>
+                                        </div>
+                                      ))
+                                  )}
+                                </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-bold text-slate-900 dark:text-white">
+                          注册标的
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="select_all"
+                            onClick={handleToggleSelectAllRegistry}
+                            disabled={!marketRegistryResult?.items.length}
+                          >
+                            {marketRegistryResult &&
+                            marketRegistrySelectedSymbols.length ===
+                              marketRegistryResult.items.length
+                              ? "取消全选"
+                              : "全选"}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="check_circle"
+                            onClick={() => {
+                              void handleBatchSetRegistryAutoIngest(true);
+                            }}
+                            disabled={marketRegistrySelectedSymbols.length === 0}
+                          >
+                            批量启用
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            icon="remove_circle"
+                            onClick={() => {
+                              void handleBatchSetRegistryAutoIngest(false);
+                            }}
+                            disabled={marketRegistrySelectedSymbols.length === 0}
+                          >
+                            批量禁用
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-2">
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_160px_auto] gap-2">
+                          <Input
+                            value={marketRegistryQuery}
+                            onChange={(event) =>
+                              setMarketRegistryQuery(event.target.value)
+                            }
+                            placeholder="搜索 symbol / name"
+                            className="font-mono text-xs"
+                          />
                           <PopoverSelect
-                            value={autoIngestScopeValue}
-                            onChangeValue={handleChangeAutoIngestScope}
+                            value={marketRegistryAutoFilter}
+                            onChangeValue={(value) =>
+                              setMarketRegistryAutoFilter(
+                                value as "all" | "enabled" | "disabled"
+                              )
+                            }
                             options={[
-                              { value: "holdings+watchlist+registry", label: "持仓 + 自选 + 注册标的" },
-                              { value: "holdings+watchlist", label: "持仓 + 自选" },
-                              { value: "holdings+registry", label: "持仓 + 注册标的" },
-                              { value: "watchlist+registry", label: "自选 + 注册标的" },
-                              { value: "holdings", label: "仅持仓" },
-                              { value: "watchlist", label: "仅自选" },
-                              { value: "registry", label: "仅注册标的" }
+                              { value: "all", label: "全部" },
+                              { value: "enabled", label: "仅已启用" },
+                              { value: "disabled", label: "仅未启用" }
                             ]}
-                            className="w-[220px]"
                           />
                           <Button
                             variant="secondary"
                             size="sm"
                             icon="refresh"
-                            onClick={refreshMarketTargets}
-                            disabled={marketTargetsLoading}
+                            onClick={() => {
+                              void refreshMarketRegistry();
+                            }}
+                            disabled={marketRegistryLoading}
                           >
                             刷新
                           </Button>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            icon="save"
-                            onClick={handleSaveTargets}
-                            disabled={marketTargetsSaving}
-                          >
-                            保存
-                          </Button>
                         </div>
-
-                        <FormGroup label="手动添加标的">
-                          <div className="flex gap-2">
-                            <Input
-                              value={marketTargetsSymbolDraft}
-                              onChange={(e) =>
-                                setMarketTargetsSymbolDraft(e.target.value)
-                              }
-                              placeholder="600519.SH"
-                              className="font-mono text-xs"
-                            />
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              icon="add"
-                              onClick={handleAddTargetSymbol}
-                              disabled={!marketTargetsSymbolDraft.trim()}
-                            >
-                              添加
-                            </Button>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {marketTargetsConfig.explicitSymbols.length === 0 && (
-                              <span className="text-xs text-slate-500 dark:text-slate-400">
-                                --
-                              </span>
-                            )}
-                            {marketTargetsConfig.explicitSymbols.map((symbol) => (
-                              <span
-                                key={symbol}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
-                              >
-                                <span className="font-mono">{symbol}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveTargetSymbol(symbol)}
-                                  className="text-slate-400 hover:text-red-500"
-                                  aria-label={`移除 symbol ${symbol}`}
-                                  title="移除"
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        </FormGroup>
-
-                        <FormGroup label="标签筛选">
-                          <div className="flex gap-2">
-                            <Input
-                              value={marketTargetsTagDraft}
-                              onChange={(e) =>
-                                setMarketTargetsTagDraft(e.target.value)
-                              }
-                              placeholder="输入标签"
-                              className="text-xs"
-                            />
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              icon="add"
-                              onClick={() => handleAddTargetTag()}
-                              disabled={!marketTargetsTagDraft.trim()}
-                            >
-                              添加
-                            </Button>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {marketTargetsConfig.tagFilters.length === 0 && (
-                              <span className="text-xs text-slate-500 dark:text-slate-400">
-                                --
-                              </span>
-                            )}
-                            {marketTargetsConfig.tagFilters.map((tag) => (
-                              <span
-                                key={tag}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
-                              >
-                                <span>{tag}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveTargetTag(tag)}
-                                  className="text-slate-400 hover:text-red-500"
-                                  aria-label={`移除过滤器 ${tag}`}
-                                  title="移除"
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        </FormGroup>
-
-                        <FormGroup label="临时标的（自动）">
-                          <div className="text-xs text-slate-500 dark:text-slate-400">
-                            从「市场行情」搜索选中但不在目标池的标的，会临时加入并参与后续回补；默认 7 天未续期会自动清理。
-                          </div>
-                          <div className="mt-2 space-y-1">
-                            {marketTempTargetsLoading && (
-                              <div className="text-xs text-slate-500 dark:text-slate-400">
-                                加载中...
-                              </div>
-                            )}
-                            {!marketTempTargetsLoading && marketTempTargets.length === 0 && (
-                              <div className="text-xs text-slate-500 dark:text-slate-400">
-                                --
-                              </div>
-                            )}
-                            {!marketTempTargetsLoading &&
-                              marketTempTargets.map((item) => (
-                                <div
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          {marketRegistryLoading
+                            ? "加载中..."
+                            : `共 ${marketRegistryResult?.total ?? 0} 条，当前 ${marketRegistryResult?.items.length ?? 0} 条`}
+                        </div>
+                        <div className="max-h-64 overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-white dark:bg-background-dark">
+                              <tr className="border-b border-slate-200 dark:border-border-dark text-slate-500 dark:text-slate-400">
+                                <th className="px-2 py-1 text-left">选择</th>
+                                <th className="px-2 py-1 text-left">代码</th>
+                                <th className="px-2 py-1 text-left">名称</th>
+                                <th className="px-2 py-1 text-left">自动拉取</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(marketRegistryResult?.items ?? []).map((item) => (
+                                <tr
                                   key={item.symbol}
-                                  className="flex items-center justify-between gap-3 rounded-md border border-slate-200 dark:border-border-dark px-2 py-1"
+                                  className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
                                 >
-                                  <div className="min-w-0">
-                                    <div className="font-mono text-xs text-slate-700 dark:text-slate-200">
-                                      {item.symbol}
-                                    </div>
-                                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                      到期 {formatDateTime(item.expiresAt)}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      variant="secondary"
-                                      size="sm"
-                                      icon="push_pin"
-                                      onClick={() => handlePromoteTempTarget(item.symbol)}
-                                      disabled={marketTargetsSaving}
-                                    >
-                                      转长期
-                                    </Button>
-                                    <Button
-                                      variant="danger"
-                                      size="sm"
-                                      icon="delete"
-                                      onClick={() => handleRemoveTempTarget(item.symbol)}
-                                    >
-                                      移除
-                                    </Button>
-                                  </div>
-                                </div>
+                                  <td className="px-2 py-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={marketRegistrySelectedSymbols.includes(
+                                        item.symbol
+                                      )}
+                                      onChange={() =>
+                                        handleToggleRegistrySymbol(item.symbol)
+                                      }
+                                    />
+                                  </td>
+                                  <td className="px-2 py-1 font-mono">
+                                    {item.symbol}
+                                  </td>
+                                  <td className="px-2 py-1">
+                                    {item.name ?? "--"}
+                                  </td>
+                                  <td className="px-2 py-1">
+                                    <label className="inline-flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={item.autoIngest}
+                                        onChange={(event) => {
+                                          void handleSetRegistryAutoIngest(
+                                            item.symbol,
+                                            event.target.checked
+                                          );
+                                        }}
+                                        disabled={marketRegistryUpdating}
+                                      />
+                                      <span>
+                                        {item.autoIngest ? "启用" : "禁用"}
+                                      </span>
+                                    </label>
+                                  </td>
+                                </tr>
                               ))}
-                          </div>
-                        </FormGroup>
-
-                        <div className="rounded-md border border-slate-200 dark:border-border-dark bg-slate-50 dark:bg-background-dark p-3 space-y-2">
-                          <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
-                            <span>预览</span>
-                            <span className="font-mono">
-                              {marketTargetsPreview
-                                ? marketTargetsPreview.symbols.length
-                                : "--"}
-                            </span>
-                          </div>
-                          <div className="max-h-56 overflow-auto">
-                            {marketTargetsPreview &&
-                              marketTargetsPreview.symbols.slice(0, 200).map((row) => (
-                                <div
-                                  key={row.symbol}
-                                  className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
-                                >
-                                  <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
-                                    {row.symbol}
-                                  </span>
-                                  <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
-                                    {formatTargetsReasons(row.reasons)}
-                                  </span>
-                                </div>
-                              ))}
-                          </div>
+                              {!marketRegistryLoading &&
+                                (!marketRegistryResult ||
+                                  marketRegistryResult.items.length === 0) && (
+                                  <tr>
+                                    <td
+                                      colSpan={4}
+                                      className="px-2 py-4 text-center text-slate-500 dark:text-slate-400"
+                                    >
+                                      --
+                                    </td>
+                                  </tr>
+                                )}
+                            </tbody>
+                          </table>
                         </div>
                       </div>
                     </section>
@@ -6067,6 +8362,204 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                         </div>
                       </div>
                     </section>
+                  </>
+                )}
+
+                {otherTab === "instrument-management" && (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-slate-900 dark:text-white">
+                        标的管理
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-3 items-start">
+                      <section className="space-y-2">
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-2.5 space-y-2.5 h-full flex flex-col">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                              标签管理
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                {marketTags.length} 个
+                              </span>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                className="h-8 px-2.5"
+                                icon="refresh"
+                                onClick={() => {
+                                  void refreshMarketTags(marketTagManagementQuery);
+                                }}
+                                disabled={marketTagsLoading}
+                              >
+                                刷新
+                              </Button>
+                            </div>
+                          </div>
+                          <Input
+                            value={marketTagManagementQuery}
+                            onChange={(event) =>
+                              setMarketTagManagementQuery(event.target.value)
+                            }
+                            placeholder="搜索标签（例如 industry: / theme: / watchlist:）"
+                            className="h-8 text-xs font-mono"
+                          />
+                          <div className="flex-1 min-h-[340px] max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
+                            <table className="w-full text-xs">
+                              <thead className="sticky top-0 bg-white dark:bg-background-dark">
+                                <tr className="border-b border-slate-200 dark:border-border-dark text-slate-500 dark:text-slate-400">
+                                  <th className="px-2 py-1.5 text-left">标签</th>
+                                  <th className="px-2 py-1.5 text-left">来源</th>
+                                  <th className="px-2 py-1.5 text-left">成员数</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {marketTags.map((tag) => (
+                                  <tr
+                                    key={tag.tag}
+                                    className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
+                                  >
+                                    <td className="px-2 py-1.5 font-mono">{tag.tag}</td>
+                                    <td className="px-2 py-1.5">
+                                      {formatTagSourceLabel(tag.source)}
+                                    </td>
+                                    <td className="px-2 py-1.5">{tag.memberCount}</td>
+                                  </tr>
+                                ))}
+                                {!marketTagsLoading && marketTags.length === 0 && (
+                                  <tr>
+                                    <td
+                                      colSpan={3}
+                                      className="px-2 py-6 text-center text-slate-500 dark:text-slate-400"
+                                    >
+                                      暂无标签
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="space-y-2">
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-2.5 space-y-2.5 h-full flex flex-col">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                              临时标的状态
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                              共 {marketTempTargets.length} 个，已选{" "}
+                              {marketSelectedTempTargetSymbols.length} 个
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 xl:grid-cols-4 gap-1.5">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="w-full h-8 px-2"
+                              icon="select_all"
+                              onClick={handleSelectAllTempTargets}
+                            >
+                              {marketSelectedTempTargetSymbols.length ===
+                              marketTempTargets.length
+                                ? "取消全选"
+                                : "全选"}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="w-full h-8 px-2"
+                              icon="history"
+                              onClick={handleBatchExtendTempTargets}
+                              disabled={marketSelectedTempTargetSymbols.length === 0}
+                            >
+                              续期 7 天
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="w-full h-8 px-2"
+                              icon="push_pin"
+                              onClick={handleBatchPromoteTempTargets}
+                              disabled={marketSelectedTempTargetSymbols.length === 0}
+                            >
+                              转长期
+                            </Button>
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              className="w-full h-8 px-2"
+                              icon="delete"
+                              onClick={handleBatchRemoveTempTargets}
+                              disabled={marketSelectedTempTargetSymbols.length === 0}
+                            >
+                              移除
+                            </Button>
+                          </div>
+                          <div className="flex-1 min-h-[340px] max-h-[520px] overflow-auto space-y-1 rounded-md border border-slate-200 dark:border-border-dark p-1.5">
+                            {marketTempTargetsLoading && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400 px-1 py-1">
+                                加载中...
+                              </div>
+                            )}
+                            {!marketTempTargetsLoading &&
+                              marketTempTargets.map((item) => (
+                                <div
+                                  key={item.symbol}
+                                  className="flex items-center justify-between gap-3 rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5"
+                                >
+                                  <div className="min-w-0 flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={marketSelectedTempTargetSymbols.includes(
+                                        item.symbol
+                                      )}
+                                      onChange={() =>
+                                        handleToggleTempTargetSelection(item.symbol)
+                                      }
+                                    />
+                                    <div className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                                      {item.symbol}
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                      到期 {formatDateTime(item.expiresAt)}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      className="h-7 px-2"
+                                      icon="push_pin"
+                                      onClick={() => handlePromoteTempTarget(item.symbol)}
+                                      disabled={marketTargetsSaving}
+                                    >
+                                      转长期
+                                    </Button>
+                                    <Button
+                                      variant="danger"
+                                      size="sm"
+                                      className="h-7 px-2"
+                                      icon="delete"
+                                      onClick={() => handleRemoveTempTarget(item.symbol)}
+                                    >
+                                      移除
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            {!marketTempTargetsLoading && marketTempTargets.length === 0 && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400 px-1 py-1">
+                                暂无临时标的
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </section>
+                    </div>
                   </>
                 )}
 
@@ -6210,78 +8703,172 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
                       )}
 
                       {!marketIngestRunsLoading && marketIngestRuns.length > 0 && (
-                        <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
-                          <table className="w-full text-sm">
-                            <thead className="bg-white dark:bg-background-dark sticky top-0">
-                              <tr className="text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-border-dark">
-                                <th className="text-left font-semibold px-3 py-2">
-                                  时间
-                                </th>
-                                <th className="text-left font-semibold px-3 py-2">
-                                  范围
-                                </th>
-                                <th className="text-left font-semibold px-3 py-2">
-                                  状态
-                                </th>
-                                <th className="text-right font-semibold px-3 py-2">
-                                  写入
-                                </th>
-                                <th className="text-right font-semibold px-3 py-2">
-                                  错误
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {marketIngestRuns.slice(0, 200).map((run) => {
-                                const statusTone = formatIngestRunTone(run.status);
-                                return (
-                                  <tr
-                                    key={run.id}
-                                    className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
-                                  >
-                                    <td className="px-3 py-2">
-                                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                        {formatDateTime(run.startedAt)}
-                                      </div>
-                                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                                        {run.finishedAt
-                                          ? `耗时 ${formatDurationMs(
-                                              run.finishedAt - run.startedAt
-                                            )}`
-                                          : "进行中..."}
-                                      </div>
-                                      <div className="text-[11px] text-slate-400 dark:text-slate-500">
-                                        截至 {run.asOfTradeDate ?? "--"}
-                                      </div>
-                                    </td>
-                                    <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200">
-                                      <span className="font-mono">{formatIngestRunScopeLabel(run.scope)}</span>
-                                      <span className="text-slate-400 dark:text-slate-500">
-                                        {" "}
-                                        · {formatIngestRunModeLabel(run.mode)}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2 text-xs">
-                                      <span className={statusTone}>
-                                        {formatIngestRunStatusLabel(run.status)}
-                                      </span>
-                                      {run.errorMessage && (
-                                        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
-                                          {run.errorMessage}
+                        <div className="grid grid-cols-1 xl:grid-cols-[1.6fr_1fr] gap-3">
+                          <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
+                            <table className="w-full text-sm">
+                              <thead className="bg-white dark:bg-background-dark sticky top-0">
+                                <tr className="text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-border-dark">
+                                  <th className="text-left font-semibold px-3 py-2">
+                                    时间
+                                  </th>
+                                  <th className="text-left font-semibold px-3 py-2">
+                                    范围
+                                  </th>
+                                  <th className="text-left font-semibold px-3 py-2">
+                                    状态
+                                  </th>
+                                  <th className="text-right font-semibold px-3 py-2">
+                                    写入
+                                  </th>
+                                  <th className="text-right font-semibold px-3 py-2">
+                                    错误
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {marketIngestRuns.slice(0, 200).map((run) => {
+                                  const statusTone = formatIngestRunTone(run.status);
+                                  const selected = marketSelectedIngestRunId === run.id;
+                                  return (
+                                    <tr
+                                      key={run.id}
+                                      className={`border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0 cursor-pointer ${
+                                        selected
+                                          ? "bg-primary/10"
+                                          : "hover:bg-slate-50 dark:hover:bg-background-dark/60"
+                                      }`}
+                                      onClick={() => {
+                                        void refreshMarketIngestRunDetail(run.id);
+                                      }}
+                                    >
+                                      <td className="px-3 py-2">
+                                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                          {formatDateTime(run.startedAt)}
                                         </div>
+                                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                          {run.finishedAt
+                                            ? `耗时 ${formatDurationMs(
+                                                run.finishedAt - run.startedAt
+                                              )}`
+                                            : "进行中..."}
+                                        </div>
+                                        <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                                          截至 {run.asOfTradeDate ?? "--"}
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2 text-xs text-slate-700 dark:text-slate-200">
+                                        <span className="font-mono">
+                                          {formatIngestRunScopeLabel(run.scope)}
+                                        </span>
+                                        <span className="text-slate-400 dark:text-slate-500">
+                                          {" "}
+                                          · {formatIngestRunModeLabel(run.mode)}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 text-xs">
+                                        <span className={statusTone}>
+                                          {formatIngestRunStatusLabel(run.status)}
+                                        </span>
+                                        {run.errorMessage && (
+                                          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                                            {run.errorMessage}
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-xs font-mono text-slate-700 dark:text-slate-200">
+                                        {(run.inserted ?? 0) + (run.updated ?? 0)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-xs font-mono text-slate-700 dark:text-slate-200">
+                                        {run.errors ?? 0}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="rounded-md border border-slate-200 dark:border-border-dark p-3 space-y-2">
+                            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                              Run 详情
+                            </div>
+                            {marketSelectedIngestRunLoading && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                加载中...
+                              </div>
+                            )}
+                            {!marketSelectedIngestRunLoading &&
+                              !marketSelectedIngestRun && (
+                                <div className="text-xs text-slate-500 dark:text-slate-400">
+                                  点击左侧记录查看详情。
+                                </div>
+                              )}
+                            {!marketSelectedIngestRunLoading &&
+                              marketSelectedIngestRun && (
+                                <div className="space-y-1 text-xs">
+                                  <div>
+                                    <span className="text-slate-400">ID：</span>
+                                    <span className="font-mono">
+                                      {marketSelectedIngestRun.id}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-400">范围：</span>
+                                    <span className="font-mono">
+                                      {formatIngestRunScopeLabel(
+                                        marketSelectedIngestRun.scope
                                       )}
-                                    </td>
-                                    <td className="px-3 py-2 text-right text-xs font-mono text-slate-700 dark:text-slate-200">
-                                      {(run.inserted ?? 0) + (run.updated ?? 0)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right text-xs font-mono text-slate-700 dark:text-slate-200">
-                                      {run.errors ?? 0}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-400">模式：</span>
+                                    <span className="font-mono">
+                                      {formatIngestRunModeLabel(
+                                        marketSelectedIngestRun.mode
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-400">状态：</span>
+                                    <span
+                                      className={formatIngestRunTone(
+                                        marketSelectedIngestRun.status
+                                      )}
+                                    >
+                                      {formatIngestRunStatusLabel(
+                                        marketSelectedIngestRun.status
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-400">写入：</span>
+                                    <span className="font-mono">
+                                      {(marketSelectedIngestRun.inserted ?? 0) +
+                                        (marketSelectedIngestRun.updated ?? 0)}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-400">错误：</span>
+                                    <span className="font-mono">
+                                      {marketSelectedIngestRun.errors ?? 0}
+                                    </span>
+                                  </div>
+                                  {marketSelectedIngestRun.errorMessage && (
+                                    <div className="rounded-md bg-slate-50 dark:bg-background-dark/60 p-2 text-[11px] text-slate-600 dark:text-slate-300 whitespace-pre-wrap">
+                                      {marketSelectedIngestRun.errorMessage}
+                                    </div>
+                                  )}
+                                  {marketSelectedIngestRun.meta && (
+                                    <pre className="rounded-md bg-slate-50 dark:bg-background-dark/60 p-2 text-[11px] overflow-auto max-h-40">
+                                      {JSON.stringify(
+                                        marketSelectedIngestRun.meta,
+                                        null,
+                                        2
+                                      )}
+                                    </pre>
+                                  )}
+                                </div>
+                              )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -6384,7 +8971,7 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
           )}
 
           {/* Placeholders */}
-          {["opportunities", "backtest", "insights", "alerts", "index-tracking", "data-analysis"].includes(activeView) && (
+          {["opportunities", "backtest", "insights", "alerts", "index-tracking"].includes(activeView) && (
             <PlaceholderPanel 
               title={navItems.find(n => n.key === activeView)?.label ?? ""}
               description={navItems.find(n => n.key === activeView)?.description ?? ""}
@@ -6392,6 +8979,78 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
           )}
 
         </div>
+
+        {marketCurrentTargetsModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div
+              className="absolute inset-0 bg-black/45 backdrop-blur-sm"
+              onClick={() => {
+                setMarketCurrentTargetsModalOpen(false);
+                setMarketCurrentTargetsFilter("");
+              }}
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="relative bg-white dark:bg-surface-dark border border-slate-200 dark:border-border-dark rounded-lg shadow-xl w-full max-w-3xl mx-4 p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    当前目标池
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    共 {marketCurrentTargetsSource.length} 个标的
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="close"
+                  onClick={() => {
+                    setMarketCurrentTargetsModalOpen(false);
+                    setMarketCurrentTargetsFilter("");
+                  }}
+                >
+                  关闭
+                </Button>
+              </div>
+
+              <Input
+                value={marketCurrentTargetsFilter}
+                onChange={(event) => setMarketCurrentTargetsFilter(event.target.value)}
+                placeholder="按代码过滤当前目标池"
+                className="font-mono text-xs"
+              />
+
+              <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark p-2">
+                {marketFilteredCurrentTargets.slice(0, 500).map((row) => (
+                  <div
+                    key={`current-target-${row.symbol}`}
+                    className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
+                  >
+                    <span className="font-mono text-xs text-slate-700 dark:text-slate-200">
+                      {row.symbol}
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 text-right">
+                      {formatTargetsReasons(row.reasons)}
+                    </span>
+                  </div>
+                ))}
+                {marketFilteredCurrentTargets.length === 0 && (
+                  <div className="text-xs text-slate-500 dark:text-slate-400 py-2 px-1">
+                    暂无匹配标的
+                  </div>
+                )}
+                {marketFilteredCurrentTargets.length > 500 && (
+                  <div className="pt-2 text-[11px] text-slate-500 dark:text-slate-400 px-1">
+                    仅展示前 500 个标的（共 {marketFilteredCurrentTargets.length}）。
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {ledgerDeleteTarget && (
           <ConfirmDialog
@@ -6557,7 +9216,8 @@ function PopoverSelect({
   onChangeValue,
   disabled,
   className,
-  buttonClassName
+  buttonClassName,
+  rightAccessory
 }: {
   value: string;
   options: PopoverSelectOption[];
@@ -6565,6 +9225,7 @@ function PopoverSelect({
   disabled?: boolean;
   className?: string;
   buttonClassName?: string;
+  rightAccessory?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -6573,6 +9234,7 @@ function PopoverSelect({
     () => options.find((opt) => opt.value === value) ?? null,
     [options, value]
   );
+  const hasRightAccessory = Boolean(rightAccessory);
 
   useEffect(() => {
     if (!open) return;
@@ -6601,12 +9263,25 @@ function PopoverSelect({
         aria-expanded={open}
         disabled={disabled}
         onClick={() => setOpen((prev) => !prev)}
-        className={`relative h-6 w-full rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark pl-2 pr-8 text-left text-xs text-slate-900 dark:text-slate-100 shadow-sm dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_10px_rgba(0,0,0,0.35)] hover:bg-slate-50 dark:hover:bg-surface-dark/80 transition-colors disabled:opacity-60 ${buttonClassName ?? ""}`}
+        className={`relative h-6 w-full rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-panel-dark pl-2 text-left text-xs text-slate-900 dark:text-slate-100 shadow-sm dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_10px_rgba(0,0,0,0.35)] hover:bg-slate-50 dark:hover:bg-surface-dark/80 transition-colors disabled:opacity-60 ${
+          hasRightAccessory ? "pr-14" : "pr-8"
+        } ${buttonClassName ?? ""}`}
       >
-        <span className="block truncate pr-6">{selected?.label ?? "--"}</span>
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 material-icons-outlined text-[18px] text-slate-400">
+        <span className={`block truncate ${hasRightAccessory ? "pr-10" : "pr-6"}`}>
+          {selected?.label ?? "--"}
+        </span>
+        <span
+          className={`pointer-events-none absolute top-1/2 -translate-y-1/2 material-icons-outlined text-[18px] text-slate-400 ${
+            hasRightAccessory ? "right-8" : "right-3"
+          }`}
+        >
           expand_more
         </span>
+        {hasRightAccessory && (
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+            {rightAccessory}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -6659,12 +9334,12 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: string;
 }
 function Button({ children, variant = 'secondary', size = 'md', icon, className, ...props }: ButtonProps) {
-  const baseClass = "inline-flex items-center justify-center rounded font-medium !text-white whitespace-nowrap break-keep shrink-0 transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:brightness-90 disabled:saturate-80 disabled:shadow-none";
+  const baseClass = "inline-flex items-center justify-center rounded-[4px] font-medium whitespace-nowrap break-keep shrink-0 transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:brightness-90 disabled:saturate-80 disabled:shadow-none";
   
   const variants = {
-    primary: "bg-primary border border-primary/90 shadow-md hover:bg-[#14b8ca] focus:ring-primary/70",
-    secondary: "bg-slate-500 border border-slate-400/80 shadow-md hover:bg-slate-400 dark:bg-surface-dark dark:border-border-dark dark:hover:bg-background-dark focus:ring-primary/50",
-    danger: "bg-red-500 border border-red-400/90 shadow-md hover:bg-red-400 focus:ring-red-400/80"
+    primary: "bg-primary/80 border border-primary/70 text-slate-50 shadow-[0_8px_16px_rgba(8,24,28,0.35)] hover:bg-primary/95 focus:ring-primary/45",
+    secondary: "bg-slate-200/95 border border-slate-300 text-slate-800 shadow-[0_6px_14px_rgba(15,23,42,0.12)] hover:bg-slate-200 dark:bg-surface-dark dark:border-border-dark dark:text-slate-200 dark:hover:bg-background-dark focus:ring-primary/35",
+    danger: "bg-[#b8726b] border border-[#c48680] text-[#fff4f3] shadow-[0_8px_16px_rgba(58,32,30,0.32)] hover:bg-[#c07a73] dark:bg-[#9b625d] dark:border-[#b27570] dark:hover:bg-[#aa6b66] focus:ring-[#c48680]/45"
   };
   
   const sizes = {
@@ -6712,7 +9387,7 @@ function IconButton({
       type="button"
       aria-label={label}
       title={label}
-      className={`inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-border-dark ${sizeClass} text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`inline-flex items-center justify-center rounded-[4px] border border-slate-200 dark:border-border-dark ${sizeClass} text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       {...props}
     >
       <span className={`material-icons-outlined ${iconClass}`}>{icon}</span>
@@ -8310,6 +10985,19 @@ function formatMarketTokenSource(source: MarketTokenStatus["source"]): string {
   }
 }
 
+function formatTagSourceLabel(source: TagSummary["source"]): string {
+  switch (source) {
+    case "provider":
+      return "Provider";
+    case "user":
+      return "用户";
+    case "watchlist":
+      return "自选";
+    default:
+      return source;
+  }
+}
+
 function formatIngestRunStatusLabel(status: MarketIngestRun["status"]): string {
   switch (status) {
     case "running":
@@ -8382,6 +11070,169 @@ function formatIngestRunTone(status: MarketIngestRun["status"]): string {
     default:
       return "text-slate-700 dark:text-slate-200";
   }
+}
+
+function formatIngestControlStateLabel(
+  state: MarketIngestControlStatus["state"]
+): string {
+  switch (state) {
+    case "idle":
+      return "空闲";
+    case "running":
+      return "运行中";
+    case "paused":
+      return "已暂停";
+    case "canceling":
+      return "取消中";
+    default:
+      return state;
+  }
+}
+
+function getIngestControlStateDotClass(
+  state: MarketIngestControlStatus["state"] | null
+): string {
+  switch (state) {
+    case "idle":
+      return "bg-emerald-500";
+    case "running":
+      return "bg-primary";
+    case "paused":
+      return "bg-amber-500";
+    case "canceling":
+      return "bg-rose-500";
+    default:
+      return "bg-slate-400";
+  }
+}
+
+function isSameSchedulerConfig(
+  left: MarketIngestSchedulerConfig,
+  right: MarketIngestSchedulerConfig
+): boolean {
+  return (
+    left.enabled === right.enabled &&
+    left.runAt === right.runAt &&
+    left.timezone === right.timezone &&
+    left.scope === right.scope &&
+    left.runOnStartup === right.runOnStartup &&
+    left.catchUpMissed === right.catchUpMissed
+  );
+}
+
+function isSameTargetsConfig(
+  left: MarketTargetsConfig,
+  right: MarketTargetsConfig
+): boolean {
+  if (left.includeHoldings !== right.includeHoldings) return false;
+  if (left.includeWatchlist !== right.includeWatchlist) return false;
+  if (left.includeRegistryAutoIngest !== right.includeRegistryAutoIngest) return false;
+
+  const leftPortfolios = normalizeStringArray(left.portfolioIds ?? []);
+  const rightPortfolios = normalizeStringArray(right.portfolioIds ?? []);
+  if (leftPortfolios.length !== rightPortfolios.length) return false;
+  for (let i = 0; i < leftPortfolios.length; i += 1) {
+    if (leftPortfolios[i] !== rightPortfolios[i]) return false;
+  }
+
+  const leftSymbols = normalizeStringArray(left.explicitSymbols);
+  const rightSymbols = normalizeStringArray(right.explicitSymbols);
+  if (leftSymbols.length !== rightSymbols.length) return false;
+  for (let i = 0; i < leftSymbols.length; i += 1) {
+    if (leftSymbols[i] !== rightSymbols[i]) return false;
+  }
+
+  const leftTags = normalizeStringArray(left.tagFilters);
+  const rightTags = normalizeStringArray(right.tagFilters);
+  if (leftTags.length !== rightTags.length) return false;
+  for (let i = 0; i < leftTags.length; i += 1) {
+    if (leftTags[i] !== rightTags[i]) return false;
+  }
+
+  return true;
+}
+
+function normalizeStringArray(values: string[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function parseBatchSymbols(input: string): {
+  valid: string[];
+  invalid: string[];
+  duplicates: number;
+} {
+  const raw = splitSymbolInputTokens(input);
+  const validSet = new Set<string>();
+  const invalidSet = new Set<string>();
+  let duplicates = 0;
+  raw.forEach((token) => {
+    const normalized = normalizeMarketSymbol(token);
+    if (!normalized) {
+      invalidSet.add(token);
+      return;
+    }
+    if (validSet.has(normalized)) {
+      duplicates += 1;
+      return;
+    }
+    validSet.add(normalized);
+  });
+  return {
+    valid: Array.from(validSet.values()).sort((a, b) => a.localeCompare(b)),
+    invalid: Array.from(invalidSet.values()),
+    duplicates
+  };
+}
+
+function buildManualTargetsPreview(
+  input: string,
+  existingSymbols: string[]
+): {
+  addable: string[];
+  existing: string[];
+  invalid: string[];
+  duplicates: number;
+} {
+  const parsed = parseBatchSymbols(input);
+  const existingSet = new Set(
+    existingSymbols
+      .map((value) => normalizeMarketSymbol(value))
+      .filter((value): value is string => Boolean(value))
+  );
+
+  const addable: string[] = [];
+  const existing: string[] = [];
+
+  parsed.valid.forEach((symbol) => {
+    if (existingSet.has(symbol)) {
+      existing.push(symbol);
+      return;
+    }
+    addable.push(symbol);
+  });
+
+  return {
+    addable,
+    existing,
+    invalid: parsed.invalid,
+    duplicates: parsed.duplicates
+  };
+}
+
+function splitSymbolInputTokens(input: string): string[] {
+  return input
+    .split(/[\s,;，；]+/g)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function normalizeMarketSymbol(value: string): string | null {
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) return null;
+  if (!/^[A-Z0-9._-]+$/.test(normalized)) return null;
+  return normalized;
 }
 
 function formatDateTimeInput(value: number | null): string {

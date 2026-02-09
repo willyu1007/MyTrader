@@ -73,6 +73,11 @@
 - 2026-02-04: `pnpm typecheck` -> ✅ (Temp Targets + remove sidebar Data Status + dev server port fix)
 - 2026-02-04: `pnpm build` -> ✅ (Temp Targets + remove sidebar Data Status + dev server port fix)
 - 2026-02-04: `pnpm dev` -> ✅ (5173 被占用时 Vite 自动切换至 5174；Electron 启动并注入 preload)
+- 2026-02-08: `pnpm -C packages/shared build` -> ✅ (新增 IPC 类型与 channel 编译通过)
+- 2026-02-08: `pnpm -C apps/backend typecheck` -> ✅ (ingest orchestrator + scheduler/control + registry IPC)
+- 2026-02-08: `pnpm -C apps/frontend typecheck` -> ✅ (Other/数据管理 UI 重构 + 新 IPC 调用)
+- 2026-02-08: `pnpm typecheck` -> ✅ (shared/backend/frontend 联合类型校验通过)
+- 2026-02-08: `pnpm -C apps/backend build && pnpm -C apps/frontend build` -> ✅ (前后端构建通过)
 
 ## Manual functional test checklist
 > 说明：本次在 CLI 环境完成后端验证；涉及 UI / 有效 token 的项目需在桌面端手工补测。

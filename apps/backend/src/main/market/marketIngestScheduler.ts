@@ -1,153 +1,199 @@
-import { getResolvedTushareToken } from "../storage/marketTokenRepository";
+import type { MarketIngestSchedulerConfig } from "@mytrader/shared";
+
+import {
+  enqueueManagedIngest
+} from "./ingestOrchestrator";
+import {
+  getMarketIngestSchedulerConfig
+} from "../storage/marketSettingsRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
-import { runTargetsIngest, runUniverseIngest } from "./marketIngestRunner";
 
 type SchedulerState = {
   timer: NodeJS.Timeout | null;
-  running: boolean;
-  warnedMissingToken: boolean;
   sessionId: number;
   businessDb: SqliteDatabase | null;
-  marketDb: SqliteDatabase | null;
-  analysisDbPath: string | null;
+  lastTriggeredDateKey: string | null;
 };
 
 const state: SchedulerState = {
   timer: null,
-  running: false,
-  warnedMissingToken: false,
   sessionId: 0,
   businessDb: null,
-  marketDb: null,
-  analysisDbPath: null
+  lastTriggeredDateKey: null
 };
 
-const DEFAULT_RUN_TIME = "19:30";
+const TICK_MS = 30_000;
 
 export function startMarketIngestScheduler(
   businessDb: SqliteDatabase,
-  marketDb: SqliteDatabase,
-  analysisDbPath: string
+  _marketDb: SqliteDatabase,
+  _analysisDbPath: string
 ): void {
   stopMarketIngestScheduler();
   state.businessDb = businessDb;
-  state.marketDb = marketDb;
-  state.analysisDbPath = analysisDbPath;
+  const sessionId = state.sessionId;
 
-  scheduleNextRun();
+  void initializeSession(sessionId).catch((err) => {
+    console.error("[mytrader] market ingest scheduler init failed");
+    console.error(err);
+  });
 
-  setTimeout(() => {
-    void triggerMarketIngest("startup").catch((err) => {
-      console.error("[mytrader] startup ingest failed");
+  state.timer = setInterval(() => {
+    void schedulerTick(sessionId).catch((err) => {
+      console.error("[mytrader] market ingest scheduler tick failed");
       console.error(err);
     });
-  }, 1500);
+  }, TICK_MS);
 }
 
 export function stopMarketIngestScheduler(): void {
   state.sessionId += 1;
   if (state.timer) {
-    clearTimeout(state.timer);
+    clearInterval(state.timer);
     state.timer = null;
   }
-  state.running = false;
-  state.warnedMissingToken = false;
   state.businessDb = null;
-  state.marketDb = null;
-  state.analysisDbPath = null;
+  state.lastTriggeredDateKey = null;
 }
 
 export async function triggerMarketIngest(
-  reason: "startup" | "manual" | "schedule"
+  reason: "startup" | "manual" | "schedule",
+  scopeOverride?: "targets" | "universe" | "both"
 ): Promise<void> {
-  if (state.running) return;
-  if (!state.businessDb || !state.marketDb || !state.analysisDbPath) return;
-  const sessionId = state.sessionId;
+  const businessDb = state.businessDb;
+  if (!businessDb) return;
+  const config = await getMarketIngestSchedulerConfig(businessDb);
+  const scope =
+    scopeOverride ??
+    (reason === "manual" ? "both" : config.scope);
 
-  state.running = true;
-  try {
-    const resolved = await getResolvedTushareToken(state.businessDb);
-    const token = resolved.token;
-    if (sessionId !== state.sessionId) return;
-
-    if (!token && reason !== "manual") {
-      if (!state.warnedMissingToken) {
-        console.warn(
-          `[mytrader] ${reason} ingest skipped: missing Tushare token.`
-        );
-        state.warnedMissingToken = true;
-      }
-      return;
-    }
-    state.warnedMissingToken = false;
-
-    const mode = reason === "manual" ? "manual" : "daily";
-    const meta = { schedule: reason };
-    const errors: unknown[] = [];
-
-    try {
-      await runTargetsIngest({
-        businessDb: state.businessDb,
-        marketDb: state.marketDb,
-        token,
-        mode,
-        meta
-      });
-    } catch (err) {
-      errors.push(err);
-    }
-    if (sessionId !== state.sessionId) return;
-
-    try {
-      await runUniverseIngest({
-        businessDb: state.businessDb,
-        marketDb: state.marketDb,
-        analysisDbPath: state.analysisDbPath,
-        token,
-        mode,
-        meta: { ...meta, windowYears: 3 }
-      });
-    } catch (err) {
-      errors.push(err);
-    }
-
-    if (errors.length > 0) {
-      throw errors[0];
-    }
-  } finally {
-    state.running = false;
-    if (reason === "schedule") scheduleNextRun();
-  }
+  await enqueueManagedIngest({
+    scope,
+    mode: reason === "manual" ? "manual" : "daily",
+    source: reason === "manual" ? "manual" : reason,
+    meta: { schedule: reason }
+  });
 }
 
-function scheduleNextRun(): void {
-  if (state.timer) {
-    clearTimeout(state.timer);
-    state.timer = null;
-  }
+async function initializeSession(sessionId: number): Promise<void> {
+  if (sessionId !== state.sessionId) return;
+  const businessDb = state.businessDb;
+  if (!businessDb) return;
+  const config = await getMarketIngestSchedulerConfig(businessDb);
+  if (sessionId !== state.sessionId) return;
 
-  const now = new Date();
-  const next = computeNextRun(now, DEFAULT_RUN_TIME);
-  const delay = Math.max(1000, next.getTime() - now.getTime());
-
-  state.timer = setTimeout(() => {
-    void triggerMarketIngest("schedule").catch((err) => {
-      console.error("[mytrader] scheduled ingest failed");
-      console.error(err);
-      scheduleNextRun();
+  if (config.runOnStartup) {
+    await enqueueManagedIngest({
+      scope: config.scope,
+      mode: "daily",
+      source: "startup",
+      meta: { schedule: "startup" }
     });
-  }, delay);
+  }
+
+  if (config.catchUpMissed) {
+    const nowParts = getZonedNow(config.timezone);
+    const schedule = parseRunAt(config.runAt);
+    if (
+      nowParts.hour > schedule.hours ||
+      (nowParts.hour === schedule.hours && nowParts.minute >= schedule.minutes)
+    ) {
+      state.lastTriggeredDateKey = nowParts.dateKey;
+      await enqueueManagedIngest({
+        scope: config.scope,
+        mode: "daily",
+        source: "schedule",
+        meta: { schedule: "catchup" }
+      });
+    }
+  }
+
+  await schedulerTick(sessionId);
 }
 
-function computeNextRun(now: Date, hhmm: string): Date {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  const hours = match ? Number(match[1]) : 19;
-  const minutes = match ? Number(match[2]) : 30;
+async function schedulerTick(sessionId: number): Promise<void> {
+  if (sessionId !== state.sessionId) return;
+  const businessDb = state.businessDb;
+  if (!businessDb) return;
 
-  const next = new Date(now);
-  next.setHours(hours, minutes, 0, 0);
-  if (next.getTime() <= now.getTime()) {
-    next.setDate(next.getDate() + 1);
+  const config = await getMarketIngestSchedulerConfig(businessDb);
+  if (sessionId !== state.sessionId) return;
+  if (!config.enabled) return;
+
+  const nowParts = getZonedNow(config.timezone);
+  const schedule = parseRunAt(config.runAt);
+  const matched =
+    nowParts.hour === schedule.hours && nowParts.minute === schedule.minutes;
+  if (!matched) return;
+  if (state.lastTriggeredDateKey === nowParts.dateKey) return;
+
+  state.lastTriggeredDateKey = nowParts.dateKey;
+  await enqueueManagedIngest({
+    scope: config.scope,
+    mode: "daily",
+    source: "schedule",
+    meta: { schedule: "schedule" }
+  });
+}
+
+function getZonedNow(timezone: string): {
+  dateKey: string;
+  hour: number;
+  minute: number;
+} {
+  const formatter = getFormatter(timezone);
+  const parts = formatter.formatToParts(new Date());
+  const year = getNumericPart(parts, "year");
+  const month = getNumericPart(parts, "month");
+  const day = getNumericPart(parts, "day");
+  const hour = getNumericPart(parts, "hour");
+  const minute = getNumericPart(parts, "minute");
+  const dateKey = `${String(year).padStart(4, "0")}-${String(month).padStart(
+    2,
+    "0"
+  )}-${String(day).padStart(2, "0")}`;
+  return { dateKey, hour, minute };
+}
+
+function getFormatter(timezone: string): Intl.DateTimeFormat {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", {
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
   }
-  return next;
+}
+
+function getNumericPart(
+  parts: Intl.DateTimeFormatPart[],
+  type: "year" | "month" | "day" | "hour" | "minute"
+): number {
+  const raw = parts.find((part) => part.type === type)?.value ?? "0";
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function parseRunAt(runAt: MarketIngestSchedulerConfig["runAt"]): {
+  hours: number;
+  minutes: number;
+} {
+  const match = /^(\d{2}):(\d{2})$/.exec(runAt);
+  if (!match) return { hours: 19, minutes: 30 };
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return { hours, minutes };
 }

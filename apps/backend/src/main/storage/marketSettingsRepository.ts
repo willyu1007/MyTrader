@@ -1,15 +1,34 @@
-import type { MarketTargetsConfig } from "@mytrader/shared";
+import type {
+  MarketIngestSchedulerConfig,
+  MarketTargetsConfig
+} from "@mytrader/shared";
 
 import { get, run } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 
 const TARGETS_KEY = "targets_config_v1";
 const TEMP_TARGETS_KEY = "targets_temp_symbols_v1";
+const INGEST_SCHEDULER_KEY = "ingest_scheduler_config_v1";
+const INGEST_CONTROL_STATE_KEY = "ingest_control_state_v1";
+
+export interface PersistedIngestControlState {
+  paused: boolean;
+  updatedAt: number;
+}
 
 export type TempTargetSymbolRow = {
   symbol: string;
   expiresAt: number;
   updatedAt: number;
+};
+
+const DEFAULT_INGEST_SCHEDULER_CONFIG: MarketIngestSchedulerConfig = {
+  enabled: true,
+  runAt: "19:30",
+  timezone: "Asia/Shanghai",
+  scope: "both",
+  runOnStartup: true,
+  catchUpMissed: true
 };
 
 export async function getMarketTargetsConfig(
@@ -191,5 +210,166 @@ function safeParseTempTargets(value: string): TempTargetSymbolRow[] | null {
       .filter((item): item is TempTargetSymbolRow => Boolean(item));
   } catch {
     return null;
+  }
+}
+
+export async function getMarketIngestSchedulerConfig(
+  db: SqliteDatabase
+): Promise<MarketIngestSchedulerConfig> {
+  const row = await get<{ value_json: string }>(
+    db,
+    `select value_json from market_settings where key = ?`,
+    [INGEST_SCHEDULER_KEY]
+  );
+  if (!row?.value_json) {
+    await setMarketIngestSchedulerConfig(db, DEFAULT_INGEST_SCHEDULER_CONFIG);
+    return { ...DEFAULT_INGEST_SCHEDULER_CONFIG };
+  }
+  const parsed = safeParseMarketIngestSchedulerConfig(row.value_json);
+  if (!parsed) {
+    await setMarketIngestSchedulerConfig(db, DEFAULT_INGEST_SCHEDULER_CONFIG);
+    return { ...DEFAULT_INGEST_SCHEDULER_CONFIG };
+  }
+  return parsed;
+}
+
+export async function setMarketIngestSchedulerConfig(
+  db: SqliteDatabase,
+  input: MarketIngestSchedulerConfig
+): Promise<MarketIngestSchedulerConfig> {
+  const normalized = normalizeMarketIngestSchedulerConfig(input);
+  await run(
+    db,
+    `
+      insert into market_settings (key, value_json)
+      values (?, ?)
+      on conflict(key) do update set
+        value_json = excluded.value_json
+    `,
+    [INGEST_SCHEDULER_KEY, JSON.stringify(normalized)]
+  );
+  return normalized;
+}
+
+export async function getPersistedIngestControlState(
+  db: SqliteDatabase
+): Promise<PersistedIngestControlState> {
+  const row = await get<{ value_json: string }>(
+    db,
+    `select value_json from market_settings where key = ?`,
+    [INGEST_CONTROL_STATE_KEY]
+  );
+  if (!row?.value_json) {
+    return { paused: false, updatedAt: Date.now() };
+  }
+  try {
+    const parsed = JSON.parse(row.value_json) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { paused: false, updatedAt: Date.now() };
+    }
+    const paused = Boolean((parsed as { paused?: boolean }).paused);
+    const updatedAtRaw = Number((parsed as { updatedAt?: number }).updatedAt);
+    return {
+      paused,
+      updatedAt:
+        Number.isFinite(updatedAtRaw) && updatedAtRaw > 0
+          ? Math.floor(updatedAtRaw)
+          : Date.now()
+    };
+  } catch {
+    return { paused: false, updatedAt: Date.now() };
+  }
+}
+
+export async function setPersistedIngestControlState(
+  db: SqliteDatabase,
+  input: PersistedIngestControlState
+): Promise<PersistedIngestControlState> {
+  const normalized: PersistedIngestControlState = {
+    paused: Boolean(input.paused),
+    updatedAt:
+      Number.isFinite(input.updatedAt) && input.updatedAt > 0
+        ? Math.floor(input.updatedAt)
+        : Date.now()
+  };
+  await run(
+    db,
+    `
+      insert into market_settings (key, value_json)
+      values (?, ?)
+      on conflict(key) do update set
+        value_json = excluded.value_json
+    `,
+    [INGEST_CONTROL_STATE_KEY, JSON.stringify(normalized)]
+  );
+  return normalized;
+}
+
+function safeParseMarketIngestSchedulerConfig(
+  value: string
+): MarketIngestSchedulerConfig | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return normalizeMarketIngestSchedulerConfig(
+      parsed as Partial<MarketIngestSchedulerConfig>
+    );
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMarketIngestSchedulerConfig(
+  input: Partial<MarketIngestSchedulerConfig>
+): MarketIngestSchedulerConfig {
+  const runAtRaw =
+    typeof input.runAt === "string" ? input.runAt.trim() : DEFAULT_INGEST_SCHEDULER_CONFIG.runAt;
+  const runAt = normalizeRunAt(runAtRaw);
+  const timezoneRaw =
+    typeof input.timezone === "string" && input.timezone.trim()
+      ? input.timezone.trim()
+      : DEFAULT_INGEST_SCHEDULER_CONFIG.timezone;
+  const timezone = normalizeTimezone(timezoneRaw);
+  const scope =
+    input.scope === "targets" || input.scope === "universe" || input.scope === "both"
+      ? input.scope
+      : DEFAULT_INGEST_SCHEDULER_CONFIG.scope;
+  return {
+    enabled: Boolean(input.enabled ?? DEFAULT_INGEST_SCHEDULER_CONFIG.enabled),
+    runAt,
+    timezone,
+    scope,
+    runOnStartup: Boolean(
+      input.runOnStartup ?? DEFAULT_INGEST_SCHEDULER_CONFIG.runOnStartup
+    ),
+    catchUpMissed: Boolean(
+      input.catchUpMissed ?? DEFAULT_INGEST_SCHEDULER_CONFIG.catchUpMissed
+    )
+  };
+}
+
+function normalizeRunAt(input: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(input);
+  if (!match) return DEFAULT_INGEST_SCHEDULER_CONFIG.runAt;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || hours < 0 || hours > 23) {
+    return DEFAULT_INGEST_SCHEDULER_CONFIG.runAt;
+  }
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 59) {
+    return DEFAULT_INGEST_SCHEDULER_CONFIG.runAt;
+  }
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function normalizeTimezone(input: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", { timeZone: input });
+    if (!formatter.resolvedOptions().timeZone) {
+      return DEFAULT_INGEST_SCHEDULER_CONFIG.timezone;
+    }
+    return input;
+  } catch {
+    return DEFAULT_INGEST_SCHEDULER_CONFIG.timezone;
   }
 }

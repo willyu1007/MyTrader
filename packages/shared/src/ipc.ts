@@ -310,6 +310,26 @@ export interface PreviewTargetsResult {
   symbols: ResolvedTargetSymbol[];
 }
 
+export interface TargetReasonsDiff {
+  symbol: string;
+  baselineReasons: string[];
+  draftReasons: string[];
+}
+
+export interface PreviewTargetsDraftInput {
+  config: MarketTargetsConfig;
+  query?: string | null;
+  limit?: number | null;
+}
+
+export interface PreviewTargetsDiffResult {
+  baseline: PreviewTargetsResult;
+  draft: PreviewTargetsResult;
+  addedSymbols: ResolvedTargetSymbol[];
+  removedSymbols: ResolvedTargetSymbol[];
+  reasonChangedSymbols: TargetReasonsDiff[];
+}
+
 export type TagSource = "provider" | "user" | "watchlist";
 
 export interface TagSummary {
@@ -556,6 +576,77 @@ export interface TriggerMarketIngestInput {
   scope: "targets" | "universe" | "both";
 }
 
+export type MarketIngestControlState =
+  | "idle"
+  | "running"
+  | "paused"
+  | "canceling";
+
+export interface MarketIngestCurrentJob {
+  scope: IngestRunScope;
+  mode: IngestRunMode;
+  source: "manual" | "schedule" | "startup" | "auto";
+  enqueuedAt: number;
+}
+
+export interface MarketIngestControlStatus {
+  state: MarketIngestControlState;
+  queueLength: number;
+  paused: boolean;
+  cancelRequested: boolean;
+  currentJob: MarketIngestCurrentJob | null;
+  currentRunId: string | null;
+  updatedAt: number;
+}
+
+export interface MarketIngestSchedulerConfig {
+  enabled: boolean;
+  runAt: string;
+  timezone: string;
+  scope: "targets" | "universe" | "both";
+  runOnStartup: boolean;
+  catchUpMissed: boolean;
+}
+
+export interface InstrumentRegistryEntry {
+  symbol: string;
+  name: string | null;
+  assetClass: AssetClass | null;
+  market: string | null;
+  currency: string | null;
+  autoIngest: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListInstrumentRegistryInput {
+  query?: string | null;
+  autoIngest?: "all" | "enabled" | "disabled";
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListInstrumentRegistryResult {
+  items: InstrumentRegistryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface SetInstrumentAutoIngestInput {
+  symbol: string;
+  enabled: boolean;
+}
+
+export interface BatchSetInstrumentAutoIngestInput {
+  symbols: string[];
+  enabled: boolean;
+}
+
+export interface GetIngestRunDetailInput {
+  id: string;
+}
+
 export interface TempTargetSymbol {
   symbol: string;
   expiresAt: number;
@@ -663,11 +754,28 @@ export interface MyTraderApi {
     testToken(input?: TestMarketTokenInput): Promise<void>;
     openProviderHomepage(input: OpenMarketProviderInput): Promise<void>;
     listIngestRuns(input?: ListIngestRunsInput): Promise<MarketIngestRun[]>;
+    getIngestRunDetail(input: GetIngestRunDetailInput): Promise<MarketIngestRun | null>;
     triggerIngest(input: TriggerMarketIngestInput): Promise<void>;
+    getIngestControlStatus(): Promise<MarketIngestControlStatus>;
+    pauseIngest(): Promise<MarketIngestControlStatus>;
+    resumeIngest(): Promise<MarketIngestControlStatus>;
+    cancelIngest(): Promise<MarketIngestControlStatus>;
+    getIngestSchedulerConfig(): Promise<MarketIngestSchedulerConfig>;
+    setIngestSchedulerConfig(
+      input: MarketIngestSchedulerConfig
+    ): Promise<MarketIngestSchedulerConfig>;
     listTempTargets(): Promise<TempTargetSymbol[]>;
     touchTempTarget(input: TouchTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
     removeTempTarget(input: RemoveTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
     promoteTempTarget(input: RemoveTempTargetSymbolInput): Promise<MarketTargetsConfig>;
+    previewTargetsDraft(input: PreviewTargetsDraftInput): Promise<PreviewTargetsDiffResult>;
+    listInstrumentRegistry(
+      input?: ListInstrumentRegistryInput
+    ): Promise<ListInstrumentRegistryResult>;
+    setInstrumentAutoIngest(input: SetInstrumentAutoIngestInput): Promise<void>;
+    batchSetInstrumentAutoIngest(
+      input: BatchSetInstrumentAutoIngestInput
+    ): Promise<void>;
   };
 }
 
@@ -721,9 +829,22 @@ export const IPC_CHANNELS = {
   MARKET_TOKEN_TEST: "market:token:test",
   MARKET_PROVIDER_OPEN: "market:provider:open",
   MARKET_INGEST_RUNS_LIST: "market:ingestRuns:list",
+  MARKET_INGEST_RUN_GET: "market:ingestRuns:get",
   MARKET_INGEST_TRIGGER: "market:ingest:trigger",
+  MARKET_INGEST_CONTROL_STATUS: "market:ingest:controlStatus",
+  MARKET_INGEST_CONTROL_PAUSE: "market:ingest:pause",
+  MARKET_INGEST_CONTROL_RESUME: "market:ingest:resume",
+  MARKET_INGEST_CONTROL_CANCEL: "market:ingest:cancel",
+  MARKET_INGEST_SCHEDULER_GET: "market:ingestScheduler:get",
+  MARKET_INGEST_SCHEDULER_SET: "market:ingestScheduler:set",
   MARKET_TEMP_TARGETS_LIST: "market:targetsTemp:list",
   MARKET_TEMP_TARGETS_TOUCH: "market:targetsTemp:touch",
   MARKET_TEMP_TARGETS_REMOVE: "market:targetsTemp:remove",
-  MARKET_TEMP_TARGETS_PROMOTE: "market:targetsTemp:promote"
+  MARKET_TEMP_TARGETS_PROMOTE: "market:targetsTemp:promote",
+  MARKET_TARGETS_PREVIEW_DRAFT: "market:targets:previewDraft",
+  MARKET_INSTRUMENT_REGISTRY_LIST: "market:instrumentRegistry:list",
+  MARKET_INSTRUMENT_REGISTRY_SET_AUTO_INGEST:
+    "market:instrumentRegistry:setAutoIngest",
+  MARKET_INSTRUMENT_REGISTRY_BATCH_SET_AUTO_INGEST:
+    "market:instrumentRegistry:batchSetAutoIngest"
 } as const;

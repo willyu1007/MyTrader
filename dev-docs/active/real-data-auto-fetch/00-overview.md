@@ -2,8 +2,8 @@
 
 ## Status
 - State: in_progress
-- Progress: Milestone 1 基本落地：Token（env > 本地 safeStorage）、ingest_runs 可观测、每日定时跑批（Targets+Universe）、DuckDB（近3年窗口）与数据状态入口（Other/Data Status）
-- Next step: 在桌面端用有效 token 做手工验收并补齐记录：token(local/env) UI 显示、手动/定时/按需拉取成功路径、trade_calendar 同步到 DuckDB、日K/缺口提示与公司行为展示
+- Progress: Milestone 2 落地：Other/数据管理闭环升级（调度配置、运行控制 pause/resume/cancel、Targets 草稿差异预览、注册标的 auto_ingest 管理、ingest run 详情）；后端新增 ingest orchestrator（统一接管 manual/schedule/startup/auto）。
+- Next step: 在桌面端做有 token 的端到端验收：调度时间触发、暂停后恢复、运行中取消、Targets 差异预览与实际拉取一致、注册标的批量启停后预览计数联动。
 
 ## Goal
 把“真实数据自动获取”做成可日常使用的闭环：可配置、可观测、可追溯、可控，并与现有组合估值/收益/风险/数据质量提示形成闭环。

@@ -14,27 +14,27 @@
   --mt-surface-2: rgba(29, 26, 24, 0.84);
   --mt-field: rgba(20, 18, 17, 0.92);
 
-  --mt-border: rgba(220, 225, 230, 0.16);
-  --mt-border-strong: rgba(220, 225, 230, 0.24);
+  --mt-border: rgba(220, 225, 230, 0.2);
+  --mt-border-strong: rgba(220, 225, 230, 0.3);
 
   --mt-text: #e8eaed;
   --mt-text-2: rgba(232, 234, 237, 0.8);
   --mt-text-3: rgba(232, 234, 237, 0.7);
 
-  --mt-accent: #0ea5b7;
+  --mt-accent: #2b8f9a;
   --mt-accent-2: #2a8cff;
   --mt-success: #2bd970;
-  --mt-danger: #ff6b6b;
+  --mt-danger: #cf7f78;
   --mt-warning: #ffb020;
 
-  --mt-radius-sm: 10px;
-  --mt-radius-md: 12px;
+  --mt-radius-sm: 6px;
+  --mt-radius-md: 8px;
 
   --mt-shadow-md: 0 10px 35px rgba(0, 0, 0, 0.35);
   --mt-shadow-sm: 0 4px 18px rgba(0, 0, 0, 0.22);
-  --mt-shadow-glow: 0 0 26px rgba(8, 145, 178, 0.16);
+  --mt-shadow-glow: 0 0 20px rgba(43, 143, 154, 0.12);
 
-  --mt-ring: 0 0 0 3px rgba(8, 145, 178, 0.25);
+  --mt-ring: 0 0 0 3px rgba(43, 143, 154, 0.2);
 
   --mt-topbar-bg: rgba(21, 19, 18, 0.74);
 
@@ -55,20 +55,20 @@
     rgba(232, 234, 237, 0.16)
   );
   --mt-btn-border: rgba(232, 234, 237, 0.24);
-  --mt-btn-border-hover: rgba(8, 145, 178, 0.55);
+  --mt-btn-border-hover: rgba(43, 143, 154, 0.5);
 
   --mt-btn-primary-bg: linear-gradient(
     180deg,
-    rgba(8, 145, 178, 0.34),
-    rgba(8, 145, 178, 0.18)
+    rgba(43, 143, 154, 0.26),
+    rgba(43, 143, 154, 0.15)
   );
   --mt-btn-primary-bg-hover: linear-gradient(
     180deg,
-    rgba(8, 145, 178, 0.42),
-    rgba(8, 145, 178, 0.22)
+    rgba(43, 143, 154, 0.34),
+    rgba(43, 143, 154, 0.2)
   );
-  --mt-btn-primary-border: rgba(8, 145, 178, 0.55);
-  --mt-btn-primary-border-hover: rgba(8, 145, 178, 0.75);
+  --mt-btn-primary-border: rgba(43, 143, 154, 0.5);
+  --mt-btn-primary-border-hover: rgba(43, 143, 154, 0.65);
 
   --mt-btn-secondary-bg: rgba(232, 234, 237, 0.14);
   --mt-btn-secondary-bg-hover: rgba(232, 234, 237, 0.22);
@@ -99,7 +99,7 @@
 
     --mt-body-bg:
       radial-gradient(1200px 800px at 18% -10%, rgba(42, 140, 255, 0.12), transparent 55%),
-      radial-gradient(900px 700px at 100% 0%, rgba(8, 145, 178, 0.1), transparent 60%),
+      radial-gradient(900px 700px at 100% 0%, rgba(43, 143, 154, 0.1), transparent 60%),
       var(--mt-bg);
 
     --mt-btn-bg: linear-gradient(
@@ -113,20 +113,20 @@
       rgba(226, 232, 240, 0.9)
     );
     --mt-btn-border: var(--mt-border-strong);
-    --mt-btn-border-hover: rgba(8, 145, 178, 0.55);
+    --mt-btn-border-hover: rgba(43, 143, 154, 0.5);
 
     --mt-btn-primary-bg: linear-gradient(
       180deg,
-      rgba(8, 145, 178, 0.28),
-      rgba(8, 145, 178, 0.14)
+      rgba(43, 143, 154, 0.22),
+      rgba(43, 143, 154, 0.1)
     );
     --mt-btn-primary-bg-hover: linear-gradient(
       180deg,
-      rgba(8, 145, 178, 0.36),
-      rgba(8, 145, 178, 0.18)
+      rgba(43, 143, 154, 0.28),
+      rgba(43, 143, 154, 0.14)
     );
-    --mt-btn-primary-border: rgba(8, 145, 178, 0.6);
-    --mt-btn-primary-border-hover: rgba(8, 145, 178, 0.8);
+    --mt-btn-primary-border: rgba(43, 143, 154, 0.55);
+    --mt-btn-primary-border-hover: rgba(43, 143, 154, 0.72);
 
     --mt-btn-secondary-bg: rgba(15, 23, 42, 0.06);
     --mt-btn-secondary-bg-hover: rgba(15, 23, 42, 0.1);
@@ -158,6 +158,6 @@ body {
 /* Global form control tone: avoid overly bright blue checkboxes/radios */
 input[type="checkbox"],
 input[type="radio"] {
-  accent-color: rgba(8, 145, 178, 0.85);
-  color: rgba(8, 145, 178, 0.85);
+  accent-color: rgba(43, 143, 154, 0.85);
+  color: rgba(43, 143, 154, 0.85);
 }

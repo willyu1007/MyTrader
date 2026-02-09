@@ -1,12 +1,10 @@
 import { config } from "../config";
-import { getResolvedTushareToken } from "../storage/marketTokenRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
-import { runTargetsIngest } from "./marketIngestRunner";
+import { enqueueManagedIngest } from "./ingestOrchestrator";
 
 type AutoIngestState = {
   timer: NodeJS.Timeout | null;
   running: boolean;
-  warnedMissingToken: boolean;
   sessionId: number;
   businessDb: SqliteDatabase | null;
   marketDb: SqliteDatabase | null;
@@ -15,7 +13,6 @@ type AutoIngestState = {
 const state: AutoIngestState = {
   timer: null,
   running: false,
-  warnedMissingToken: false,
   sessionId: 0,
   businessDb: null,
   marketDb: null
@@ -78,28 +75,12 @@ async function runOnce(
   if (!state.businessDb || !state.marketDb) return;
   if (!config.autoIngest.enabled) return;
 
-  const sessionId = state.sessionId;
-  const businessDb = state.businessDb;
-  const marketDb = state.marketDb;
-  const resolved = await getResolvedTushareToken(businessDb);
-  const token = resolved.token;
-  if (!token) {
-    if (!state.warnedMissingToken) {
-      console.warn("[mytrader] auto-ingest skipped: missing Tushare token.");
-      state.warnedMissingToken = true;
-    }
-    return;
-  }
-  state.warnedMissingToken = false;
-
   state.running = true;
   try {
-    if (sessionId !== state.sessionId) return;
-    await runTargetsIngest({
-      businessDb,
-      marketDb,
-      token,
+    await enqueueManagedIngest({
+      scope: "targets",
       mode: "on_demand",
+      source: "auto",
       meta: { schedule, reason: reason ?? null }
     });
   } finally {

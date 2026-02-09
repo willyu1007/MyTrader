@@ -92,8 +92,22 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_PROVIDER_OPEN, input),
     listIngestRuns: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_RUNS_LIST, input ?? null),
+    getIngestRunDetail: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_RUN_GET, input),
     triggerIngest: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_TRIGGER, input),
+    getIngestControlStatus: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_CONTROL_STATUS),
+    pauseIngest: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_CONTROL_PAUSE),
+    resumeIngest: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_CONTROL_RESUME),
+    cancelIngest: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_CONTROL_CANCEL),
+    getIngestSchedulerConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_GET),
+    setIngestSchedulerConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_SET, input),
     listTempTargets: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST),
     touchTempTarget: (input) =>
@@ -101,7 +115,24 @@ const api: MyTraderApi = {
     removeTempTarget: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_REMOVE, input),
     promoteTempTarget: (input) =>
-      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_PROMOTE, input)
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_PROMOTE, input),
+    previewTargetsDraft: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_TARGETS_PREVIEW_DRAFT, input),
+    listInstrumentRegistry: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.MARKET_INSTRUMENT_REGISTRY_LIST,
+        input ?? null
+      ),
+    setInstrumentAutoIngest: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.MARKET_INSTRUMENT_REGISTRY_SET_AUTO_INGEST,
+        input
+      ),
+    batchSetInstrumentAutoIngest: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.MARKET_INSTRUMENT_REGISTRY_BATCH_SET_AUTO_INGEST,
+        input
+      )
   }
 };
 

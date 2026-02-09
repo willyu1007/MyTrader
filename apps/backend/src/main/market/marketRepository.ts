@@ -50,6 +50,20 @@ export interface InstrumentRegistryEntry {
   updatedAt: number;
 }
 
+export interface ListInstrumentRegistryOptions {
+  query?: string | null;
+  autoIngest?: "all" | "enabled" | "disabled";
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListInstrumentRegistryResult {
+  items: InstrumentRegistryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface InstrumentMetadata {
   symbol: string;
   name: string | null;
@@ -96,8 +110,30 @@ export async function upsertInstruments(
 }
 
 export async function listInstrumentRegistry(
-  db: SqliteDatabase
-): Promise<InstrumentRegistryEntry[]> {
+  db: SqliteDatabase,
+  input?: ListInstrumentRegistryOptions
+): Promise<ListInstrumentRegistryResult> {
+  const query = input?.query?.trim() ?? "";
+  const autoIngest = input?.autoIngest ?? "all";
+  const limit = Math.max(1, Math.min(500, Math.floor(input?.limit ?? 100)));
+  const offset = Math.max(0, Math.floor(input?.offset ?? 0));
+  const whereClauses: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (query) {
+    const escaped = `%${escapeLike(query)}%`;
+    whereClauses.push(
+      `(symbol like ? escape '\\' or coalesce(name, '') like ? escape '\\')`
+    );
+    params.push(escaped, escaped);
+  }
+
+  if (autoIngest === "enabled") whereClauses.push(`auto_ingest = 1`);
+  if (autoIngest === "disabled") whereClauses.push(`auto_ingest = 0`);
+
+  const whereSql =
+    whereClauses.length > 0 ? `where ${whereClauses.join(" and ")}` : "";
+
   const rows = await all<{
     symbol: string;
     name: string | null;
@@ -113,11 +149,26 @@ export async function listInstrumentRegistry(
       select symbol, name, asset_class, market, currency, auto_ingest,
              created_at, updated_at
       from instruments
+      ${whereSql}
       order by symbol asc
-    `
+      limit ?
+      offset ?
+    `,
+    [...params, limit, offset]
   );
 
-  return rows.map((row) => ({
+  const totalRow = await all<{ total: number }>(
+    db,
+    `
+      select count(*) as total
+      from instruments
+      ${whereSql}
+    `,
+    params
+  );
+  const total = Number(totalRow[0]?.total ?? 0);
+
+  const items = rows.map((row) => ({
     symbol: row.symbol,
     name: row.name ?? null,
     assetClass: row.asset_class ? (row.asset_class as AssetClass) : null,
@@ -127,6 +178,7 @@ export async function listInstrumentRegistry(
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }));
+  return { items, total, limit, offset };
 }
 
 export async function getInstrumentsBySymbols(
@@ -223,6 +275,21 @@ export async function setInstrumentAutoIngest(
     `,
     [autoIngest, now, symbol]
   );
+}
+
+export async function batchSetInstrumentAutoIngest(
+  db: SqliteDatabase,
+  symbols: string[],
+  enabled: boolean
+): Promise<number> {
+  const normalized = Array.from(
+    new Set(symbols.map((symbol) => symbol.trim()).filter(Boolean))
+  );
+  if (normalized.length === 0) return 0;
+  for (const symbol of normalized) {
+    await setInstrumentAutoIngest(db, symbol, enabled);
+  }
+  return normalized.length;
 }
 
 export async function upsertPrices(
@@ -386,4 +453,8 @@ export async function getLatestPricesAsOf(
   }
 
   return latest;
+}
+
+function escapeLike(input: string): string {
+  return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }

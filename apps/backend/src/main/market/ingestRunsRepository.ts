@@ -125,6 +125,23 @@ export async function listIngestRuns(
   );
 }
 
+export async function getIngestRunById(
+  db: SqliteDatabase,
+  id: string
+): Promise<IngestRunRow | null> {
+  const row = await get<IngestRunRow>(
+    db,
+    `
+      select *
+      from ingest_runs
+      where id = ?
+      limit 1
+    `,
+    [id]
+  );
+  return row ?? null;
+}
+
 export async function getLatestIngestRun(
   db: SqliteDatabase,
   scope: IngestRunScope
@@ -142,4 +159,3 @@ export async function getLatestIngestRun(
   );
   return row ?? null;
 }
-

@@ -7,4 +7,4 @@
 
 ## Acceptance criteria
 - Styles are consistent across the feature.
-- No "magic numbers" for spacing where tokens exist.
+- No “magic numbers” for spacing where tokens exist.

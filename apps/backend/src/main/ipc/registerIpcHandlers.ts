@@ -7,13 +7,16 @@ import { IPC_CHANNELS } from "@mytrader/shared";
 
 import type {
   AccountSummary,
+  BatchSetInstrumentAutoIngestInput,
   CorporateActionCategory,
   CorporateActionMeta,
   CreateAccountInput,
   GetDailyBarsInput,
+  GetIngestRunDetailInput,
   GetQuotesInput,
   GetTagMembersInput,
   GetTagSeriesInput,
+  ListInstrumentRegistryInput,
   CreateLedgerEntryInput,
   CreatePortfolioInput,
   CreatePositionInput,
@@ -21,9 +24,12 @@ import type {
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
   ListTagsInput,
+  MarketIngestSchedulerConfig,
   MarketTargetsConfig,
+  PreviewTargetsDraftInput,
   PortfolioPerformanceRangeInput,
   SearchInstrumentsInput,
+  SetInstrumentAutoIngestInput,
   TushareIngestInput,
   UpsertWatchlistItemInput,
   UpdateLedgerEntryInput,
@@ -35,7 +41,13 @@ import type {
 import { ensureBusinessSchema } from "../storage/businessSchema";
 import { AccountIndexDb } from "../storage/accountIndexDb";
 import { ensureMarketCacheSchema } from "../market/marketCache";
-import { getLatestPrices, upsertInstruments } from "../market/marketRepository";
+import {
+  batchSetInstrumentAutoIngest,
+  getLatestPrices,
+  listInstrumentRegistry,
+  setInstrumentAutoIngest,
+  upsertInstruments
+} from "../market/marketRepository";
 import {
   startAutoIngest,
   stopAutoIngest,
@@ -43,8 +55,7 @@ import {
 } from "../market/autoIngest";
 import {
   startMarketIngestScheduler,
-  stopMarketIngestScheduler,
-  triggerMarketIngest
+  stopMarketIngestScheduler
 } from "../market/marketIngestScheduler";
 import {
   createPortfolio,
@@ -101,8 +112,10 @@ import {
 import { config } from "../config";
 import {
   getMarketTargetsConfig,
+  getMarketIngestSchedulerConfig,
   listTempTargetSymbols,
   removeTempTargetSymbol,
+  setMarketIngestSchedulerConfig,
   setMarketTargetsConfig,
   touchTempTargetSymbol
 } from "../storage/marketSettingsRepository";
@@ -116,19 +129,23 @@ import {
   removeWatchlistItem,
   upsertWatchlistItem
 } from "../storage/watchlistRepository";
-import { previewTargets } from "../market/targetsService";
-import { listIngestRuns } from "../market/ingestRunsRepository";
-import {
-  runTargetsIngest,
-  runUniverseIngest
-} from "../market/marketIngestRunner";
+import { previewTargets, previewTargetsDraft } from "../market/targetsService";
+import { getIngestRunById, listIngestRuns } from "../market/ingestRunsRepository";
 import { getMarketProvider } from "../market/providers";
+import {
+  cancelManagedIngest,
+  enqueueManagedIngest,
+  getManagedIngestControlStatus,
+  pauseManagedIngest,
+  resumeManagedIngest,
+  startIngestOrchestrator,
+  stopIngestOrchestrator
+} from "../market/ingestOrchestrator";
 
 let accountIndexDb: AccountIndexDb | null = null;
 let activeAccount: AccountSummary | null = null;
 let activeBusinessDb: SqliteDatabase | null = null;
 let marketCacheDb: SqliteDatabase | null = null;
-let activeAnalysisDbPath: string | null = null;
 
 function requireActiveBusinessDb(): SqliteDatabase {
   if (!activeBusinessDb) throw new Error("当前账号未解锁。");
@@ -249,11 +266,11 @@ export async function registerIpcHandlers() {
       const layout = await ensureAccountDataLayout(unlocked.dataDir);
 
       if (activeBusinessDb) {
+        stopIngestOrchestrator();
         stopAutoIngest();
         stopMarketIngestScheduler();
         await close(activeBusinessDb);
         activeBusinessDb = null;
-        activeAnalysisDbPath = null;
       }
 
       activeBusinessDb = await openSqliteDatabase(layout.businessDbPath);
@@ -261,8 +278,12 @@ export async function registerIpcHandlers() {
       await ensureBusinessSchema(activeBusinessDb);
 
       activeAccount = unlocked;
-      activeAnalysisDbPath = layout.analysisDbPath;
       const marketDb = requireMarketCacheDb();
+      await startIngestOrchestrator({
+        businessDb: activeBusinessDb,
+        marketDb,
+        analysisDbPath: layout.analysisDbPath
+      });
       startAutoIngest(activeBusinessDb, marketDb);
       startMarketIngestScheduler(activeBusinessDb, marketDb, layout.analysisDbPath);
       return unlocked;
@@ -271,13 +292,13 @@ export async function registerIpcHandlers() {
 
   ipcMain.handle(IPC_CHANNELS.ACCOUNT_LOCK, async () => {
     if (activeBusinessDb) {
+      stopIngestOrchestrator();
       stopAutoIngest();
       stopMarketIngestScheduler();
       await close(activeBusinessDb);
       activeBusinessDb = null;
     }
     activeAccount = null;
-    activeAnalysisDbPath = null;
   });
 
   ipcMain.handle(IPC_CHANNELS.PORTFOLIO_LIST, async () => {
@@ -650,6 +671,22 @@ export async function registerIpcHandlers() {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.MARKET_TARGETS_PREVIEW_DRAFT,
+    async (_event, input: PreviewTargetsDraftInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      if (!input || typeof input !== "object" || Array.isArray(input)) {
+        throw new Error("previewTargetsDraft input is required.");
+      }
+      return await previewTargetsDraft({
+        businessDb,
+        marketDb,
+        draftInput: input
+      });
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.MARKET_WATCHLIST_LIST,
     async () => {
       const businessDb = requireActiveBusinessDb();
@@ -726,6 +763,41 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       return await getMarketTagSeries(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_INSTRUMENT_REGISTRY_LIST,
+    async (_event, input: ListInstrumentRegistryInput | null) => {
+      const marketDb = requireMarketCacheDb();
+      return await listInstrumentRegistry(marketDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_INSTRUMENT_REGISTRY_SET_AUTO_INGEST,
+    async (_event, input: SetInstrumentAutoIngestInput) => {
+      const marketDb = requireMarketCacheDb();
+      const symbol = normalizeRequiredString(input?.symbol, "symbol");
+      const enabled = Boolean(input?.enabled);
+      await setInstrumentAutoIngest(marketDb, symbol, enabled);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_INSTRUMENT_REGISTRY_BATCH_SET_AUTO_INGEST,
+    async (_event, input: BatchSetInstrumentAutoIngestInput) => {
+      const marketDb = requireMarketCacheDb();
+      const symbols = Array.isArray(input?.symbols)
+        ? input.symbols
+            .map((value) => String(value).trim())
+            .filter(Boolean)
+        : [];
+      if (symbols.length === 0) {
+        throw new Error("symbols is required.");
+      }
+      const enabled = Boolean(input?.enabled);
+      await batchSetInstrumentAutoIngest(marketDb, symbols, enabled);
     }
   );
 
@@ -818,40 +890,73 @@ export async function registerIpcHandlers() {
     }));
   });
 
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_INGEST_RUN_GET,
+    async (_event, input: GetIngestRunDetailInput) => {
+      const marketDb = requireMarketCacheDb();
+      const id = normalizeRequiredString(input?.id, "id");
+      const row = await getIngestRunById(marketDb, id);
+      if (!row) return null;
+      return {
+        id: row.id,
+        scope: row.scope,
+        mode: row.mode,
+        status: row.status,
+        asOfTradeDate: row.as_of_trade_date,
+        startedAt: row.started_at,
+        finishedAt: row.finished_at,
+        symbolCount: row.symbol_count,
+        inserted: row.inserted,
+        updated: row.updated,
+        errors: row.errors,
+        errorMessage: row.error_message,
+        meta: row.meta_json ? safeParseJsonObject(row.meta_json) : null
+      };
+    }
+  );
+
   ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_TRIGGER, async (_event, input) => {
-    const businessDb = requireActiveBusinessDb();
-    const marketDb = requireMarketCacheDb();
-    const resolved = await getResolvedTushareToken(businessDb);
     const scope = input?.scope;
     if (!scope || (scope !== "targets" && scope !== "universe" && scope !== "both")) {
       throw new Error("scope must be targets/universe/both.");
     }
-    if (scope === "both") {
-      await triggerMarketIngest("manual");
-      return;
-    }
-    if (scope === "targets") {
-      await runTargetsIngest({
-        businessDb,
-        marketDb,
-        token: resolved.token,
-        mode: "manual",
-        meta: { schedule: "manual" }
-      });
-      return;
-    }
-    if (!activeAnalysisDbPath) {
-      throw new Error("analysis.duckdb 尚未初始化。");
-    }
-    await runUniverseIngest({
-      businessDb,
-      marketDb,
-      analysisDbPath: activeAnalysisDbPath,
-      token: resolved.token,
+    await enqueueManagedIngest({
+      scope,
       mode: "manual",
-      meta: { schedule: "manual", windowYears: 3 }
+      source: "manual",
+      meta: { schedule: "manual" }
     });
   });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_CONTROL_STATUS, async () => {
+    return getManagedIngestControlStatus();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_CONTROL_PAUSE, async () => {
+    return await pauseManagedIngest();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_CONTROL_RESUME, async () => {
+    return await resumeManagedIngest();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_CONTROL_CANCEL, async () => {
+    return cancelManagedIngest();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_GET, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketIngestSchedulerConfig(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_INGEST_SCHEDULER_SET,
+    async (_event, input: MarketIngestSchedulerConfig) => {
+      const businessDb = requireActiveBusinessDb();
+      const saved = await setMarketIngestSchedulerConfig(businessDb, input);
+      return saved;
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST, async () => {
     const businessDb = requireActiveBusinessDb();

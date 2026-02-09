@@ -1,4 +1,11 @@
-import type { AssetClass, MarketTargetsConfig, TushareIngestItem } from "@mytrader/shared";
+import type {
+  AssetClass,
+  MarketTargetsConfig,
+  PreviewTargetsDiffResult,
+  PreviewTargetsDraftInput,
+  ResolvedTargetSymbol as SharedResolvedTargetSymbol,
+  TushareIngestItem
+} from "@mytrader/shared";
 
 import { derivePositionsFromLedger } from "../services/positionEngine";
 import { listLedgerEntriesByPortfolio } from "../storage/ledgerRepository";
@@ -29,6 +36,61 @@ export async function previewTargets(input: {
 }): Promise<PreviewTargetsResult> {
   const { businessDb, marketDb } = input;
   const config = await getMarketTargetsConfig(businessDb);
+  return await previewTargetsByConfig({
+    businessDb,
+    marketDb,
+    config
+  });
+}
+
+export async function previewTargetsDraft(input: {
+  businessDb: SqliteDatabase;
+  marketDb: SqliteDatabase;
+  draftInput: PreviewTargetsDraftInput;
+}): Promise<PreviewTargetsDiffResult> {
+  const { businessDb, marketDb, draftInput } = input;
+  const baselineConfig = await getMarketTargetsConfig(businessDb);
+  const baseline = await previewTargetsByConfig({
+    businessDb,
+    marketDb,
+    config: baselineConfig
+  });
+  const draft = await previewTargetsByConfig({
+    businessDb,
+    marketDb,
+    config: draftInput.config
+  });
+  const diff = buildTargetsDiff({
+    baseline,
+    draft
+  });
+  const query = draftInput.query?.trim().toLowerCase() ?? "";
+  const limit = normalizePreviewLimit(draftInput.limit);
+  if (!query && !limit) return diff;
+
+  return {
+    baseline: {
+      ...diff.baseline,
+      symbols: filterAndSliceSymbols(diff.baseline.symbols, query, limit)
+    },
+    draft: {
+      ...diff.draft,
+      symbols: filterAndSliceSymbols(diff.draft.symbols, query, limit)
+    },
+    addedSymbols: filterAndSliceSymbols(diff.addedSymbols, query, limit),
+    removedSymbols: filterAndSliceSymbols(diff.removedSymbols, query, limit),
+    reasonChangedSymbols: diff.reasonChangedSymbols
+      .filter((item) => !query || item.symbol.toLowerCase().includes(query))
+      .slice(0, limit ?? undefined)
+  };
+}
+
+async function previewTargetsByConfig(input: {
+  businessDb: SqliteDatabase;
+  marketDb: SqliteDatabase;
+  config: MarketTargetsConfig;
+}): Promise<PreviewTargetsResult> {
+  const { businessDb, marketDb, config } = input;
   const reasonsBySymbol = new Map<string, Set<string>>();
 
   const tempSymbols = await listTempTargetSymbols(businessDb);
@@ -96,6 +158,51 @@ export async function previewTargets(input: {
   return { config, symbols };
 }
 
+function buildTargetsDiff(input: {
+  baseline: PreviewTargetsResult;
+  draft: PreviewTargetsResult;
+}): PreviewTargetsDiffResult {
+  const baselineMap = new Map<string, SharedResolvedTargetSymbol>();
+  input.baseline.symbols.forEach((row) => baselineMap.set(row.symbol, row));
+  const draftMap = new Map<string, SharedResolvedTargetSymbol>();
+  input.draft.symbols.forEach((row) => draftMap.set(row.symbol, row));
+
+  const addedSymbols: SharedResolvedTargetSymbol[] = [];
+  const removedSymbols: SharedResolvedTargetSymbol[] = [];
+  const reasonChangedSymbols: PreviewTargetsDiffResult["reasonChangedSymbols"] = [];
+
+  draftMap.forEach((draftRow, symbol) => {
+    const baselineRow = baselineMap.get(symbol);
+    if (!baselineRow) {
+      addedSymbols.push(draftRow);
+      return;
+    }
+    if (!sameReasonSet(baselineRow.reasons, draftRow.reasons)) {
+      reasonChangedSymbols.push({
+        symbol,
+        baselineReasons: baselineRow.reasons,
+        draftReasons: draftRow.reasons
+      });
+    }
+  });
+
+  baselineMap.forEach((baselineRow, symbol) => {
+    if (!draftMap.has(symbol)) removedSymbols.push(baselineRow);
+  });
+
+  addedSymbols.sort((a, b) => a.symbol.localeCompare(b.symbol));
+  removedSymbols.sort((a, b) => a.symbol.localeCompare(b.symbol));
+  reasonChangedSymbols.sort((a, b) => a.symbol.localeCompare(b.symbol));
+
+  return {
+    baseline: input.baseline,
+    draft: input.draft,
+    addedSymbols,
+    removedSymbols,
+    reasonChangedSymbols
+  };
+}
+
 export async function resolveAutoIngestItems(input: {
   businessDb: SqliteDatabase;
   marketDb: SqliteDatabase;
@@ -157,4 +264,31 @@ function addReason(
   const set = map.get(key) ?? new Set<string>();
   set.add(reason);
   map.set(key, set);
+}
+
+function sameReasonSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function filterAndSliceSymbols(
+  symbols: SharedResolvedTargetSymbol[],
+  query: string,
+  limit: number | null
+): SharedResolvedTargetSymbol[] {
+  const filtered = query
+    ? symbols.filter((row) => row.symbol.toLowerCase().includes(query))
+    : symbols;
+  if (!limit) return filtered;
+  return filtered.slice(0, limit);
+}
+
+function normalizePreviewLimit(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const n = Math.floor(value);
+  if (n <= 0) return null;
+  return Math.min(5000, n);
 }
