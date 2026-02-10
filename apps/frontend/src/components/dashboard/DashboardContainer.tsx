@@ -10,8 +10,6 @@ import type {
   AssetClass,
   CorporateActionKind,
   CreateLedgerEntryInput,
-  CreatePositionInput,
-  CreateRiskLimitInput,
   LedgerEntry,
   LedgerEventType,
   LedgerSide,
@@ -22,8 +20,6 @@ import type {
   Portfolio,
   PortfolioPerformanceRangeResult,
   PortfolioSnapshot,
-  PositionValuation,
-  RiskLimit,
   RiskLimitType,
 } from "@mytrader/shared";
 import {
@@ -149,6 +145,7 @@ import { useDashboardMarketAdminActions } from "./hooks/use-dashboard-market-adm
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
 import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data-loaders";
+import { useDashboardPortfolioActions } from "./hooks/use-dashboard-portfolio-actions";
 import {
   useDashboardPortfolio
 } from "./hooks/use-dashboard-portfolio";
@@ -1843,188 +1840,36 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     return () => window.clearTimeout(timer);
   }, [error, notice]);
 
-  const handleCreatePortfolio = useCallback(async () => {
-    if (!window.mytrader) return;
-    setError(null);
-    setNotice(null);
-    const name = portfolioName.trim();
-    if (!name) {
-      setError("请输入组合名称。");
-      return;
-    }
-    const created = await window.mytrader.portfolio.create({
-      name,
-      baseCurrency: portfolioBaseCurrency.trim() || "CNY"
-    });
-    setPortfolioName("");
-    setPortfolioBaseCurrency("CNY");
-    await loadPortfolios(created.id);
-    setNotice(`组合已创建：${created.name}。`);
-  }, [portfolioName, portfolioBaseCurrency, loadPortfolios]);
-
-  const handleRenamePortfolio = useCallback(async () => {
-    if (!window.mytrader || !activePortfolio) return;
-    setError(null);
-    setNotice(null);
-    const name = portfolioRename.trim();
-    if (!name) {
-      setError("请输入组合名称。");
-      return;
-    }
-    const updated = await window.mytrader.portfolio.update({
-      id: activePortfolio.id,
-      name,
-      baseCurrency: activePortfolio.baseCurrency
-    });
-    await loadPortfolios(updated.id);
-    setNotice(`组合已重命名为：${updated.name}。`);
-  }, [activePortfolio, portfolioRename, loadPortfolios]);
-
-  const handleDeletePortfolio = useCallback(async () => {
-    if (!window.mytrader || !activePortfolio) return;
-    setError(null);
-    setNotice(null);
-    await window.mytrader.portfolio.remove(activePortfolio.id);
-    await loadPortfolios();
-    setNotice("组合已删除。");
-  }, [activePortfolio, loadPortfolios]);
-
-  const handleEditPosition = useCallback((position: PositionValuation) => {
-    setPositionForm({
-      id: position.position.id,
-      symbol: position.position.symbol,
-      name: position.position.name ?? "",
-      assetClass: position.position.assetClass,
-      market: position.position.market,
-      currency: position.position.currency,
-      quantity: String(position.position.quantity),
-      cost: position.position.cost?.toString() ?? "",
-      openDate: position.position.openDate ?? ""
-    });
-  }, []);
-
-  const handleCancelEditPosition = useCallback(() => {
-    setPositionForm(emptyPositionForm);
-  }, []);
-
-  const handleSubmitPosition = useCallback(async () => {
-    if (!window.mytrader || !activePortfolio) return;
-    setError(null);
-    setNotice(null);
-
-    const quantity = Number(positionForm.quantity);
-    const costValue = positionForm.cost ? Number(positionForm.cost) : null;
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setError("数量必须大于 0。");
-      return;
-    }
-    if (positionForm.cost && !Number.isFinite(costValue)) {
-      setError("成本必须是数字。");
-      return;
-    }
-    if (!positionForm.symbol.trim()) {
-      setError("请输入代码。");
-      return;
-    }
-    if (!positionForm.market.trim() || !positionForm.currency.trim()) {
-      setError("请输入市场与币种。");
-      return;
-    }
-
-    const payload: CreatePositionInput = {
-      portfolioId: activePortfolio.id,
-      symbol: positionForm.symbol.trim(),
-      name: positionForm.name.trim() || null,
-      assetClass: positionForm.assetClass,
-      market: positionForm.market.trim(),
-      currency: positionForm.currency.trim(),
-      quantity,
-      cost: costValue,
-      openDate: positionForm.openDate.trim() || null
-    };
-
-    if (positionForm.id) {
-      await window.mytrader.position.update({ ...payload, id: positionForm.id });
-      setNotice("持仓已更新。");
-    } else {
-      await window.mytrader.position.create(payload);
-      setNotice("持仓已新增。");
-    }
-
-    setPositionForm(emptyPositionForm);
-    await loadSnapshot(activePortfolio.id);
-  }, [activePortfolio, positionForm, loadSnapshot]);
-
-  const handleDeletePosition = useCallback(
-    async (positionId: string) => {
-      if (!window.mytrader || !activePortfolio) return;
-      setError(null);
-      setNotice(null);
-      await window.mytrader.position.remove(positionId);
-      await loadSnapshot(activePortfolio.id);
-      setNotice("持仓已删除。");
-    },
-    [activePortfolio, loadSnapshot]
-  );
-
-  const handleEditRiskLimit = useCallback((limit: RiskLimit) => {
-    setRiskForm({
-      id: limit.id,
-      limitType: limit.limitType,
-      target: limit.target,
-      thresholdPct: (limit.threshold * 100).toFixed(2)
-    });
-  }, []);
-
-  const handleCancelRiskEdit = useCallback(() => {
-    setRiskForm(emptyRiskForm);
-  }, []);
-
-  const handleSubmitRiskLimit = useCallback(async () => {
-    if (!window.mytrader || !activePortfolio) return;
-    setError(null);
-    setNotice(null);
-
-    const threshold = Number(riskForm.thresholdPct) / 100;
-    if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1) {
-      setError("阈值必须在 0 到 100 之间。");
-      return;
-    }
-    if (!riskForm.target.trim()) {
-      setError("请输入目标。");
-      return;
-    }
-
-    const payload: CreateRiskLimitInput = {
-      portfolioId: activePortfolio.id,
-      limitType: riskForm.limitType,
-      target: riskForm.target.trim(),
-      threshold
-    };
-
-    if (riskForm.id) {
-      await window.mytrader.risk.update({ ...payload, id: riskForm.id });
-      setNotice("风险限额已更新。");
-    } else {
-      await window.mytrader.risk.create(payload);
-      setNotice("风险限额已新增。");
-    }
-
-    setRiskForm(emptyRiskForm);
-    await loadSnapshot(activePortfolio.id);
-  }, [activePortfolio, riskForm, loadSnapshot]);
-
-  const handleDeleteRiskLimit = useCallback(
-    async (riskLimitId: string) => {
-      if (!window.mytrader || !activePortfolio) return;
-      setError(null);
-      setNotice(null);
-      await window.mytrader.risk.remove(riskLimitId);
-      await loadSnapshot(activePortfolio.id);
-      setNotice("风险限额已删除。");
-    },
-    [activePortfolio, loadSnapshot]
-  );
+  const {
+    handleCreatePortfolio,
+    handleRenamePortfolio,
+    handleDeletePortfolio,
+    handleEditPosition,
+    handleCancelEditPosition,
+    handleSubmitPosition,
+    handleDeletePosition,
+    handleEditRiskLimit,
+    handleCancelRiskEdit,
+    handleSubmitRiskLimit,
+    handleDeleteRiskLimit
+  } = useDashboardPortfolioActions({
+    activePortfolio,
+    portfolioName,
+    portfolioBaseCurrency,
+    portfolioRename,
+    positionForm,
+    riskForm,
+    emptyPositionForm,
+    emptyRiskForm,
+    loadPortfolios,
+    loadSnapshot,
+    setError,
+    setNotice,
+    setPortfolioName,
+    setPortfolioBaseCurrency,
+    setPositionForm,
+    setRiskForm
+  });
 
   const updateLedgerForm = useCallback((patch: Partial<LedgerFormState>) => {
     setLedgerForm((prev) => ({ ...prev, ...patch }));
