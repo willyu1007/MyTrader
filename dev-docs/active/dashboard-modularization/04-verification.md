@@ -485,3 +485,12 @@
     - `86`（剩余 `any` 全部集中在 `MarketView/OtherView`）
   - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
     - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after fixing implicit-`any` blockers in `MarketView` + `OtherView` callback parameters):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `rg -n "\\bany\\b|as any" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx | wc -l`
+    - `2`（仅剩两个索引签名）
+  - `rg -n "\\[key: string\\]: any" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx`
+    - `apps/frontend/src/components/dashboard/views/MarketView.tsx:9:  [key: string]: any;`
+    - `apps/frontend/src/components/dashboard/views/OtherView.tsx:17:  [key: string]: any;`

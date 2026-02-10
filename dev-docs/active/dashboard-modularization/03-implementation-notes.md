@@ -98,6 +98,9 @@
   - `views/PortfolioView.tsx` 改为显式 `PortfolioViewProps`（移除 `[key: string]: any`），并将事件参数、`map` 回调、`catch` 错误类型统一收敛为强类型；当前文件仍偏大（`1009` 行），后续可再做结构拆分。
   - `views/DataAnalysisView.tsx` 改为显式 `DataAnalysisViewProps`（移除 `[key: string]: any`），并收敛搜索输入/回车事件、列表迭代、`catch` 错误与 toggle setter 类型。
   - 本轮后 `PortfolioView/DataAnalysisView/RiskView/DashboardOverlays/DashboardContainerLayout` 五个边界视图文件已无 `any`。
+  - `views/MarketView.tsx` 收敛阻断点参数类型：补充 `ChangeEvent`/`TagSummary`/`InstrumentProfileSummary` 等参数标注，修复 `setState(prev)` 与图表 hover 回调的隐式 `any`。
+  - `views/OtherView.tsx` 收敛阻断点参数类型：补充 `ChangeEvent` 事件参数、`UniversePoolBucketId/MarketTargetsConfig/ResolvedTargetSymbol/TargetReasonsDiff/TempTargetSymbol/MarketIngestRun` 等 map/updater 参数类型。
+  - 本轮后 `MarketView/OtherView` 的隐式 `any` 阻断已清零；剩余 `any` 仅为两个兼容性索引签名（各文件 1 处）。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -151,7 +154,7 @@
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
 - `DashboardContainer.tsx` 当前 `547` 行、`DashboardContainerLayout.tsx` 当前 `752` 行，均低于 `800`。
 - `DashboardContainerLayoutProps` 的 `any` 宽类型已全部移除（改为 hook 返回类型与明确函数签名），后续重点从“减行”转向“manual smoke 覆盖 + view-model 结构继续清晰化”。
-- `PortfolioView.tsx` 与 `DataAnalysisView.tsx` 已移除 `any` 宽类型；当前剩余 `any` 全部集中在 `MarketView.tsx` / `OtherView.tsx`（共 `86` 处），下一步优先继续收敛这两个文件。
+- `PortfolioView.tsx` 与 `DataAnalysisView.tsx` 已移除 `any` 宽类型；`MarketView.tsx` / `OtherView.tsx` 的隐式 `any` 阻断已修复，当前剩余 `any` 为 2 处索引签名（待后续按 `DashboardContainerLayout` 透传契约继续替换为显式 props）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

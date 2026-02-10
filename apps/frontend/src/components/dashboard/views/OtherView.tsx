@@ -1,5 +1,31 @@
+import type { ChangeEvent } from "react";
+
+import type {
+  InstrumentRegistryEntry,
+  MarketIngestRun,
+  MarketTargetsConfig,
+  ResolvedTargetSymbol,
+  TagSummary,
+  TargetReasonsDiff,
+  TempTargetSymbol,
+  UniversePoolBucketId
+} from "@mytrader/shared";
+
+import type { OtherTab } from "../types";
+
 export interface OtherViewProps {
   [key: string]: any;
+}
+
+interface OtherTabOption {
+  key: OtherTab;
+  label: string;
+}
+
+interface TargetPoolMetricCard {
+  key: string;
+  label: string;
+  value: string | number;
 }
 
 export function OtherView(props: OtherViewProps) {
@@ -160,7 +186,7 @@ export function OtherView(props: OtherViewProps) {
             <Panel>
               <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
                 <div className="flex items-center gap-1 overflow-x-auto px-3">
-                  {otherTabs.map((tab: any) => {
+                  {otherTabs.map((tab: OtherTabOption) => {
                     const isActive = otherTab === tab.key;
                     return (
                       <button
@@ -317,7 +343,9 @@ export function OtherView(props: OtherViewProps) {
                             <Input
                               type="password"
                               value={marketTokenDraft}
-                              onChange={(e: any) => setMarketTokenDraft(e.target.value)}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setMarketTokenDraft(event.target.value)
+                              }
                               placeholder="输入数据源令牌"
                               className="font-mono text-xs pr-8"
                             />
@@ -387,7 +415,7 @@ export function OtherView(props: OtherViewProps) {
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            {UNIVERSE_POOL_BUCKET_ORDER.map((bucket: any) => {
+                            {UNIVERSE_POOL_BUCKET_ORDER.map((bucket: UniversePoolBucketId) => {
                               const enabled = marketUniverseEnabledBuckets.has(bucket);
                               const status = marketUniverseBucketStatusById.get(bucket);
                               return (
@@ -463,7 +491,7 @@ export function OtherView(props: OtherViewProps) {
                                 >
                                   <Input
                                     value={marketSchedulerConfig.runAt}
-                                    onChange={(event: any) =>
+                                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
                                       updateMarketSchedulerConfig({
                                         runAt: event.target.value
                                       })
@@ -482,9 +510,11 @@ export function OtherView(props: OtherViewProps) {
                                 >
                                   <PopoverSelect
                                     value={marketSchedulerConfig.scope}
-                                    onChangeValue={(value: any) =>
+                                    onChangeValue={(
+                                      value: "targets" | "universe" | "both"
+                                    ) =>
                                       updateMarketSchedulerConfig({
-                                        scope: value as "targets" | "universe" | "both"
+                                        scope: value
                                       })
                                     }
                                     options={[
@@ -644,7 +674,7 @@ export function OtherView(props: OtherViewProps) {
                                 type="checkbox"
                                 className="mt-1 h-4 w-4 accent-primary"
                                 checked={marketSchedulerConfig.enabled}
-                                onChange={(event: any) =>
+                                onChange={(event) =>
                                   updateMarketSchedulerConfig({
                                     enabled: event.target.checked
                                   })
@@ -665,7 +695,7 @@ export function OtherView(props: OtherViewProps) {
                             >
                               <PopoverSelect
                                 value={marketSchedulerConfig.timezone}
-                                onChangeValue={(value: any) =>
+                                onChangeValue={(value: string) =>
                                   updateMarketSchedulerConfig({ timezone: value })
                                 }
                                 options={marketSchedulerTimezoneOptions}
@@ -684,7 +714,7 @@ export function OtherView(props: OtherViewProps) {
                                     type="checkbox"
                                     className="h-4 w-4 accent-primary"
                                     checked={marketSchedulerConfig.runOnStartup}
-                                    onChange={(event: any) =>
+                                    onChange={(event) =>
                                       updateMarketSchedulerConfig({
                                         runOnStartup: event.target.checked
                                       })
@@ -704,7 +734,7 @@ export function OtherView(props: OtherViewProps) {
                                     type="checkbox"
                                     className="h-4 w-4 accent-primary"
                                     checked={marketSchedulerConfig.catchUpMissed}
-                                    onChange={(event: any) =>
+                                    onChange={(event) =>
                                       updateMarketSchedulerConfig({
                                         catchUpMissed: event.target.checked
                                       })
@@ -875,10 +905,10 @@ export function OtherView(props: OtherViewProps) {
                                       <input
                                         type="checkbox"
                                         checked={marketTargetsConfig.includeHoldings}
-                                        onChange={(e: any) =>
-                                          setMarketTargetsConfig((prev: any) => ({
+                                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                          setMarketTargetsConfig((prev: MarketTargetsConfig) => ({
                                             ...prev,
-                                            includeHoldings: e.target.checked
+                                            includeHoldings: event.target.checked
                                           }))
                                         }
                                       />
@@ -888,10 +918,10 @@ export function OtherView(props: OtherViewProps) {
                                       <input
                                         type="checkbox"
                                         checked={marketTargetsConfig.includeWatchlist}
-                                        onChange={(e: any) =>
-                                          setMarketTargetsConfig((prev: any) => ({
+                                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                          setMarketTargetsConfig((prev: MarketTargetsConfig) => ({
                                             ...prev,
-                                            includeWatchlist: e.target.checked
+                                            includeWatchlist: event.target.checked
                                           }))
                                         }
                                       />
@@ -904,10 +934,10 @@ export function OtherView(props: OtherViewProps) {
                                           checked={
                                             marketTargetsConfig.includeRegistryAutoIngest
                                           }
-                                          onChange={(e: any) =>
-                                            setMarketTargetsConfig((prev: any) => ({
+                                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                            setMarketTargetsConfig((prev: MarketTargetsConfig) => ({
                                               ...prev,
-                                              includeRegistryAutoIngest: e.target.checked
+                                              includeRegistryAutoIngest: event.target.checked
                                             }))
                                           }
                                         />
@@ -939,7 +969,7 @@ export function OtherView(props: OtherViewProps) {
                                   <div className="relative">
                                     <textarea
                                       value={marketTargetsSymbolDraft}
-                                      onChange={(event: any) => {
+                                      onChange={(event) => {
                                         setMarketTargetsSymbolDraft(event.target.value);
                                         setMarketManualSymbolPreview({
                                           addable: [],
@@ -967,7 +997,7 @@ export function OtherView(props: OtherViewProps) {
                                       预览
                                     </div>
                                     <div className="max-h-28 overflow-auto space-y-1">
-                                      {marketManualSymbolPreview.addable.map((symbol: any) => (
+                                      {marketManualSymbolPreview.addable.map((symbol: string) => (
                                         <div
                                           key={`preview-addable-${symbol}`}
                                           className="flex items-center justify-between gap-2 rounded bg-emerald-50/70 dark:bg-emerald-900/15 px-2 py-1"
@@ -996,7 +1026,7 @@ export function OtherView(props: OtherViewProps) {
                                           </div>
                                         </div>
                                       ))}
-                                      {marketManualSymbolPreview.existing.map((symbol: any) => (
+                                      {marketManualSymbolPreview.existing.map((symbol: string) => (
                                         <div
                                           key={`preview-existing-${symbol}`}
                                           className="flex items-center justify-between gap-2 rounded bg-amber-50/70 dark:bg-amber-900/15 px-2 py-1"
@@ -1025,7 +1055,7 @@ export function OtherView(props: OtherViewProps) {
                                           </div>
                                         </div>
                                       ))}
-                                      {marketManualSymbolPreview.invalid.map((symbol: any) => (
+                                      {marketManualSymbolPreview.invalid.map((symbol: string) => (
                                         <div
                                           key={`preview-invalid-${symbol}`}
                                           className="flex items-center justify-between gap-2 rounded bg-rose-50/70 dark:bg-rose-900/15 px-2 py-1"
@@ -1131,7 +1161,7 @@ export function OtherView(props: OtherViewProps) {
                               </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                                {marketTargetPoolMetricCards.map((card: any) => (
+                                {marketTargetPoolMetricCards.map((card: TargetPoolMetricCard) => (
                                   <button
                                     key={card.key}
                                     type="button"
@@ -1204,7 +1234,9 @@ export function OtherView(props: OtherViewProps) {
                                         --
                                       </div>
                                     ) : (
-                                      marketFilteredAddedSymbols.slice(0, 100).map((row: any) => (
+                                      marketFilteredAddedSymbols
+                                        .slice(0, 100)
+                                        .map((row: ResolvedTargetSymbol) => (
                                         <div
                                           key={`added-${row.symbol}`}
                                           className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
@@ -1251,7 +1283,7 @@ export function OtherView(props: OtherViewProps) {
                                     ) : (
                                       marketFilteredRemovedSymbols
                                         .slice(0, 100)
-                                        .map((row: any) => (
+                                        .map((row: ResolvedTargetSymbol) => (
                                           <div
                                             key={`removed-${row.symbol}`}
                                             className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
@@ -1298,7 +1330,7 @@ export function OtherView(props: OtherViewProps) {
                                     ) : (
                                       marketFilteredReasonChangedSymbols
                                         .slice(0, 100)
-                                        .map((row: any) => (
+                                        .map((row: TargetReasonsDiff) => (
                                           <div
                                             key={`changed-${row.symbol}`}
                                             className="py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
@@ -1372,7 +1404,7 @@ export function OtherView(props: OtherViewProps) {
                         <div className="grid grid-cols-1 md:grid-cols-[1fr_160px_auto] gap-2">
                           <Input
                             value={marketRegistryQuery}
-                            onChange={(event: any) =>
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
                               setMarketRegistryQuery(event.target.value)
                             }
                             placeholder="搜索 symbol / name"
@@ -1380,11 +1412,9 @@ export function OtherView(props: OtherViewProps) {
                           />
                           <PopoverSelect
                             value={marketRegistryAutoFilter}
-                            onChangeValue={(value: any) =>
-                              setMarketRegistryAutoFilter(
-                                value as "all" | "enabled" | "disabled"
-                              )
-                            }
+                            onChangeValue={(
+                              value: "all" | "enabled" | "disabled"
+                            ) => setMarketRegistryAutoFilter(value)}
                             options={[
                               { value: "all", label: "全部" },
                               { value: "enabled", label: "仅已启用" },
@@ -1419,7 +1449,9 @@ export function OtherView(props: OtherViewProps) {
                               </tr>
                             </thead>
                             <tbody>
-                              {(marketRegistryResult?.items ?? []).map((item: any) => (
+                              {(marketRegistryResult?.items ?? []).map((
+                                item: InstrumentRegistryEntry
+                              ) => (
                                 <tr
                                   key={item.symbol}
                                   className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
@@ -1446,7 +1478,7 @@ export function OtherView(props: OtherViewProps) {
                                       <input
                                         type="checkbox"
                                         checked={item.autoIngest}
-                                        onChange={(event: any) => {
+                                        onChange={(event) => {
                                           void handleSetRegistryAutoIngest(
                                             item.symbol,
                                             event.target.checked
@@ -1565,7 +1597,7 @@ export function OtherView(props: OtherViewProps) {
                           </div>
                           <Input
                             value={marketTagManagementQuery}
-                            onChange={(event: any) =>
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
                               setMarketTagManagementQuery(event.target.value)
                             }
                             placeholder="搜索标签（例如 industry: / theme: / watchlist:）"
@@ -1581,7 +1613,7 @@ export function OtherView(props: OtherViewProps) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {marketTags.map((tag: any) => (
+                                {marketTags.map((tag: TagSummary) => (
                                   <tr
                                     key={tag.tag}
                                     className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
@@ -1671,7 +1703,7 @@ export function OtherView(props: OtherViewProps) {
                               </div>
                             )}
                             {!marketTempTargetsLoading &&
-                              marketTempTargets.map((item: any) => (
+                              marketTempTargets.map((item: TempTargetSymbol) => (
                                 <div
                                   key={item.symbol}
                                   className="flex items-center justify-between gap-3 rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5"
@@ -1814,7 +1846,7 @@ export function OtherView(props: OtherViewProps) {
                         </div>
                         <div className="max-h-32 overflow-auto rounded-md border border-slate-200/70 dark:border-border-dark/70 bg-slate-50/50 dark:bg-background-dark/40">
                           <div className="p-2 flex flex-wrap gap-1">
-                            {dataQuality.missingSymbols.slice(0, 200).map((symbol: any) => (
+                            {dataQuality.missingSymbols.slice(0, 200).map((symbol: string) => (
                               <span
                                 key={symbol}
                                 className="px-2 py-1 rounded-full bg-white dark:bg-surface-dark border border-slate-200/60 dark:border-border-dark/60 text-[11px] font-mono text-slate-700 dark:text-slate-200"
@@ -1891,7 +1923,7 @@ export function OtherView(props: OtherViewProps) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {marketIngestRuns.slice(0, 200).map((run: any) => {
+                                {marketIngestRuns.slice(0, 200).map((run: MarketIngestRun) => {
                                   const statusTone = formatIngestRunTone(run.status);
                                   const selected = marketSelectedIngestRunId === run.id;
                                   return (

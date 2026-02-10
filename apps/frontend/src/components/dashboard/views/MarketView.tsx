@@ -1,6 +1,36 @@
+import type { ChangeEvent } from "react";
+
+import type {
+  InstrumentProfileSummary,
+  TagSummary
+} from "@mytrader/shared";
+
 export interface MarketViewProps {
   [key: string]: any;
 }
+
+interface MarketTagFacetItem {
+  tag: string;
+  level: string;
+  name: string;
+}
+
+interface MarketThemeFacetItem {
+  tag: string;
+}
+
+interface MarketRangeOption {
+  key: string;
+  label: string;
+}
+
+interface MarketChartHoverDatum {
+  date: string;
+  close: number;
+}
+
+type MarketAssetFilterKey = "stock" | "etf";
+type MarketKindFilterKey = "stock" | "fund";
 
 export function MarketView(props: MarketViewProps) {
   const {
@@ -146,7 +176,9 @@ export function MarketView(props: MarketViewProps) {
                           </span>
                           <Input
                             value={marketSearchQuery}
-                            onChange={(e: any) => setMarketSearchQuery(e.target.value)}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              setMarketSearchQuery(event.target.value)
+                            }
                             placeholder="搜索标的（代码/名称）"
                             className="pl-9 pr-2 !rounded-none !border-0 !bg-transparent dark:!bg-transparent shadow-none focus:ring-0 focus:border-transparent dark:placeholder:text-slate-500"
                           />
@@ -156,7 +188,7 @@ export function MarketView(props: MarketViewProps) {
                       <div className="relative border-t border-slate-200/70 dark:border-border-dark/70">
                         <PopoverSelect
                           value={marketCollectionSelectValue}
-                          onChangeValue={(value: any) => {
+                          onChangeValue={(value: string) => {
                             setMarketSearchQuery("");
                             setMarketSelectedSymbol(null);
 
@@ -182,13 +214,13 @@ export function MarketView(props: MarketViewProps) {
                             { value: "builtin:watchlist", label: "自选" },
                             ...marketTags
                               .filter(
-                                (tag: any) =>
+                                (tag: TagSummary) =>
                                   !(
                                     tag.source === "watchlist" &&
                                     tag.tag === "watchlist:all"
                                   )
                               )
-                              .map((tag: any) => {
+                              .map((tag: TagSummary) => {
                                 const sourceLabel =
                                   tag.source === "provider"
                                     ? "提供方"
@@ -276,7 +308,7 @@ export function MarketView(props: MarketViewProps) {
                             </div>
                           )}
 
-                        {marketSearchResultsFiltered.map((item: any) => {
+                        {marketSearchResultsFiltered.map((item: InstrumentProfileSummary) => {
                           const isActive = item.symbol === marketSelectedSymbol;
                           const quote = marketQuotesBySymbol[item.symbol] ?? null;
                           const tone = getCnChangeTone(quote?.changePct ?? null);
@@ -336,7 +368,7 @@ export function MarketView(props: MarketViewProps) {
                               筛选后无结果。
                             </div>
                           )}
-                        {marketFilteredListSymbols.map((symbol: any) => {
+                        {marketFilteredListSymbols.map((symbol: string) => {
                           const isActive = symbol === marketSelectedSymbol;
                           const quote = marketQuotesBySymbol[symbol] ?? null;
                           const tone = getCnChangeTone(quote?.changePct ?? null);
@@ -435,7 +467,7 @@ export function MarketView(props: MarketViewProps) {
                             )}
 
                             {!marketTagMembersLoading &&
-                              marketFilteredListSymbols.map((symbol: any) => {
+                              marketFilteredListSymbols.map((symbol: string) => {
                                 const isActive = symbol === marketSelectedSymbol;
                                 const quote = marketQuotesBySymbol[symbol] ?? null;
                                 const tone = getCnChangeTone(quote?.changePct ?? null);
@@ -478,7 +510,7 @@ export function MarketView(props: MarketViewProps) {
                                         {canRemove && (
                                           <button
                                             type="button"
-                                            onClick={(e: any) => {
+                                            onClick={(e) => {
                                               e.stopPropagation();
                                               void handleRemoveWatchlistItem(symbol);
                                             }}
@@ -613,7 +645,7 @@ export function MarketView(props: MarketViewProps) {
                             </div>
                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                               <div className="flex items-center gap-1 rounded-full bg-slate-100/80 dark:bg-black/40 backdrop-blur px-2 py-1">
-                                {marketChartRanges.map((item: any) => {
+                                {marketChartRanges.map((item: MarketRangeOption) => {
                                   const isActive = marketChartRange === item.key;
                                   return (
                                     <button
@@ -625,7 +657,7 @@ export function MarketView(props: MarketViewProps) {
                                           : "text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
                                       }`}
                                       onClick={() =>
-                                        setMarketChartRange(item.key as any)
+                                        setMarketChartRange(item.key)
                                       }
                                     >
                                       {item.label}
@@ -663,7 +695,9 @@ export function MarketView(props: MarketViewProps) {
                                   <MarketAreaChart
                                     bars={marketTagSeriesBars}
                                     tone={marketSelectedTagSeriesTone}
-                                    onHoverDatumChange={(datum: any) => {
+                                    onHoverDatumChange={(
+                                      datum: MarketChartHoverDatum | null
+                                    ) => {
                                       setMarketTagChartHoverDate(datum?.date ?? null);
                                       setMarketTagChartHoverPrice(datum?.close ?? null);
                                     }}
@@ -723,7 +757,7 @@ export function MarketView(props: MarketViewProps) {
                                   marketQuotesBySymbol
                                 )
                                   .slice(0, 20)
-                                  .map((symbol: any) => {
+                                  .map((symbol: string) => {
                                     const quote = marketQuotesBySymbol[symbol] ?? null;
                                     const tone = getCnChangeTone(quote?.changePct ?? null);
                                     return (
@@ -837,7 +871,7 @@ export function MarketView(props: MarketViewProps) {
                               </div>
                               <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                                 <div className="flex items-center gap-1 rounded-full bg-slate-100/80 dark:bg-black/40 backdrop-blur px-2 py-1">
-                                  {marketChartRanges.map((item: any) => {
+                                  {marketChartRanges.map((item: MarketRangeOption) => {
                                     const isActive = marketChartRange === item.key;
                                     return (
                                       <button
@@ -849,7 +883,7 @@ export function MarketView(props: MarketViewProps) {
                                             : "text-slate-600 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
                                         }`}
                                         onClick={() =>
-                                          setMarketChartRange(item.key as any)
+                                          setMarketChartRange(item.key)
                                         }
                                       >
                                         {item.label}
@@ -902,7 +936,7 @@ export function MarketView(props: MarketViewProps) {
                                 tone={getCnChangeTone(
                                   marketSelectedQuote?.changePct ?? null
                                 )}
-                                onHoverDatumChange={(datum: any) => {
+                                onHoverDatumChange={(datum: MarketChartHoverDatum | null) => {
                                   setMarketChartHoverDate(datum?.date ?? null);
                                   setMarketChartHoverPrice(datum?.close ?? null);
                                 }}
@@ -1074,7 +1108,7 @@ export function MarketView(props: MarketViewProps) {
                       {([
                         { key: "all", label: "全部" },
                         { key: "CN", label: "CN" }
-                      ] as const).map((item: any) => {
+                      ] as const).map((item) => {
                         const isActive = marketFilterMarket === item.key;
                         return (
                           <button
@@ -1099,15 +1133,15 @@ export function MarketView(props: MarketViewProps) {
                       {([
                         { key: "stock", label: "stock" },
                         { key: "etf", label: "etf" }
-                      ] as const).map((item: any) => (
+                      ] as const).map((item) => (
                         <label key={item.key} className="flex items-center gap-2">
                           <input
                             type="checkbox"
                             checked={marketFilterAssetClasses.includes(item.key)}
                             onChange={() =>
-                              setMarketFilterAssetClasses((prev: any) =>
+                              setMarketFilterAssetClasses((prev: MarketAssetFilterKey[]) =>
                                 prev.includes(item.key)
-                                  ? prev.filter((v: any) => v !== item.key)
+                                  ? prev.filter((value: MarketAssetFilterKey) => value !== item.key)
                                   : [...prev, item.key]
                               )
                             }
@@ -1123,15 +1157,15 @@ export function MarketView(props: MarketViewProps) {
                       {([
                         { key: "stock", label: "stock" },
                         { key: "fund", label: "fund" }
-                      ] as const).map((item: any) => (
+                      ] as const).map((item) => (
                         <label key={item.key} className="flex items-center gap-2">
                           <input
                             type="checkbox"
                             checked={marketFilterKinds.includes(item.key)}
                             onChange={() =>
-                              setMarketFilterKinds((prev: any) =>
+                              setMarketFilterKinds((prev: MarketKindFilterKey[]) =>
                                 prev.includes(item.key)
-                                  ? prev.filter((v: any) => v !== item.key)
+                                  ? prev.filter((value: MarketKindFilterKey) => value !== item.key)
                                   : [...prev, item.key]
                               )
                             }
@@ -1206,7 +1240,9 @@ export function MarketView(props: MarketViewProps) {
                       <div className="flex gap-2">
                         <Input
                           value={marketWatchlistGroupDraft}
-                          onChange={(e: any) => setMarketWatchlistGroupDraft(e.target.value)}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setMarketWatchlistGroupDraft(event.target.value)
+                          }
                           placeholder="自选分组（可选）"
                           className="text-xs"
                         />
@@ -1231,7 +1267,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketSelectedProfile.tags.map((tag: any) => (
+                        {marketSelectedProfile.tags.map((tag: string) => (
                           <button
                             key={tag}
                             type="button"
@@ -1255,7 +1291,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketSelectedIndustry.map((item: any) => (
+                        {marketSelectedIndustry.map((item: MarketTagFacetItem) => (
                           <button
                             key={item.tag}
                             type="button"
@@ -1279,7 +1315,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketSelectedThemes.map((theme: any) => (
+                        {marketSelectedThemes.map((theme: MarketThemeFacetItem) => (
                           <button
                             key={theme.tag}
                             type="button"
@@ -1318,7 +1354,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketSelectedManualThemes.map((tag: any) => (
+                        {marketSelectedManualThemes.map((tag: string) => (
                           <span
                             key={tag}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
@@ -1360,7 +1396,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketSelectedPlainUserTags.map((tag: any) => (
+                        {marketSelectedPlainUserTags.map((tag: string) => (
                           <span
                             key={tag}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
@@ -1388,7 +1424,9 @@ export function MarketView(props: MarketViewProps) {
                       <div className="flex gap-2">
                         <Input
                           value={marketUserTagDraft}
-                          onChange={(e: any) => setMarketUserTagDraft(e.target.value)}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setMarketUserTagDraft(event.target.value)
+                          }
                           placeholder="例如：user:核心 / theme:AI"
                           className="text-xs"
                         />
@@ -1412,7 +1450,9 @@ export function MarketView(props: MarketViewProps) {
                         <button
                           type="button"
                           className="text-xs text-slate-600 dark:text-slate-300 hover:underline"
-                          onClick={() => setMarketShowProviderData((prev: any) => !prev)}
+                          onClick={() =>
+                            setMarketShowProviderData((prev: boolean) => !prev)
+                          }
                         >
                           {marketShowProviderData ? "隐藏" : "显示"}
                         </button>
@@ -1441,7 +1481,9 @@ export function MarketView(props: MarketViewProps) {
                   <div className="flex items-center gap-2">
                     <Input
                       value={marketTagPickerQuery}
-                      onChange={(e: any) => setMarketTagPickerQuery(e.target.value)}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                        setMarketTagPickerQuery(event.target.value)
+                      }
                       placeholder="搜索 tag（例如 watchlist / industry / 白酒）"
                       className="text-sm"
                     />
@@ -1470,7 +1512,7 @@ export function MarketView(props: MarketViewProps) {
 
                   {!marketTagsLoading && marketTags.length > 0 && (
                     <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
-                      {marketTags.map((tag: any) => {
+                      {marketTags.map((tag: TagSummary) => {
                         const isActive = marketSelectedTag === tag.tag;
                         return (
                           <button
@@ -1562,7 +1604,7 @@ export function MarketView(props: MarketViewProps) {
                             marketQuotesBySymbol
                           )
                             .slice(0, 2000)
-                            .map((symbol: any) => {
+                            .map((symbol: string) => {
                               const quote = marketQuotesBySymbol[symbol] ?? null;
                               const tone = getCnChangeTone(quote?.changePct ?? null);
                               return (
@@ -1661,7 +1703,7 @@ export function MarketView(props: MarketViewProps) {
                     <FormGroup label="搜索（代码 / 名称）">
                       <Input
                         value={marketSearchQuery}
-                        onChange={(e: any) => setMarketSearchQuery(e.target.value)}
+                        onChange={(e) => setMarketSearchQuery(e.target.value)}
                         placeholder="例如：600519 / 贵州茅台 / 510300"
                       />
                     </FormGroup>
@@ -1686,7 +1728,7 @@ export function MarketView(props: MarketViewProps) {
                             </div>
                           )}
                         {!marketSearchLoading &&
-                          marketSearchResults.map((item: any) => {
+                          marketSearchResults.map((item) => {
                             const isActive = item.symbol === marketSelectedSymbol;
                             const tagsPreview = item.tags.slice(0, 3);
                             return (
@@ -1787,7 +1829,7 @@ export function MarketView(props: MarketViewProps) {
                                 --
                               </span>
                             )}
-                            {marketSelectedProfile.tags.map((tag: any) => (
+                            {marketSelectedProfile.tags.map((tag) => (
                               <button
                                 key={tag}
                                 type="button"
@@ -1811,7 +1853,7 @@ export function MarketView(props: MarketViewProps) {
                                 --
                               </span>
                             )}
-                            {marketSelectedUserTags.map((tag: any) => (
+                            {marketSelectedUserTags.map((tag) => (
                               <span
                                 key={tag}
                                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
@@ -1839,7 +1881,7 @@ export function MarketView(props: MarketViewProps) {
                           <div className="flex gap-2">
                             <Input
                               value={marketUserTagDraft}
-                              onChange={(e: any) => setMarketUserTagDraft(e.target.value)}
+                              onChange={(e) => setMarketUserTagDraft(e.target.value)}
                               placeholder="例如：my:watch / sector:新能源"
                               className="text-xs"
                             />
@@ -1862,7 +1904,7 @@ export function MarketView(props: MarketViewProps) {
                             type="button"
                             className="text-xs text-slate-600 dark:text-slate-300 hover:underline"
                             onClick={() =>
-                              setMarketShowProviderData((prev: any) => !prev)
+                              setMarketShowProviderData((prev) => !prev)
                             }
                           >
                             {marketShowProviderData ? "隐藏" : "显示"} 原始字段
@@ -1901,7 +1943,7 @@ export function MarketView(props: MarketViewProps) {
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                       <Input
                         value={marketWatchlistSymbolDraft}
-                        onChange={(e: any) =>
+                        onChange={(e) =>
                           setMarketWatchlistSymbolDraft(e.target.value)
                         }
                         placeholder="代码（如 600519.SH）"
@@ -1909,7 +1951,7 @@ export function MarketView(props: MarketViewProps) {
                       />
                       <Input
                         value={marketWatchlistGroupDraft}
-                        onChange={(e: any) =>
+                        onChange={(e) =>
                           setMarketWatchlistGroupDraft(e.target.value)
                         }
                         placeholder="分组（可选）"
@@ -1939,7 +1981,7 @@ export function MarketView(props: MarketViewProps) {
                           </div>
                         )}
                         {!marketWatchlistLoading &&
-                          marketWatchlistItems.map((item: any) => (
+                          marketWatchlistItems.map((item) => (
                             <div
                               key={item.id}
                               className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 dark:border-border-dark last:border-b-0"
@@ -1998,8 +2040,8 @@ export function MarketView(props: MarketViewProps) {
                         <input
                           type="checkbox"
                           checked={marketTargetsConfig.includeHoldings}
-                          onChange={(e: any) =>
-                            setMarketTargetsConfig((prev: any) => ({
+                          onChange={(e) =>
+                            setMarketTargetsConfig((prev) => ({
                               ...prev,
                               includeHoldings: e.target.checked
                             }))
@@ -2011,8 +2053,8 @@ export function MarketView(props: MarketViewProps) {
                         <input
                           type="checkbox"
                           checked={marketTargetsConfig.includeWatchlist}
-                          onChange={(e: any) =>
-                            setMarketTargetsConfig((prev: any) => ({
+                          onChange={(e) =>
+                            setMarketTargetsConfig((prev) => ({
                               ...prev,
                               includeWatchlist: e.target.checked
                             }))
@@ -2024,8 +2066,8 @@ export function MarketView(props: MarketViewProps) {
                         <input
                           type="checkbox"
                           checked={marketTargetsConfig.includeRegistryAutoIngest}
-                          onChange={(e: any) =>
-                            setMarketTargetsConfig((prev: any) => ({
+                          onChange={(e) =>
+                            setMarketTargetsConfig((prev) => ({
                               ...prev,
                               includeRegistryAutoIngest: e.target.checked
                             }))
@@ -2039,7 +2081,7 @@ export function MarketView(props: MarketViewProps) {
                       <div className="flex flex-wrap gap-2">
                         <Input
                           value={marketTargetsSymbolDraft}
-                          onChange={(e: any) =>
+                          onChange={(e) =>
                             setMarketTargetsSymbolDraft(e.target.value)
                           }
                           placeholder="600519.SH"
@@ -2061,7 +2103,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketTargetsConfig.explicitSymbols.map((symbol: any) => (
+                        {marketTargetsConfig.explicitSymbols.map((symbol) => (
                           <span
                             key={symbol}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
@@ -2085,7 +2127,7 @@ export function MarketView(props: MarketViewProps) {
                       <div className="flex flex-wrap gap-2">
                         <Input
                           value={marketTargetsTagDraft}
-                          onChange={(e: any) => setMarketTargetsTagDraft(e.target.value)}
+                          onChange={(e) => setMarketTargetsTagDraft(e.target.value)}
                           placeholder="例如：industry:白酒 / fund_type:股票型"
                           className="text-xs flex-1 min-w-[220px]"
                         />
@@ -2105,7 +2147,7 @@ export function MarketView(props: MarketViewProps) {
                             --
                           </span>
                         )}
-                        {marketTargetsConfig.tagFilters.map((tag: any) => (
+                        {marketTargetsConfig.tagFilters.map((tag) => (
                           <span
                             key={tag}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] border border-slate-200 dark:border-border-dark text-slate-700 dark:text-slate-200"
