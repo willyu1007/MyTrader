@@ -83,6 +83,8 @@
   - 继续进行容器 props 收敛：`analysisState`、`marketState`、`portfolioState` 统一保留为状态对象，并在 `PortfolioView`/`DataAnalysisView`/`MarketView`/`OtherView`/`DashboardOverlays` 透传处改为优先使用 `...state`，删除大段重复枚举。
   - 修复本轮阻断：清理 `portfolioState` 解构中的未使用字段（`ledgerLoading`、`ledgerError`、`setLedgerFilter`、`setLedgerStartDate`、`setLedgerEndDate`、`isLedgerFormOpen`），恢复 `typecheck` 通过。
   - `DashboardContainer.tsx` 继续下降到 `1563` 行。
+  - 新增 `hooks/use-dashboard-market-admin-derived.ts`，将 market 管理区块派生状态从容器下沉（ingest/scheduler/targets diff/universe pool 衍生计算与布尔门控）。
+  - `DashboardContainer.tsx` 继续下降到 `1492` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -134,7 +136,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `1563` 行，仍偏大；后续需继续将 `MarketView`/`OtherView`/`PortfolioView` 的超大 props 对象收敛为分组 view-model，逐步逼近 `<= 800` 目标。
+- `DashboardContainer.tsx` 当前 `1492` 行，仍偏大；后续需继续将 `MarketView`/`OtherView`/`PortfolioView` 的超大 props 对象收敛为分组 view-model，逐步逼近 `<= 800` 目标。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

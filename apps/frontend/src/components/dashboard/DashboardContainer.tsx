@@ -7,7 +7,6 @@ import {
 
 import type {
   LedgerEntry,
-  MarketUniversePoolBucketStatus,
   PerformanceRangeKey,
   Portfolio,
   PortfolioPerformanceRangeResult,
@@ -53,7 +52,6 @@ import type {
   RiskFormState,
   TargetPoolStatsScope,
   TargetPoolStructureStats,
-  UniversePoolBucketId,
   WorkspaceView
 } from "./types";
 import {
@@ -106,9 +104,6 @@ import {
   formatIngestControlStateLabel,
   getIngestControlStateDotClass,
   getUniversePoolBucketLabel,
-  isSameSchedulerConfig,
-  isSameUniversePoolConfig,
-  isSameTargetsConfig,
   toUserErrorMessage,
   formatInputDate,
   formatCnDate,
@@ -140,6 +135,7 @@ import {
 import { useDashboardMarketDerived } from "./hooks/use-dashboard-market-derived";
 import { useDashboardMarketInstrumentActions } from "./hooks/use-dashboard-market-instrument-actions";
 import { useDashboardMarketAdminRefresh } from "./hooks/use-dashboard-market-admin-refresh";
+import { useDashboardMarketAdminDerived } from "./hooks/use-dashboard-market-admin-derived";
 import { useDashboardMarketAdminActions } from "./hooks/use-dashboard-market-admin-actions";
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
@@ -414,120 +410,53 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setTargetsEditorLeftPct
   });
 
-  const latestMarketIngestRun = useMemo(() => {
-    if (marketIngestRuns.length === 0) return null;
-    return marketIngestRuns.reduce((latest, candidate) =>
-      candidate.startedAt > latest.startedAt ? candidate : latest
-    );
-  }, [marketIngestRuns]);
-
-  const marketSelectedIndustry = marketSelectedProfile?.tagFacets?.industry ?? [];
-  const marketSelectedThemes = marketSelectedProfile?.tagFacets?.themes ?? [];
-  const marketSelectedManualThemes = useMemo(
-    () => marketSelectedUserTags.filter((tag) => tag.startsWith("theme:manual:")),
-    [marketSelectedUserTags]
-  );
-  const marketSelectedPlainUserTags = useMemo(
-    () => marketSelectedUserTags.filter((tag) => !tag.startsWith("theme:manual:")),
-    [marketSelectedUserTags]
-  );
-
-  const marketTargetsDirty = useMemo(() => {
-    if (!marketTargetsSavedConfig) return false;
-    return !isSameTargetsConfig(marketTargetsSavedConfig, marketTargetsConfig);
-  }, [marketTargetsConfig, marketTargetsSavedConfig]);
-
-  const marketSchedulerDirty = useMemo(() => {
-    if (!marketSchedulerConfig || !marketSchedulerSavedConfig) return false;
-    return !isSameSchedulerConfig(marketSchedulerSavedConfig, marketSchedulerConfig);
-  }, [marketSchedulerConfig, marketSchedulerSavedConfig]);
-
-  const marketUniversePoolDirty = useMemo(() => {
-    if (!marketUniversePoolConfig || !marketUniversePoolSavedConfig) return false;
-    return !isSameUniversePoolConfig(
-      marketUniversePoolSavedConfig,
-      marketUniversePoolConfig
-    );
-  }, [marketUniversePoolConfig, marketUniversePoolSavedConfig]);
-
-  const marketIngestControlState = marketIngestControlStatus?.state ?? "idle";
-  const marketCanTriggerIngestNow =
-    !marketIngestControlUpdating && Boolean(marketTokenStatus?.configured);
-  const marketCanPauseIngest =
-    !marketIngestControlUpdating && marketIngestControlState === "running";
-  const marketCanResumeIngest =
-    !marketIngestControlUpdating && marketIngestControlState === "paused";
-  const marketCanCancelIngest =
-    !marketIngestControlUpdating &&
-    (marketIngestControlState === "running" ||
-      marketIngestControlState === "paused");
-
-  const marketSchedulerTimezoneOptions = useMemo(() => {
-    const values = [...schedulerTimezoneDefaults];
-    const current = marketSchedulerConfig?.timezone?.trim();
-    if (current && !values.includes(current)) {
-      values.unshift(current);
-    }
-    return values.map((value) => ({ value, label: value }));
-  }, [marketSchedulerConfig?.timezone]);
-
-  const marketRegistryEntryEnabled = false;
-
-  const marketCurrentTargetsSource = useMemo(
-    () => marketTargetsDiffPreview?.draft.symbols ?? marketTargetsPreview?.symbols ?? [],
-    [marketTargetsDiffPreview?.draft.symbols, marketTargetsPreview?.symbols]
-  );
-
-  const marketCurrentTargetsKeyword = marketCurrentTargetsFilter
-    .trim()
-    .toLowerCase();
-
-  const marketFilteredCurrentTargets = useMemo(() => {
-    if (!marketCurrentTargetsKeyword) return marketCurrentTargetsSource;
-    return marketCurrentTargetsSource.filter((row) =>
-      row.symbol.toLowerCase().includes(marketCurrentTargetsKeyword)
-    );
-  }, [marketCurrentTargetsKeyword, marketCurrentTargetsSource]);
-
-  const marketFilteredAddedSymbols = useMemo(() => {
-    return marketTargetsDiffPreview?.addedSymbols ?? [];
-  }, [marketTargetsDiffPreview?.addedSymbols]);
-
-  const marketFilteredRemovedSymbols = useMemo(() => {
-    return marketTargetsDiffPreview?.removedSymbols ?? [];
-  }, [marketTargetsDiffPreview?.removedSymbols]);
-
-  const marketFilteredReasonChangedSymbols = useMemo(() => {
-    return marketTargetsDiffPreview?.reasonChangedSymbols ?? [];
-  }, [marketTargetsDiffPreview?.reasonChangedSymbols]);
-
-  const marketFocusTargetSymbols = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          (marketTargetsDiffPreview?.draft.symbols ?? marketTargetsPreview?.symbols ?? [])
-            .map((item) => item.symbol.trim())
-            .filter(Boolean)
-        )
-      ).sort((a, b) => a.localeCompare(b)),
-    [marketTargetsDiffPreview?.draft.symbols, marketTargetsPreview?.symbols]
-  );
-
-  const marketActiveTargetPoolStats = useMemo(
-    () => marketTargetPoolStatsByScope[marketTargetPoolStatsScope],
-    [marketTargetPoolStatsByScope, marketTargetPoolStatsScope]
-  );
-
-  const marketUniverseEnabledBuckets = useMemo(() => {
-    const source = marketUniversePoolConfig?.enabledBuckets ?? UNIVERSE_POOL_BUCKET_ORDER;
-    return new Set(source);
-  }, [marketUniversePoolConfig?.enabledBuckets]);
-
-  const marketUniverseBucketStatusById = useMemo(() => {
-    const map = new Map<UniversePoolBucketId, MarketUniversePoolBucketStatus>();
-    marketUniversePoolOverview?.buckets.forEach((item) => map.set(item.bucket, item));
-    return map;
-  }, [marketUniversePoolOverview?.buckets]);
+  const {
+    latestMarketIngestRun,
+    marketSelectedIndustry,
+    marketSelectedThemes,
+    marketSelectedManualThemes,
+    marketSelectedPlainUserTags,
+    marketTargetsDirty,
+    marketSchedulerDirty,
+    marketUniversePoolDirty,
+    marketIngestControlState,
+    marketCanTriggerIngestNow,
+    marketCanPauseIngest,
+    marketCanResumeIngest,
+    marketCanCancelIngest,
+    marketSchedulerTimezoneOptions,
+    marketRegistryEntryEnabled,
+    marketCurrentTargetsSource,
+    marketFilteredCurrentTargets,
+    marketFilteredAddedSymbols,
+    marketFilteredRemovedSymbols,
+    marketFilteredReasonChangedSymbols,
+    marketFocusTargetSymbols,
+    marketActiveTargetPoolStats,
+    marketUniverseEnabledBuckets,
+    marketUniverseBucketStatusById
+  } = useDashboardMarketAdminDerived({
+    marketIngestRuns,
+    marketSelectedProfile,
+    marketSelectedUserTags,
+    marketTargetsSavedConfig,
+    marketTargetsConfig,
+    marketSchedulerConfig,
+    marketSchedulerSavedConfig,
+    marketUniversePoolConfig,
+    marketUniversePoolSavedConfig,
+    marketIngestControlStatus,
+    marketIngestControlUpdating,
+    marketTokenStatus,
+    schedulerTimezoneDefaults,
+    marketTargetsDiffPreview,
+    marketTargetsPreview,
+    marketCurrentTargetsFilter,
+    marketTargetPoolStatsByScope,
+    marketTargetPoolStatsScope,
+    marketUniversePoolOverview,
+    universePoolBucketOrder: UNIVERSE_POOL_BUCKET_ORDER
+  });
 
   const {
     marketTargetPoolMetricCards,
