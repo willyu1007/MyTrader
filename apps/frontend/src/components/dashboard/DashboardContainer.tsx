@@ -154,6 +154,7 @@ import {
   useDashboardMarketManagementActions,
   useDashboardMarketRuntimeEffects
 } from "./hooks/use-dashboard-market";
+import { useDashboardMarketInstrumentActions } from "./hooks/use-dashboard-market-instrument-actions";
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import {
   useDashboardPortfolio
@@ -2973,257 +2974,58 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     [refreshMarketIngestControl, refreshMarketIngestRuns]
   );
 
-  const handleSyncInstrumentCatalog = useCallback(async () => {
-    if (!window.mytrader) return;
-    setError(null);
-    setNotice(null);
-    setMarketCatalogSyncing(true);
-    try {
-      const result = await window.mytrader.market.syncInstrumentCatalog();
-      setMarketCatalogSyncSummary(
-        `标的库已同步：新增 ${result.inserted}，更新 ${result.updated}。`
-      );
-      await refreshMarketTargets();
-      setNotice(`标的库同步完成：新增 ${result.inserted}，更新 ${result.updated}。`);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketCatalogSyncing(false);
-    }
-  }, [refreshMarketTargets]);
+  const setMarketScopeToTags = useCallback(() => {
+    setMarketScope("tags");
+  }, [setMarketScope]);
 
-  const handleSelectInstrument = useCallback(async (symbol: string) => {
-    if (!window.mytrader) return;
-    const key = symbol.trim();
-    if (!key) return;
-    setMarketInstrumentDetailsOpen(false);
-    setMarketTagMembersModalOpen(false);
-    setMarketSelectedSymbol(key);
-    setMarketSelectedProfile(null);
-    setMarketSelectedUserTags([]);
-    setMarketShowProviderData(false);
-    setMarketChartHoverDate(null);
-    setMarketChartHoverPrice(null);
-    setMarketChartLoading(true);
-    setError(null);
-    try {
-      const profile = await window.mytrader.market.getInstrumentProfile(key);
-      setMarketSelectedProfile(profile);
-      const tags = await window.mytrader.market.listInstrumentTags(key);
-      setMarketSelectedUserTags(tags);
-      await loadMarketQuotes([key]);
-
-      if (profile) {
-        const preview = await window.mytrader.market.previewTargets();
-        const entry = preview.symbols.find((item) => item.symbol === key) ?? null;
-        const isTempOnly = entry?.reasons?.includes("temp:search") ?? false;
-
-        if (!entry || isTempOnly) {
-          const temp = await window.mytrader.market.touchTempTarget({ symbol: key });
-          setMarketTempTargets(temp);
-          const refreshed = await window.mytrader.market.previewTargets();
-          setMarketTargetsPreview(refreshed);
-          if (!entry) {
-            setNotice(`已临时加入目标池：${key}（7天后自动清理，可在「数据管理」转为长期）。`);
-          }
-        }
-      }
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      setMarketChartLoading(false);
-    }
-  }, [loadMarketQuotes]);
-
-  const handleSelectTag = useCallback(
-    async (tag: string) => {
-      if (!window.mytrader) return;
-      const key = tag.trim();
-      if (!key) return;
-
-      setMarketInstrumentDetailsOpen(false);
-      setMarketTagMembersModalOpen(false);
-      setMarketSelectedTag(key);
-      setMarketSelectedSymbol(null);
-      setMarketSelectedProfile(null);
-      setMarketSelectedUserTags([]);
-      setMarketShowProviderData(false);
-      setMarketTagMembers([]);
-      setMarketChartBars([]);
-
-      setError(null);
-      setMarketTagMembersLoading(true);
-      try {
-        const members = await window.mytrader.market.getTagMembers({
-          tag: key,
-          limit: 5000
-        });
-        setMarketTagMembers(members);
-        await loadMarketQuotes(members);
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-      } finally {
-        setMarketTagMembersLoading(false);
-      }
-    },
-    [loadMarketQuotes]
-  );
-
-  const handleSeedMarketDemoData = useCallback(async () => {
-    if (!window.mytrader) return;
-    setError(null);
-    setNotice(null);
-    setMarketDemoSeeding(true);
-    try {
-      const result = await window.mytrader.market.seedDemoData({
-        portfolioId: activePortfolioId,
-        seedHoldings: true
-      });
-      await refreshMarketWatchlist();
-      await refreshMarketTags("demo");
-      if (activePortfolioId) {
-        await loadSnapshot(activePortfolioId);
-      }
-      setMarketScope("tags");
-      await handleSelectTag("demo:all");
-      setNotice(
-        `已注入示例数据：${result.symbols.length} 个标的，${result.tradeDateCount} 个交易日。${
-          result.warnings.length ? `（${result.warnings.join("；")}）` : ""
-        }`
-      );
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketDemoSeeding(false);
-    }
-  }, [
-    activePortfolioId,
+  const {
+    handleSyncInstrumentCatalog,
+    handleSelectInstrument,
     handleSelectTag,
-    loadSnapshot,
-    refreshMarketTags,
-    refreshMarketWatchlist
-  ]);
-
-  const handleAddUserTag = useCallback(async () => {
-    if (!window.mytrader || !marketSelectedSymbol) return;
-    const tag = marketUserTagDraft.trim();
-    if (!tag) return;
-    if (!tag.includes(":")) {
-      setError("标签必须符合 namespace:value，例如 user:核心 或 theme:AI。");
-      return;
-    }
-    if (tag.startsWith("theme:")) {
-      setError("主题请通过“手动主题（THS）”选择，不支持手动输入。");
-      return;
-    }
-    setError(null);
-    setNotice(null);
-    try {
-      await window.mytrader.market.addInstrumentTag(marketSelectedSymbol, tag);
-      setMarketUserTagDraft("");
-      const tags = await window.mytrader.market.listInstrumentTags(
-        marketSelectedSymbol
-      );
-      setMarketSelectedUserTags(tags);
-      setNotice("标签已添加。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, [marketSelectedSymbol, marketUserTagDraft]);
-
-  const handleRemoveUserTag = useCallback(
-    async (tag: string) => {
-      if (!window.mytrader || !marketSelectedSymbol) return;
-      const key = tag.trim();
-      if (!key) return;
-      setError(null);
-      setNotice(null);
-      try {
-        await window.mytrader.market.removeInstrumentTag(
-          marketSelectedSymbol,
-          key
-        );
-        const tags = await window.mytrader.market.listInstrumentTags(
-          marketSelectedSymbol
-        );
-        setMarketSelectedUserTags(tags);
-        setNotice("标签已移除。");
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-      }
-    },
-    [marketSelectedSymbol]
-  );
-
-  const handleAddManualTheme = useCallback(async () => {
-    if (!window.mytrader || !marketSelectedSymbol) return;
-    const tag = marketManualThemeDraft.trim();
-    if (!tag) return;
-    if (!tag.startsWith("theme:manual:")) {
-      setError("请选择 THS 主题后再添加。");
-      return;
-    }
-    if (!marketManualThemeOptions.some((opt) => opt.value === tag)) {
-      setError("主题不在 THS 列表中，请重新选择。");
-      return;
-    }
-    if (marketSelectedUserTags.includes(tag)) {
-      setNotice("主题已存在。");
-      return;
-    }
-    setError(null);
-    setNotice(null);
-    try {
-      await window.mytrader.market.addInstrumentTag(marketSelectedSymbol, tag);
-      const tags = await window.mytrader.market.listInstrumentTags(
-        marketSelectedSymbol
-      );
-      setMarketSelectedUserTags(tags);
-      setNotice("主题已添加。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, [
+    handleSeedMarketDemoData,
+    handleAddUserTag,
+    handleRemoveUserTag,
+    handleAddManualTheme,
+    handleAddSelectedToWatchlist,
+    handleRemoveWatchlistItem
+  } = useDashboardMarketInstrumentActions({
+    activePortfolioId,
+    marketSelectedSymbol,
+    marketUserTagDraft,
     marketManualThemeDraft,
     marketManualThemeOptions,
-    marketSelectedSymbol,
-    marketSelectedUserTags
-  ]);
-
-  const handleAddSelectedToWatchlist = useCallback(async () => {
-    if (!window.mytrader || !marketSelectedProfile) return;
-    const groupName = marketWatchlistGroupDraft.trim();
-    setError(null);
-    setNotice(null);
-    try {
-      await window.mytrader.market.upsertWatchlistItem({
-        symbol: marketSelectedProfile.symbol,
-        name: marketSelectedProfile.name ?? null,
-        groupName: groupName ? groupName : null
-      });
-      await refreshMarketWatchlist();
-      setNotice("已加入自选列表。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, [marketSelectedProfile, marketWatchlistGroupDraft, refreshMarketWatchlist]);
-
-  const handleRemoveWatchlistItem = useCallback(
-    async (symbol: string) => {
-      if (!window.mytrader) return;
-      const key = symbol.trim();
-      if (!key) return;
-      setError(null);
-      setNotice(null);
-      try {
-        await window.mytrader.market.removeWatchlistItem(key);
-        await refreshMarketWatchlist();
-        setNotice("已从自选列表移除。");
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-      }
-    },
-    [refreshMarketWatchlist]
-  );
+    marketSelectedUserTags,
+    marketSelectedProfile,
+    marketWatchlistGroupDraft,
+    toUserErrorMessage,
+    loadSnapshot,
+    loadMarketQuotes,
+    refreshMarketTargets,
+    refreshMarketWatchlist,
+    refreshMarketTags,
+    setMarketScopeToTags,
+    setError,
+    setNotice,
+    setMarketCatalogSyncing,
+    setMarketCatalogSyncSummary,
+    setMarketInstrumentDetailsOpen,
+    setMarketTagMembersModalOpen,
+    setMarketSelectedSymbol,
+    setMarketSelectedProfile,
+    setMarketSelectedUserTags,
+    setMarketShowProviderData,
+    setMarketChartHoverDate,
+    setMarketChartHoverPrice,
+    setMarketChartLoading,
+    setMarketTempTargets,
+    setMarketTargetsPreview,
+    setMarketSelectedTag,
+    setMarketTagMembers,
+    setMarketChartBars,
+    setMarketTagMembersLoading,
+    setMarketDemoSeeding,
+    setMarketUserTagDraft
+  });
 
   const handleAddTargetTag = useCallback(
     (raw?: string) => {
