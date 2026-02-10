@@ -116,9 +116,6 @@ import {
   buildCategoryDetailsFromTagSummaries,
   buildCategoryDetailsFromCategoryMap,
   mapWithConcurrency,
-  buildManualTargetsPreview,
-  splitSymbolInputTokens,
-  normalizeMarketSymbol,
   formatDateTimeInput,
   sanitizeToastMessage,
   toUserErrorMessage,
@@ -157,6 +154,7 @@ import {
   useDashboardMarketManagementActions,
   useDashboardMarketRuntimeEffects
 } from "./hooks/use-dashboard-market";
+import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import {
   useDashboardPortfolio
 } from "./hooks/use-dashboard-portfolio";
@@ -3227,86 +3225,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     [refreshMarketWatchlist]
   );
 
-  const handlePreviewManualTargetSymbols = useCallback(() => {
-    const preview = buildManualTargetsPreview(
-      marketTargetsSymbolDraft,
-      marketTargetsConfig.explicitSymbols
-    );
-    setMarketManualSymbolPreview(preview);
-    setError(null);
-  }, [marketTargetsConfig.explicitSymbols, marketTargetsSymbolDraft]);
-
-  const handleApplyManualTargetSymbols = useCallback(() => {
-    setError(null);
-    const hasPreview =
-      marketManualSymbolPreview.addable.length +
-        marketManualSymbolPreview.existing.length +
-        marketManualSymbolPreview.invalid.length +
-        marketManualSymbolPreview.duplicates >
-      0;
-
-    if (!hasPreview) {
-      setNotice("请先解析输入内容。");
-      return;
-    }
-
-    if (marketManualSymbolPreview.addable.length === 0) {
-      setNotice(
-        `没有可新增标的。已存在 ${marketManualSymbolPreview.existing.length} 个，无效 ${marketManualSymbolPreview.invalid.length} 个。`
-      );
-      return;
-    }
-
-    const nextExplicitSymbols = Array.from(
-      new Set([
-        ...marketTargetsConfig.explicitSymbols,
-        ...marketManualSymbolPreview.addable
-      ])
-    ).sort((left, right) => left.localeCompare(right));
-
-    setMarketTargetsConfig((prev) => ({
-      ...prev,
-      explicitSymbols: nextExplicitSymbols
-    }));
-
-    const nextPreview = buildManualTargetsPreview(
-      marketTargetsSymbolDraft,
-      nextExplicitSymbols
-    );
-    setMarketManualSymbolPreview(nextPreview);
-
-    setNotice(
-      `已应用 ${marketManualSymbolPreview.addable.length} 个有效标的；无效 ${marketManualSymbolPreview.invalid.length} 个。${
-        marketManualSymbolPreview.existing.length > 0
-          ? `已存在 ${marketManualSymbolPreview.existing.length} 个。`
-          : ""
-      }`
-    );
-  }, [
-    marketManualSymbolPreview,
-    marketTargetsConfig.explicitSymbols,
-    marketTargetsSymbolDraft
-  ]);
-
-  const handleRemoveManualPreviewSymbol = useCallback(
-    (token: string, mode: "addable" | "existing" | "invalid") => {
-      const nextTokens = splitSymbolInputTokens(marketTargetsSymbolDraft).filter(
-        (item) => {
-          if (mode === "addable" || mode === "existing") {
-            return normalizeMarketSymbol(item) !== token;
-          }
-          return item.trim().toUpperCase() !== token.trim().toUpperCase();
-        }
-      );
-      const nextInput = nextTokens.join("\n");
-      setMarketTargetsSymbolDraft(nextInput);
-      setMarketManualSymbolPreview(
-        buildManualTargetsPreview(nextInput, marketTargetsConfig.explicitSymbols)
-      );
-    },
-    [marketTargetsConfig.explicitSymbols, marketTargetsSymbolDraft]
-  );
-
   const handleAddTargetTag = useCallback(
     (raw?: string) => {
       const tag = (raw ?? marketTargetsTagDraft).trim();
@@ -3325,102 +3243,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     [marketTargetsTagDraft]
   );
 
-  const handleRemoveTempTarget = useCallback(
-    async (symbol: string) => {
-      if (!window.mytrader) return;
-      const key = symbol.trim();
-      if (!key) return;
-      setError(null);
-      setNotice(null);
-      setMarketTempTargetsLoading(true);
-      try {
-        const next = await window.mytrader.market.removeTempTarget({ symbol: key });
-        setMarketTempTargets(next);
-        const diff = await window.mytrader.market.previewTargetsDraft({
-          config: marketTargetsConfig
-        });
-        setMarketTargetsDiffPreview(diff);
-        setMarketTargetsPreview(diff.draft);
-        setNotice(`已移除临时标的：${key}`);
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-      } finally {
-        setMarketTempTargetsLoading(false);
-      }
-    },
-    [marketTargetsConfig]
-  );
-
-  const handlePromoteTempTarget = useCallback(
-    async (symbol: string) => {
-      if (!window.mytrader) return;
-      const key = symbol.trim();
-      if (!key) return;
-      setError(null);
-      setNotice(null);
-      setMarketTempTargetsLoading(true);
-      setMarketTargetsSaving(true);
-      try {
-        const savedRaw = await window.mytrader.market.promoteTempTarget({
-          symbol: key
-        });
-        const saved: MarketTargetsConfig = {
-          ...savedRaw,
-          includeRegistryAutoIngest: false,
-          tagFilters: []
-        };
-        setMarketTargetsSavedConfig(saved);
-        setMarketTargetsConfig(saved);
-        const diff = await window.mytrader.market.previewTargetsDraft({
-          config: saved
-        });
-        setMarketTargetsDiffPreview(diff);
-        setMarketTargetsPreview(diff.draft);
-        const temp = await window.mytrader.market.listTempTargets();
-        setMarketTempTargets(temp);
-        setNotice(`已转为长期目标：${key}`);
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-      } finally {
-        setMarketTargetsSaving(false);
-        setMarketTempTargetsLoading(false);
-      }
-    },
-    []
-  );
-
-  const handleSaveTargets = useCallback(async () => {
-    if (!window.mytrader) return;
-    setError(null);
-    setNotice(null);
-    setMarketTargetsSaving(true);
-    try {
-      const payload: MarketTargetsConfig = {
-        ...marketTargetsConfig,
-        includeRegistryAutoIngest: false,
-        tagFilters: []
-      };
-      const savedRaw = await window.mytrader.market.setTargets(payload);
-      const saved: MarketTargetsConfig = {
-        ...savedRaw,
-        includeRegistryAutoIngest: false,
-        tagFilters: []
-      };
-      setMarketTargetsSavedConfig(saved);
-      setMarketTargetsConfig(saved);
-      const diff = await window.mytrader.market.previewTargetsDraft({
-        config: saved
-      });
-      setMarketTargetsDiffPreview(diff);
-      setMarketTargetsPreview(diff.draft);
-      setNotice("目标池已保存。");
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTargetsSaving(false);
-    }
-  }, [marketTargetsConfig]);
-
   const refreshMarketTargetsDiff = useCallback(async () => {
     if (!window.mytrader) return;
     try {
@@ -3434,114 +3256,42 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     }
   }, [marketTargetsConfig]);
 
-  const handleResetTargetsDraft = useCallback(() => {
-    if (!marketTargetsSavedConfig) return;
-    setMarketTargetsConfig(marketTargetsSavedConfig);
-    setMarketTargetsSymbolDraft("");
-    setMarketManualSymbolPreview({
-      addable: [],
-      existing: [],
-      invalid: [],
-      duplicates: 0
-    });
-    setNotice("已重置为最近一次已保存配置。");
-  }, [marketTargetsSavedConfig]);
-
-  const handleToggleTempTargetSelection = useCallback((symbol: string) => {
-    const key = symbol.trim();
-    if (!key) return;
-    setMarketSelectedTempTargetSymbols((prev) =>
-      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
-    );
-  }, []);
-
-  const handleSelectAllTempTargets = useCallback(() => {
-    if (marketTempTargets.length === 0) {
-      setMarketSelectedTempTargetSymbols([]);
-      return;
-    }
-    const all = marketTempTargets.map((item) => item.symbol);
-    setMarketSelectedTempTargetSymbols((prev) =>
-      prev.length === all.length ? [] : all
-    );
-  }, [marketTempTargets]);
-
-  const handleBatchPromoteTempTargets = useCallback(async () => {
-    if (!window.mytrader) return;
-    if (marketSelectedTempTargetSymbols.length === 0) return;
-    setMarketTargetsSaving(true);
-    setMarketTempTargetsLoading(true);
-    setError(null);
-    try {
-      let promoted = 0;
-      for (const symbol of marketSelectedTempTargetSymbols) {
-        await window.mytrader.market.promoteTempTarget({ symbol });
-        promoted += 1;
-      }
-      setNotice(`已批量转长期：${promoted} 个标的。`);
-      await refreshMarketTargets();
-      await refreshMarketTargetsDiff();
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTargetsSaving(false);
-      setMarketTempTargetsLoading(false);
-      setMarketSelectedTempTargetSymbols([]);
-    }
-  }, [
+  const {
+    handlePreviewManualTargetSymbols,
+    handleApplyManualTargetSymbols,
+    handleRemoveManualPreviewSymbol,
+    handleRemoveTempTarget,
+    handlePromoteTempTarget,
+    handleSaveTargets,
+    handleResetTargetsDraft,
+    handleToggleTempTargetSelection,
+    handleSelectAllTempTargets,
+    handleBatchPromoteTempTargets,
+    handleBatchRemoveTempTargets,
+    handleBatchExtendTempTargets
+  } = useDashboardMarketTargetActions({
+    marketTargetsConfig,
+    marketTargetsSavedConfig,
+    marketTargetsSymbolDraft,
+    marketManualSymbolPreview,
     marketSelectedTempTargetSymbols,
+    marketTempTargets,
+    toUserErrorMessage,
     refreshMarketTargets,
-    refreshMarketTargetsDiff
-  ]);
-
-  const handleBatchRemoveTempTargets = useCallback(async () => {
-    if (!window.mytrader) return;
-    if (marketSelectedTempTargetSymbols.length === 0) return;
-    setMarketTempTargetsLoading(true);
-    setError(null);
-    try {
-      let removed = 0;
-      for (const symbol of marketSelectedTempTargetSymbols) {
-        await window.mytrader.market.removeTempTarget({ symbol });
-        removed += 1;
-      }
-      setNotice(`已批量移除：${removed} 个临时标的。`);
-      await refreshMarketTargets();
-      await refreshMarketTargetsDiff();
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTempTargetsLoading(false);
-      setMarketSelectedTempTargetSymbols([]);
-    }
-  }, [
-    marketSelectedTempTargetSymbols,
-    refreshMarketTargets,
-    refreshMarketTargetsDiff
-  ]);
-
-  const handleBatchExtendTempTargets = useCallback(async () => {
-    if (!window.mytrader) return;
-    if (marketSelectedTempTargetSymbols.length === 0) return;
-    setMarketTempTargetsLoading(true);
-    setError(null);
-    try {
-      for (const symbol of marketSelectedTempTargetSymbols) {
-        await window.mytrader.market.touchTempTarget({ symbol, ttlDays: 7 });
-      }
-      setNotice(`已续期 ${marketSelectedTempTargetSymbols.length} 个临时标的（7天）。`);
-      await refreshMarketTargets();
-      await refreshMarketTargetsDiff();
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTempTargetsLoading(false);
-    }
-  }, [
-    marketSelectedTempTargetSymbols,
-    refreshMarketTargets,
-    refreshMarketTargetsDiff
-  ]);
+    refreshMarketTargetsDiff,
+    setError,
+    setNotice,
+    setMarketTargetsConfig,
+    setMarketTargetsSavedConfig,
+    setMarketTargetsSymbolDraft,
+    setMarketManualSymbolPreview,
+    setMarketTargetsDiffPreview,
+    setMarketTargetsPreview,
+    setMarketTargetsSaving,
+    setMarketTempTargets,
+    setMarketTempTargetsLoading,
+    setMarketSelectedTempTargetSymbols
+  });
 
   const {
     handlePauseMarketIngest,

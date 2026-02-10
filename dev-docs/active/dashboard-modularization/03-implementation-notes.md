@@ -56,7 +56,8 @@
     - `handleToggleRegistrySymbol` / `handleToggleSelectAllRegistry`
     - `handleSetRegistryAutoIngest` / `handleBatchSetRegistryAutoIngest`
   - `DashboardContainer.tsx` 删除对应重复 `useState/useEffect`，改为消费 hook 返回值。
-  - `DashboardContainer.tsx` 进一步下降到 `4304` 行；`use-dashboard-market.ts` 增长到 `1360` 行（下一步将继续把 market 处理器分组下沉到更细粒度 hooks，避免单 hook 继续膨胀）。
+  - 新增 `hooks/use-dashboard-market-target-actions.ts`，承接 targets/temp-target 处理器（手动标的预览与应用、临时标的单项/批量操作、目标池保存与重置）。
+  - `DashboardContainer.tsx` 进一步下降到 `4054` 行；`use-dashboard-market.ts` 维持 `1360` 行，新增 `use-dashboard-market-target-actions.ts` `420` 行（后续继续按功能分组下沉，避免单文件继续膨胀）。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -108,7 +109,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `4304` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `4054` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).
