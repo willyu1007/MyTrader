@@ -1,5 +1,132 @@
+import type {
+  ChangeEvent,
+  Dispatch,
+  KeyboardEvent,
+  SetStateAction
+} from "react";
+
+import type {
+  ContributionBreakdown,
+  InstrumentProfile,
+  InstrumentProfileSummary,
+  MarketDailyBar,
+  MarketQuote,
+  PerformanceMethod,
+  PerformanceMetric,
+  PerformanceRangeKey,
+  Portfolio,
+  PortfolioPerformance,
+  PortfolioPerformanceRangeResult,
+  PortfolioPerformanceSeries,
+  PortfolioRiskMetrics,
+  PositionValuation
+} from "@mytrader/shared";
+
+import type { AnalysisTab, MarketChartRangeKey } from "../types";
+
+interface AnalysisTabOption {
+  key: AnalysisTab;
+  label: string;
+  icon: string;
+  description: string;
+}
+
+interface PerformanceRangeOption {
+  key: PerformanceRangeKey;
+  label: string;
+}
+
+interface MarketChartRangeOption {
+  key: MarketChartRangeKey;
+  label: string;
+}
+
+interface AnalysisRangeSummary {
+  rangeHigh: number | null;
+  rangeLow: number | null;
+  avgVolume: number | null;
+  rangeReturn: number | null;
+  startDate: string | null;
+  endDate: string | null;
+}
+
 export interface DataAnalysisViewProps {
-  [key: string]: any;
+  Badge: typeof import("../shared").Badge;
+  CONTRIBUTION_TOP_N: number;
+  ChartErrorBoundary: typeof import("../shared").ChartErrorBoundary;
+  ContributionTable: typeof import("../shared").ContributionTable;
+  EmptyState: typeof import("../shared").EmptyState;
+  ErrorState: typeof import("../shared").ErrorState;
+  Input: typeof import("../shared").Input;
+  MarketAreaChart: typeof import("../shared").MarketAreaChart;
+  Panel: typeof import("../shared").Panel;
+  PerformanceChart: typeof import("../shared").PerformanceChart;
+  PlaceholderPanel: typeof import("../shared").PlaceholderPanel;
+  RiskMetricCard: typeof import("../shared").RiskMetricCard;
+  SummaryCard: typeof import("../shared").SummaryCard;
+  activePortfolio: Portfolio | null;
+  activePortfolioId: string | null;
+  analysisInstrumentBars: MarketDailyBar[];
+  analysisInstrumentError: string | null;
+  analysisInstrumentHasEnoughData: boolean;
+  analysisInstrumentHoldingUnitCost: number | null;
+  analysisInstrumentLatestBar: MarketDailyBar | null;
+  analysisInstrumentLoading: boolean;
+  analysisInstrumentNameBySymbol: Map<string, string>;
+  analysisInstrumentPositionValuation: PositionValuation | null;
+  analysisInstrumentProfile: InstrumentProfile | null;
+  analysisInstrumentQuery: string;
+  analysisInstrumentQuickSymbols: string[];
+  analysisInstrumentQuote: MarketQuote | null;
+  analysisInstrumentRange: MarketChartRangeKey;
+  analysisInstrumentRangeSummary: AnalysisRangeSummary;
+  analysisInstrumentSearchLoading: boolean;
+  analysisInstrumentSearchResults: InstrumentProfileSummary[];
+  analysisInstrumentSymbol: string | null;
+  analysisInstrumentTargetPrice: number | null;
+  analysisInstrumentTone: ReturnType<typeof import("../shared").getCnChangeTone>;
+  analysisInstrumentUserTags: string[];
+  analysisTab: AnalysisTab;
+  analysisTabs: ReadonlyArray<AnalysisTabOption>;
+  contributionBreakdown: ContributionBreakdown | null;
+  formatCnWanYiNullable: (
+    value: number | null,
+    fractionDigits?: number,
+    zeroFractionDigits?: number
+  ) => string;
+  formatDateRange: (startDate?: string | null, endDate?: string | null) => string;
+  formatNumber: (value: number | null, fractionDigits?: number) => string;
+  formatPctNullable: (value: number | null | undefined) => string;
+  formatPerformanceMethod: (value: PerformanceMethod) => string;
+  formatSignedPctNullable: (value: number | null | undefined) => string;
+  loadAnalysisInstrument: (symbol: string) => Promise<void>;
+  loadPerformance: (
+    portfolioId: string,
+    range: PerformanceRangeKey
+  ) => Promise<void>;
+  marketChartRanges: ReadonlyArray<MarketChartRangeOption>;
+  performanceError: string | null;
+  performanceLoading: boolean;
+  performance: PortfolioPerformance | null;
+  performanceRange: PerformanceRangeKey;
+  performanceRanges: ReadonlyArray<PerformanceRangeOption>;
+  performanceResult: PortfolioPerformanceRangeResult | null;
+  performanceSeries: PortfolioPerformanceSeries | null;
+  riskAnnualized: boolean;
+  riskMetrics: PortfolioRiskMetrics | null;
+  selectedPerformance: PerformanceMetric | null;
+  setAnalysisInstrumentQuery: Dispatch<SetStateAction<string>>;
+  setAnalysisInstrumentRange: Dispatch<SetStateAction<MarketChartRangeKey>>;
+  setAnalysisInstrumentSymbol: Dispatch<SetStateAction<string | null>>;
+  setAnalysisTab: Dispatch<SetStateAction<AnalysisTab>>;
+  setPerformanceError: Dispatch<SetStateAction<string | null>>;
+  setPerformanceRange: Dispatch<SetStateAction<PerformanceRangeKey>>;
+  setRiskAnnualized: Dispatch<SetStateAction<boolean>>;
+  setShowAllAssetContribution: Dispatch<SetStateAction<boolean>>;
+  setShowAllSymbolContribution: Dispatch<SetStateAction<boolean>>;
+  showAllAssetContribution: boolean;
+  showAllSymbolContribution: boolean;
+  toUserErrorMessage: (err: unknown) => string;
 }
 
 export function DataAnalysisView(props: DataAnalysisViewProps) {
@@ -79,7 +206,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
             <div className="space-y-6">
               <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
                 <div className="flex items-center gap-0 overflow-x-auto px-3">
-                  {analysisTabs.map((tab: any) => {
+                  {analysisTabs.map((tab) => {
                     const isActive = analysisTab === tab.key;
                     return (
                       <button
@@ -121,7 +248,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {performanceRanges.map((range: any) => {
+                        {performanceRanges.map((range) => {
                           const isActive = performanceRange === range.key;
                           return (
                             <button
@@ -145,8 +272,10 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
 
                 {(analysisTab === "index" || analysisTab === "sector") && (
                   <PlaceholderPanel
-                    title={`数据分析 · ${analysisTabs.find((tab: any) => tab.key === analysisTab)?.label ?? ""}`}
-                    description={analysisTabs.find((tab: any) => tab.key === analysisTab)?.description ?? ""}
+                    title={`数据分析 · ${analysisTabs.find((tab) => tab.key === analysisTab)?.label ?? ""}`}
+                    description={
+                      analysisTabs.find((tab) => tab.key === analysisTab)?.description ?? ""
+                    }
                   />
                 )}
 
@@ -161,8 +290,10 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                             </div>
                             <Input
                               value={analysisInstrumentQuery}
-                              onChange={(event: any) => setAnalysisInstrumentQuery(event.target.value)}
-                              onKeyDown={(event: any) => {
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setAnalysisInstrumentQuery(event.target.value)
+                              }
+                              onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
                                 if (event.key !== "Enter") return;
                                 if (analysisInstrumentSearchResults.length === 0) return;
                                 event.preventDefault();
@@ -187,7 +318,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                             {!analysisInstrumentSearchLoading &&
                               analysisInstrumentSearchResults.length > 0 && (
                                 <div className="max-h-56 overflow-auto rounded-md border border-slate-200 dark:border-border-dark">
-                                  {analysisInstrumentSearchResults.slice(0, 20).map((item: any) => {
+                                  {analysisInstrumentSearchResults.slice(0, 20).map((item) => {
                                     const selected =
                                       analysisInstrumentSymbol === item.symbol;
                                     return (
@@ -219,7 +350,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                               区间
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              {marketChartRanges.map((range: any) => {
+                              {marketChartRanges.map((range) => {
                                 const isActive = analysisInstrumentRange === range.key;
                                 return (
                                   <button
@@ -250,7 +381,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                                 暂无快捷标的，可先在上方搜索。
                               </span>
                             )}
-                            {analysisInstrumentQuickSymbols.map((symbol: any) => {
+                            {analysisInstrumentQuickSymbols.map((symbol) => {
                               const selected = analysisInstrumentSymbol === symbol;
                               return (
                                 <button
@@ -476,7 +607,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                     message={performanceError}
                     onRetry={() => {
                       if (!activePortfolioId) return;
-                      loadPerformance(activePortfolioId, performanceRange).catch((err: any) =>
+                      loadPerformance(activePortfolioId, performanceRange).catch((err: unknown) =>
                         setPerformanceError(toUserErrorMessage(err))
                       );
                     }}
@@ -570,7 +701,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                             showAll={showAllSymbolContribution}
                             topCount={CONTRIBUTION_TOP_N}
                             showMarketValue={showAllSymbolContribution}
-                            onToggle={() => setShowAllSymbolContribution((prev: any) => !prev)}
+                            onToggle={() => setShowAllSymbolContribution((prev) => !prev)}
                           />
                           <ContributionTable
                             title="资产类别贡献"
@@ -579,7 +710,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                             showAll={showAllAssetContribution}
                             topCount={CONTRIBUTION_TOP_N}
                             showMarketValue={showAllAssetContribution}
-                            onToggle={() => setShowAllAssetContribution((prev: any) => !prev)}
+                            onToggle={() => setShowAllAssetContribution((prev) => !prev)}
                           />
                         </div>
                         {contributionBreakdown.missingSymbols.length > 0 && (

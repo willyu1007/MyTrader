@@ -1,5 +1,149 @@
+import type {
+  ChangeEvent,
+  Dispatch,
+  SetStateAction
+} from "react";
+
+import type {
+  AssetClass,
+  LedgerEntry,
+  LedgerEventType,
+  MarketDataQuality,
+  PerformanceMethod,
+  PerformanceMetric,
+  PerformanceRangeKey,
+  Portfolio,
+  PortfolioPerformance,
+  PortfolioPerformanceRangeResult,
+  PortfolioPerformanceSeries,
+  PortfolioRiskMetrics,
+  PortfolioSnapshot,
+  PositionValuation
+} from "@mytrader/shared";
+
+import type {
+  AnalysisTab,
+  LedgerFilter,
+  LedgerFormState,
+  OtherTab,
+  PortfolioTab,
+  PositionFormState,
+  WorkspaceView
+} from "../types";
+
+interface PortfolioTabOption {
+  key: PortfolioTab;
+  label: string;
+  icon: string;
+  description: string;
+}
+
+interface PerformanceRangeOption {
+  key: PerformanceRangeKey;
+  label: string;
+}
+
+interface CashFlowTotalItem {
+  currency: string;
+  amount: number;
+}
+
 export interface PortfolioViewProps {
-  [key: string]: any;
+  Badge: typeof import("../shared").Badge;
+  Button: typeof import("../shared").Button;
+  DataQualityCard: typeof import("../shared").DataQualityCard;
+  DescriptionItem: typeof import("../shared").DescriptionItem;
+  EmptyState: typeof import("../shared").EmptyState;
+  ErrorState: typeof import("../shared").ErrorState;
+  FormGroup: typeof import("../shared").FormGroup;
+  HHI_WARN_THRESHOLD: number;
+  IconButton: typeof import("../shared").IconButton;
+  Input: typeof import("../shared").Input;
+  LedgerForm: typeof import("../shared").LedgerForm;
+  LedgerTable: typeof import("../shared").LedgerTable;
+  Panel: typeof import("../shared").Panel;
+  PerformanceChart: typeof import("../shared").PerformanceChart;
+  PlaceholderPanel: typeof import("../shared").PlaceholderPanel;
+  RiskMetricCard: typeof import("../shared").RiskMetricCard;
+  Select: typeof import("../shared").Select;
+  SummaryCard: typeof import("../shared").SummaryCard;
+  activePortfolio: Portfolio | null;
+  activePortfolioId: string | null;
+  assetClassLabels: Record<AssetClass, string>;
+  cashFlowTotals: CashFlowTotalItem[];
+  cashTotal: number;
+  dataQuality: MarketDataQuality | null;
+  filteredLedgerEntries: LedgerEntry[];
+  formatAssetClassLabel: (value: string) => string;
+  formatCurrency: (value: number | null) => string;
+  formatDateRange: (startDate?: string | null, endDate?: string | null) => string;
+  formatNumber: (value: number | null, fractionDigits?: number) => string;
+  formatPct: (value: number) => string;
+  formatPctNullable: (value: number | null | undefined) => string;
+  formatPerformanceMethod: (value: PerformanceMethod) => string;
+  handleCancelEditPosition: () => void;
+  handleCancelLedgerEdit: () => void;
+  handleCreatePortfolio: () => Promise<void>;
+  handleDeletePortfolio: () => Promise<void>;
+  handleDeletePosition: (positionId: string) => Promise<void>;
+  handleEditLedgerEntry: (entry: LedgerEntry) => void;
+  handleEditPosition: (position: PositionValuation) => void;
+  handleOpenLedgerForm: () => void;
+  handleRenamePortfolio: () => Promise<void>;
+  handleRequestDeleteLedgerEntry: (entry: LedgerEntry) => void;
+  handleSubmitLedgerEntry: () => Promise<void>;
+  handleSubmitPosition: () => Promise<void>;
+  hhiValue: number | null;
+  isLedgerFormOpen: boolean;
+  isLoading: boolean;
+  ledgerEndDate: string;
+  ledgerEntries: LedgerEntry[];
+  ledgerError: string | null;
+  ledgerEventTypeOptions: Array<{ value: LedgerEventType; label: string }>;
+  ledgerFilter: LedgerFilter;
+  ledgerForm: LedgerFormState;
+  ledgerLoading: boolean;
+  ledgerStartDate: string;
+  loadLedgerEntries: (portfolioId: string) => Promise<void>;
+  loadPerformance: (
+    portfolioId: string,
+    range: PerformanceRangeKey
+  ) => Promise<void>;
+  performanceError: string | null;
+  performanceLoading: boolean;
+  performance: PortfolioPerformance | null;
+  performanceRange: PerformanceRangeKey;
+  performanceRanges: ReadonlyArray<PerformanceRangeOption>;
+  performanceResult: PortfolioPerformanceRangeResult | null;
+  performanceSeries: PortfolioPerformanceSeries | null;
+  portfolioBaseCurrency: string;
+  portfolioName: string;
+  portfolioRename: string;
+  portfolioTab: PortfolioTab;
+  portfolioTabs: ReadonlyArray<PortfolioTabOption>;
+  portfolios: Portfolio[];
+  positionForm: PositionFormState;
+  riskAnnualized: boolean;
+  riskMetrics: PortfolioRiskMetrics | null;
+  selectedPerformance: PerformanceMetric | null;
+  setActivePortfolioId: Dispatch<SetStateAction<string | null>>;
+  setActiveView: Dispatch<SetStateAction<WorkspaceView>>;
+  setAnalysisTab: Dispatch<SetStateAction<AnalysisTab>>;
+  setLedgerEndDate: Dispatch<SetStateAction<string>>;
+  setLedgerError: Dispatch<SetStateAction<string | null>>;
+  setLedgerFilter: Dispatch<SetStateAction<LedgerFilter>>;
+  setLedgerStartDate: Dispatch<SetStateAction<string>>;
+  setOtherTab: Dispatch<SetStateAction<OtherTab>>;
+  setPerformanceError: Dispatch<SetStateAction<string | null>>;
+  setPerformanceRange: Dispatch<SetStateAction<PerformanceRangeKey>>;
+  setPortfolioBaseCurrency: Dispatch<SetStateAction<string>>;
+  setPortfolioName: Dispatch<SetStateAction<string>>;
+  setPortfolioRename: Dispatch<SetStateAction<string>>;
+  setPositionForm: Dispatch<SetStateAction<PositionFormState>>;
+  setRiskAnnualized: Dispatch<SetStateAction<boolean>>;
+  snapshot: PortfolioSnapshot | null;
+  toUserErrorMessage: (err: unknown) => string;
+  updateLedgerForm: (patch: Partial<LedgerFormState>) => void;
 }
 
 export function PortfolioView(props: PortfolioViewProps) {
@@ -151,10 +295,15 @@ export function PortfolioView(props: PortfolioViewProps) {
                         <FormGroup label="切换组合">
                           <Select
                             value={activePortfolioId ?? ""}
-                            onChange={(e: any) => setActivePortfolioId(e.target.value)}
+                            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                              setActivePortfolioId(event.target.value)
+                            }
                             options={[
                               { value: "", label: "请选择组合", disabled: true },
-                              ...portfolios.map((p: any) => ({ value: p.id, label: p.name }))
+                              ...portfolios.map((portfolio) => ({
+                                value: portfolio.id,
+                                label: portfolio.name
+                              }))
                             ]}
                             className="w-full"
                           />
@@ -164,7 +313,9 @@ export function PortfolioView(props: PortfolioViewProps) {
                           <div className="flex gap-2">
                             <Input
                               value={portfolioRename}
-                              onChange={(e: any) => setPortfolioRename(e.target.value)}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setPortfolioRename(event.target.value)
+                              }
                               placeholder="组合名称"
                               className="flex-1"
                             />
@@ -184,13 +335,17 @@ export function PortfolioView(props: PortfolioViewProps) {
                         <div className="flex gap-2 items-center">
                           <Input
                             value={portfolioName}
-                            onChange={(e: any) => setPortfolioName(e.target.value)}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              setPortfolioName(event.target.value)
+                            }
                             placeholder="例如：核心持仓"
                             className="flex-[2]"
                           />
                           <Input
                             value={portfolioBaseCurrency}
-                            onChange={(e: any) => setPortfolioBaseCurrency(e.target.value)}
+                            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                              setPortfolioBaseCurrency(event.target.value)
+                            }
                             placeholder="基准币种"
                             className="flex-1"
                           />
@@ -241,7 +396,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                                 </td>
                               </tr>
                             ) : (
-                              snapshot.positions.map((pos: any) => (
+                              snapshot.positions.map((pos) => (
                                 <tr
                                   key={pos.position.id}
                                   className="hover:bg-slate-50 dark:hover:bg-background-dark/70 transition-colors group"
@@ -276,7 +431,9 @@ export function PortfolioView(props: PortfolioViewProps) {
                                   </td>
                                   <td className="px-4 py-2 text-sm text-slate-500 dark:text-slate-500 font-mono text-right">
                                     {formatPct(
-                                      snapshot.exposures.bySymbol.find((e: any) => e.key === pos.position.symbol)
+                                      snapshot.exposures.bySymbol.find(
+                                        (entry) => entry.key === pos.position.symbol
+                                      )
                                         ?.weight ?? 0
                                     )}
                                   </td>
@@ -321,22 +478,35 @@ export function PortfolioView(props: PortfolioViewProps) {
                           <FormGroup label="代码">
                             <Input
                               value={positionForm.symbol}
-                              onChange={(e: any) => setPositionForm((p: any) => ({ ...p, symbol: e.target.value }))}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setPositionForm((previous) => ({
+                                  ...previous,
+                                  symbol: event.target.value
+                                }))
+                              }
                               placeholder="例如: 600519.SH"
                             />
                           </FormGroup>
                           <FormGroup label="名称">
                             <Input
                               value={positionForm.name}
-                              onChange={(e: any) => setPositionForm((p: any) => ({ ...p, name: e.target.value }))}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setPositionForm((previous) => ({
+                                  ...previous,
+                                  name: event.target.value
+                                }))
+                              }
                               placeholder="可选"
                             />
                           </FormGroup>
                           <FormGroup label="资产类别">
                             <Select
                               value={positionForm.assetClass}
-                              onChange={(e: any) =>
-                                setPositionForm((p: any) => ({ ...p, assetClass: e.target.value as any }))
+                              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                                setPositionForm((previous) => ({
+                                  ...previous,
+                                  assetClass: event.target.value as AssetClass
+                                }))
                               }
                               options={Object.entries(assetClassLabels).map(([v, l]) => ({
                                 value: v,
@@ -348,12 +518,22 @@ export function PortfolioView(props: PortfolioViewProps) {
                             <div className="flex gap-2">
                               <Input
                                 value={positionForm.market}
-                                onChange={(e: any) => setPositionForm((p: any) => ({ ...p, market: e.target.value }))}
+                                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                  setPositionForm((previous) => ({
+                                    ...previous,
+                                    market: event.target.value
+                                  }))
+                                }
                                 placeholder="CN"
                               />
                               <Input
                                 value={positionForm.currency}
-                                onChange={(e: any) => setPositionForm((p: any) => ({ ...p, currency: e.target.value }))}
+                                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                  setPositionForm((previous) => ({
+                                    ...previous,
+                                    currency: event.target.value
+                                  }))
+                                }
                                 placeholder="CNY"
                               />
                             </div>
@@ -362,7 +542,12 @@ export function PortfolioView(props: PortfolioViewProps) {
                             <Input
                               type="number"
                               value={positionForm.quantity}
-                              onChange={(e: any) => setPositionForm((p: any) => ({ ...p, quantity: e.target.value }))}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setPositionForm((previous) => ({
+                                  ...previous,
+                                  quantity: event.target.value
+                                }))
+                              }
                               placeholder="0"
                             />
                           </FormGroup>
@@ -370,7 +555,12 @@ export function PortfolioView(props: PortfolioViewProps) {
                             <Input
                               type="number"
                               value={positionForm.cost}
-                              onChange={(e: any) => setPositionForm((p: any) => ({ ...p, cost: e.target.value }))}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setPositionForm((previous) => ({
+                                  ...previous,
+                                  cost: event.target.value
+                                }))
+                              }
                               placeholder="0.00"
                             />
                           </FormGroup>
@@ -378,7 +568,12 @@ export function PortfolioView(props: PortfolioViewProps) {
                             <Input
                               type="date"
                               value={positionForm.openDate}
-                              onChange={(e: any) => setPositionForm((p: any) => ({ ...p, openDate: e.target.value }))}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                setPositionForm((previous) => ({
+                                  ...previous,
+                                  openDate: event.target.value
+                                }))
+                              }
                             />
                           </FormGroup>
                           <div className="flex items-end">
@@ -403,7 +598,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {performanceRanges.map((range: any) => {
+                      {performanceRanges.map((range) => {
                         const isActive = performanceRange === range.key;
                         return (
                           <button
@@ -429,7 +624,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                       message={performanceError}
                       onRetry={() => {
                         if (!activePortfolioId) return;
-                        loadPerformance(activePortfolioId, performanceRange).catch((err: any) =>
+                        loadPerformance(activePortfolioId, performanceRange).catch((err: unknown) =>
                           setPerformanceError(toUserErrorMessage(err))
                         );
                       }}
@@ -576,7 +771,9 @@ export function PortfolioView(props: PortfolioViewProps) {
                         <Input
                           type="date"
                           value={ledgerStartDate}
-                          onChange={(e: any) => setLedgerStartDate(e.target.value)}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setLedgerStartDate(event.target.value)
+                          }
                           className="text-xs w-32 border-0 bg-transparent dark:bg-transparent focus:ring-0 focus:border-transparent rounded-none"
                           disabled={!activePortfolio}
                         />
@@ -584,7 +781,9 @@ export function PortfolioView(props: PortfolioViewProps) {
                         <Input
                           type="date"
                           value={ledgerEndDate}
-                          onChange={(e: any) => setLedgerEndDate(e.target.value)}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setLedgerEndDate(event.target.value)
+                          }
                           className="text-xs w-32 border-0 bg-transparent dark:bg-transparent focus:ring-0 focus:border-transparent rounded-none"
                           disabled={!activePortfolio}
                         />
@@ -594,7 +793,9 @@ export function PortfolioView(props: PortfolioViewProps) {
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
                         <Select
                           value={ledgerFilter}
-                          onChange={(e: any) => setLedgerFilter(e.target.value as any)}
+                          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                            setLedgerFilter(event.target.value as LedgerFilter)
+                          }
                           options={[
                             { value: "all", label: "全部交易类型" },
                             ...ledgerEventTypeOptions
@@ -606,7 +807,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                         <span>
                           筛选结果 {filteredLedgerEntries.length} / {ledgerEntries.length}
                         </span>
-                        {cashFlowTotals.map((item: any) => (
+                        {cashFlowTotals.map((item) => (
                           <span
                             key={item.currency}
                             className="text-[11px] font-mono text-emerald-500 dark:text-emerald-300"
@@ -623,7 +824,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                           className="rounded-none"
                           onClick={() => {
                             if (!activePortfolioId) return;
-                            loadLedgerEntries(activePortfolioId).catch((err: any) =>
+                            loadLedgerEntries(activePortfolioId).catch((err: unknown) =>
                               setLedgerError(toUserErrorMessage(err))
                             );
                           }}
@@ -654,7 +855,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                       message={ledgerError}
                       onRetry={() => {
                         if (!activePortfolioId) return;
-                        loadLedgerEntries(activePortfolioId).catch((err: any) =>
+                        loadLedgerEntries(activePortfolioId).catch((err: unknown) =>
                           setLedgerError(toUserErrorMessage(err))
                         );
                       }}
@@ -699,7 +900,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      {performanceRanges.map((range: any) => {
+                      {performanceRanges.map((range) => {
                         const isActive = performanceRange === range.key;
                         return (
                           <button
@@ -720,7 +921,9 @@ export function PortfolioView(props: PortfolioViewProps) {
                         <input
                           type="checkbox"
                           checked={riskAnnualized}
-                          onChange={(e: any) => setRiskAnnualized(e.target.checked)}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            setRiskAnnualized(event.target.checked)
+                          }
                           className="h-3.5 w-3.5 rounded-none border-slate-300 text-primary focus:ring-primary"
                         />
                         年化波动
@@ -734,7 +937,7 @@ export function PortfolioView(props: PortfolioViewProps) {
                       message={performanceError}
                       onRetry={() => {
                         if (!activePortfolioId) return;
-                        loadPerformance(activePortfolioId, performanceRange).catch((err: any) =>
+                        loadPerformance(activePortfolioId, performanceRange).catch((err: unknown) =>
                           setPerformanceError(toUserErrorMessage(err))
                         );
                       }}
@@ -795,8 +998,10 @@ export function PortfolioView(props: PortfolioViewProps) {
 
               {["allocation", "corporate"].includes(portfolioTab) && (
                 <PlaceholderPanel
-                  title={portfolioTabs.find((tab: any) => tab.key === portfolioTab)?.label ?? ""}
-                  description={portfolioTabs.find((tab: any) => tab.key === portfolioTab)?.description ?? ""}
+                  title={portfolioTabs.find((tab) => tab.key === portfolioTab)?.label ?? ""}
+                  description={
+                    portfolioTabs.find((tab) => tab.key === portfolioTab)?.description ?? ""
+                  }
                 />
               )}
             </>

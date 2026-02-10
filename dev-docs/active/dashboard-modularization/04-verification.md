@@ -469,3 +469,19 @@
     - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
   - `rg -n "\\bany\\b" apps/frontend/src/components/dashboard/views/RiskView.tsx apps/frontend/src/components/dashboard/views/DashboardOverlays.tsx apps/frontend/src/components/dashboard/views/DashboardContainerLayout.tsx`
     - no matches ✅ (`RiskView`/`DashboardOverlays`/`Layout` 三个边界文件已无 `any`)
+- 2026-02-10 (after tightening `PortfolioView` + `DataAnalysisView` typing and removing their dictionary props):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/views/DashboardContainerLayout.tsx apps/frontend/src/components/dashboard/views/PortfolioView.tsx apps/frontend/src/components/dashboard/views/DataAnalysisView.tsx apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `547` lines ✅ (`<= 800`)
+    - `DashboardContainerLayout.tsx`: `752` lines ✅ (`<= 800`)
+    - `PortfolioView.tsx`: `1009` lines
+    - `DataAnalysisView.tsx`: `772` lines ✅ (`<= 800`)
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "\\bany\\b" apps/frontend/src/components/dashboard/views/PortfolioView.tsx apps/frontend/src/components/dashboard/views/DataAnalysisView.tsx apps/frontend/src/components/dashboard/views/RiskView.tsx apps/frontend/src/components/dashboard/views/DashboardOverlays.tsx apps/frontend/src/components/dashboard/views/DashboardContainerLayout.tsx`
+    - no matches ✅（已完成 5 个视图边界文件的 `any` 清零）
+  - `rg -n "\\bany\\b" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx | wc -l`
+    - `86`（剩余 `any` 全部集中在 `MarketView/OtherView`）
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
