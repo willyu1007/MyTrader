@@ -71,6 +71,8 @@
   - 新增 `hooks/use-dashboard-market-resize.ts`，承接 market explorer/targets editor 的 resize refs、pointer/keyboard handlers 与拖拽生命周期副作用。
   - 新增 `hooks/use-dashboard-ui-effects.ts`，承接容器通用 UI 副作用（market 详情面板收敛、portfolio tab 重置、contribution 展开状态重置、toast 自动消失）。
   - `DashboardContainer.tsx` 继续下降到 `2522` 行；新增 hooks 行数：`use-dashboard-market-resize.ts` `211` 行、`use-dashboard-ui-effects.ts` `63` 行。
+  - 新增 `hooks/use-dashboard-market-target-pool-detail.ts`，承接 target-pool detail 计算与交互（metric cards、detail rows、member filter、category 同步、副作用与 section toggle）。
+  - `DashboardContainer.tsx` 继续下降到 `2324` 行；新增 hook 行数：`use-dashboard-market-target-pool-detail.ts` `312` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -122,7 +124,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `2522` 行，仍明显偏大；后续需继续将 market 领域编排与超大视图透传对象下沉（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `2324` 行，仍明显偏大；后续需继续将 market/analysis 领域衍生 view-model 与超大视图透传对象下沉（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

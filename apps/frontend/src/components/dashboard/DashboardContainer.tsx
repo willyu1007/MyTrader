@@ -134,6 +134,7 @@ import { useDashboardMarketAdminRefresh } from "./hooks/use-dashboard-market-adm
 import { useDashboardMarketAdminActions } from "./hooks/use-dashboard-market-admin-actions";
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
+import { useDashboardMarketTargetPoolDetail } from "./hooks/use-dashboard-market-target-pool-detail";
 import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data-loaders";
 import { useDashboardMarketResize } from "./hooks/use-dashboard-market-resize";
 import { useDashboardPortfolioActions } from "./hooks/use-dashboard-portfolio-actions";
@@ -730,11 +731,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     [marketTargetPoolStatsByScope, marketTargetPoolStatsScope]
   );
 
-  const marketTargetPoolScopeLabel = useMemo(
-    () => (marketTargetPoolStatsScope === "universe" ? "全量标的" : "强相关标的"),
-    [marketTargetPoolStatsScope]
-  );
-
   const marketUniverseEnabledBuckets = useMemo(() => {
     const source = marketUniversePoolConfig?.enabledBuckets ?? UNIVERSE_POOL_BUCKET_ORDER;
     return new Set(source);
@@ -746,222 +742,28 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     return map;
   }, [marketUniversePoolOverview?.buckets]);
 
-  const marketTargetPoolMetricCards = useMemo(
-    () => [
-      {
-        key: "totalSymbols" as const,
-        label: "标的总数",
-        value: String(marketActiveTargetPoolStats.totalSymbols)
-      },
-      {
-        key: "industryL1Count" as const,
-        label: "一级行业分类",
-        value: String(marketActiveTargetPoolStats.industryL1Count)
-      },
-      {
-        key: "industryL2Count" as const,
-        label: "二级行业分类",
-        value: String(marketActiveTargetPoolStats.industryL2Count)
-      },
-      {
-        key: "conceptCount" as const,
-        label: "概念分类数",
-        value: String(marketActiveTargetPoolStats.conceptCount)
-      },
-      {
-        key: "unclassifiedCount" as const,
-        label: "未分类标的",
-        value: String(marketActiveTargetPoolStats.unclassifiedCount)
-      },
-      {
-        key: "classificationCoverage" as const,
-        label: "分类覆盖率",
-        value:
-          marketActiveTargetPoolStats.classificationCoverage === null
-            ? "--"
-            : formatPct(marketActiveTargetPoolStats.classificationCoverage)
-      }
-    ],
-    [marketActiveTargetPoolStats]
-  );
-
-  const marketTargetPoolDetailTitle = useMemo(() => {
-    if (!marketTargetPoolDetailMetric) return "";
-    const card = marketTargetPoolMetricCards.find(
-      (item) => item.key === marketTargetPoolDetailMetric
-    );
-    return `${marketTargetPoolScopeLabel} · ${card?.label ?? "指标详情"}`;
-  }, [marketTargetPoolDetailMetric, marketTargetPoolMetricCards, marketTargetPoolScopeLabel]);
-
-  const marketTargetPoolDetailValue = useMemo(() => {
-    if (!marketTargetPoolDetailMetric) return "--";
-    const card = marketTargetPoolMetricCards.find(
-      (item) => item.key === marketTargetPoolDetailMetric
-    );
-    return card?.value ?? "--";
-  }, [marketTargetPoolDetailMetric, marketTargetPoolMetricCards]);
-
-  const marketTargetPoolDetailDescription = useMemo(() => {
-    if (!marketTargetPoolDetailMetric) return "";
-    switch (marketTargetPoolDetailMetric) {
-      case "totalSymbols":
-        return "当前口径下参与统计的标的总数。";
-      case "industryL1Count":
-        return "已命中的一级行业分类标签。";
-      case "industryL2Count":
-        return "已命中的二级行业分类标签。";
-      case "conceptCount":
-        return "已命中的概念（主题）分类标签。";
-      case "unclassifiedCount":
-        return "未命中行业与概念分类的标的数量。";
-      case "classificationCoverage":
-        return "有任一行业或概念分类的标的占比。";
-      default:
-        return "";
-    }
-  }, [marketTargetPoolDetailMetric]);
-
-  const marketTargetPoolDetailCategoryRows = useMemo(() => {
-    if (!marketTargetPoolDetailMetric) {
-      return [] as Array<{
-        key: string;
-        label: string;
-        symbols: string[];
-        count: number;
-        ratio: number | null;
-      }>;
-    }
-
-    const total = Math.max(0, marketActiveTargetPoolStats.totalSymbols);
-    const toRow = (detail: TargetPoolCategoryDetail) => {
-      const count = detail.symbols.length;
-      return {
-        key: detail.key,
-        label: detail.label,
-        symbols: detail.symbols,
-        count,
-        ratio: total > 0 ? count / total : null
-      };
-    };
-
-    switch (marketTargetPoolDetailMetric) {
-      case "industryL1Count":
-        return marketActiveTargetPoolStats.industryL1Details.map(toRow);
-      case "industryL2Count":
-        return marketActiveTargetPoolStats.industryL2Details.map(toRow);
-      case "conceptCount":
-        return marketActiveTargetPoolStats.conceptDetails.map(toRow);
-      case "unclassifiedCount":
-        return [
-          toRow({
-            key: "unclassified",
-            label: "未分类",
-            symbols: marketActiveTargetPoolStats.unclassifiedSymbols
-          })
-        ];
-      case "classificationCoverage":
-        return [
-          toRow({
-            key: "classified",
-            label: "已分类",
-            symbols: marketActiveTargetPoolStats.classifiedSymbols
-          }),
-          toRow({
-            key: "unclassified",
-            label: "未分类",
-            symbols: marketActiveTargetPoolStats.unclassifiedSymbols
-          })
-        ];
-      case "totalSymbols":
-      default:
-        return [
-          toRow({
-            key: "all",
-            label: "全部标的",
-            symbols: marketActiveTargetPoolStats.allSymbols
-          }),
-          toRow({
-            key: "classified",
-            label: "已分类",
-            symbols: marketActiveTargetPoolStats.classifiedSymbols
-          }),
-          toRow({
-            key: "unclassified",
-            label: "未分类",
-            symbols: marketActiveTargetPoolStats.unclassifiedSymbols
-          })
-        ];
-    }
-  }, [marketActiveTargetPoolStats, marketTargetPoolDetailMetric]);
-
-  const marketTargetPoolActiveCategoryRow = useMemo(() => {
-    if (marketTargetPoolDetailCategoryRows.length === 0) return null;
-    const selected = marketTargetPoolDetailCategoryRows.find(
-      (row) => row.key === marketTargetPoolDetailCategoryKey
-    );
-    return selected ?? marketTargetPoolDetailCategoryRows[0];
-  }, [marketTargetPoolDetailCategoryRows, marketTargetPoolDetailCategoryKey]);
-
-  const marketTargetPoolDetailMembers = useMemo(() => {
-    const source = marketTargetPoolActiveCategoryRow?.symbols ?? [];
-    const keyword = marketTargetPoolDetailMemberFilter.trim().toLowerCase();
-    if (!keyword) return source;
-    return source.filter((symbol) => {
-      const normalized = symbol.toLowerCase();
-      if (normalized.includes(keyword)) return true;
-      const name = marketActiveTargetPoolStats.symbolNames[symbol]?.toLowerCase() ?? "";
-      return Boolean(name && name.includes(keyword));
-    });
-  }, [
+  const {
+    marketTargetPoolMetricCards,
+    marketTargetPoolDetailTitle,
+    marketTargetPoolDetailValue,
+    marketTargetPoolDetailDescription,
+    marketTargetPoolDetailCategoryRows,
     marketTargetPoolActiveCategoryRow,
+    marketTargetPoolDetailMembers,
+    handleToggleTargetsSection,
+    handleToggleDiffSection
+  } = useDashboardMarketTargetPoolDetail({
+    marketTargetPoolStatsScope,
+    marketActiveTargetPoolStats,
+    marketTargetPoolDetailMetric,
+    marketTargetPoolDetailCategoryKey,
     marketTargetPoolDetailMemberFilter,
-    marketActiveTargetPoolStats.symbolNames
-  ]);
-
-  useEffect(() => {
-    if (!marketTargetPoolDetailMetric) {
-      setMarketTargetPoolDetailCategoryKey(null);
-      setMarketTargetPoolDetailMemberFilter("");
-      return;
-    }
-    setMarketTargetPoolDetailCategoryKey(null);
-    setMarketTargetPoolDetailMemberFilter("");
-  }, [marketTargetPoolDetailMetric, marketTargetPoolStatsScope]);
-
-  useEffect(() => {
-    if (!marketTargetPoolDetailCategoryRows.length) {
-      setMarketTargetPoolDetailCategoryKey(null);
-      return;
-    }
-    if (
-      !marketTargetPoolDetailCategoryKey ||
-      !marketTargetPoolDetailCategoryRows.some(
-        (row) => row.key === marketTargetPoolDetailCategoryKey
-      )
-    ) {
-      setMarketTargetPoolDetailCategoryKey(marketTargetPoolDetailCategoryRows[0]?.key ?? null);
-    }
-  }, [marketTargetPoolDetailCategoryRows, marketTargetPoolDetailCategoryKey]);
-
-  const handleToggleTargetsSection = useCallback(
-    (section: "scope" | "symbols") => {
-      setMarketTargetsSectionOpen((prev) => ({
-        ...prev,
-        [section]: !prev[section]
-      }));
-    },
-    []
-  );
-
-  const handleToggleDiffSection = useCallback(
-    (section: "added" | "removed" | "reasonChanged") => {
-      setMarketDiffSectionOpen((prev) => ({
-        ...prev,
-        [section]: !prev[section]
-      }));
-    },
-    []
-  );
+    formatPct,
+    setMarketTargetPoolDetailCategoryKey,
+    setMarketTargetPoolDetailMemberFilter,
+    setMarketTargetsSectionOpen,
+    setMarketDiffSectionOpen
+  });
 
   const activePortfolio = useMemo(
     () => portfolios.find((portfolio) => portfolio.id === activePortfolioId) ?? null,
