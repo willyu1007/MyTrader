@@ -155,6 +155,7 @@ import {
   useDashboardMarketRuntimeEffects
 } from "./hooks/use-dashboard-market";
 import { useDashboardMarketInstrumentActions } from "./hooks/use-dashboard-market-instrument-actions";
+import { useDashboardMarketAdminRefresh } from "./hooks/use-dashboard-market-admin-refresh";
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import {
   useDashboardPortfolio
@@ -2719,16 +2720,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     }
   }, [marketFocusTargetSymbols, marketUniversePoolConfig?.enabledBuckets]);
 
-  const refreshMarketTokenStatus = useCallback(async () => {
-    if (!window.mytrader) return;
-    try {
-      const status = await window.mytrader.market.getTokenStatus();
-      setMarketTokenStatus(status);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, []);
-
   const handleOpenMarketProvider = useCallback(async () => {
     if (!window.mytrader) return;
     try {
@@ -2740,116 +2731,38 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     }
   }, [marketTokenProvider]);
 
-  const refreshMarketIngestRuns = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketIngestRunsLoading(true);
-    try {
-      const runs = await window.mytrader.market.listIngestRuns({ limit: 100 });
-      setMarketIngestRuns(runs);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      setMarketIngestRuns([]);
-    } finally {
-      setMarketIngestRunsLoading(false);
-    }
-  }, []);
-
-  const refreshMarketIngestControl = useCallback(async () => {
-    if (!window.mytrader) return;
-    try {
-      const status = await window.mytrader.market.getIngestControlStatus();
-      setMarketIngestControlStatus(status);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, []);
-
-  const refreshMarketSchedulerConfig = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketSchedulerLoading(true);
-    try {
-      const config = await window.mytrader.market.getIngestSchedulerConfig();
-      setMarketSchedulerConfig(config);
-      setMarketSchedulerSavedConfig(config);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketSchedulerLoading(false);
-    }
-  }, []);
-
-  const refreshMarketUniversePool = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketUniversePoolLoading(true);
-    try {
-      const [config, overview] = await Promise.all([
-        window.mytrader.market.getUniversePoolConfig(),
-        window.mytrader.market.getUniversePoolOverview()
-      ]);
-      setMarketUniversePoolConfig(config);
-      setMarketUniversePoolSavedConfig(config);
-      setMarketUniversePoolOverview(overview);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketUniversePoolLoading(false);
-    }
-  }, []);
-
-  const refreshMarketUniversePoolOverview = useCallback(async () => {
-    if (!window.mytrader) return;
-    try {
-      const overview = await window.mytrader.market.getUniversePoolOverview();
-      setMarketUniversePoolOverview(overview);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, []);
-
-  const refreshMarketRegistry = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketRegistryLoading(true);
-    try {
-      const result = await window.mytrader.market.listInstrumentRegistry({
-        query: marketRegistryQuery.trim() ? marketRegistryQuery.trim() : null,
-        autoIngest: marketRegistryAutoFilter,
-        limit: 200,
-        offset: 0
-      });
-      setMarketRegistryResult(result);
-      setMarketRegistrySelectedSymbols((prev) =>
-        prev.filter((symbol) =>
-          result.items.some((item) => item.symbol === symbol)
-        )
-      );
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      setMarketRegistryResult(null);
-    } finally {
-      setMarketRegistryLoading(false);
-    }
-  }, [marketRegistryAutoFilter, marketRegistryQuery]);
-
-  const refreshMarketIngestRunDetail = useCallback(async (runId: string) => {
-    if (!window.mytrader) return;
-    const id = runId.trim();
-    if (!id) {
-      setMarketSelectedIngestRunId(null);
-      setMarketSelectedIngestRun(null);
-      return;
-    }
-    setMarketSelectedIngestRunId(id);
-    setMarketSelectedIngestRunLoading(true);
-    try {
-      const detail = await window.mytrader.market.getIngestRunDetail({ id });
-      setMarketSelectedIngestRun(detail);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      setMarketSelectedIngestRun(null);
-    } finally {
-      setMarketSelectedIngestRunLoading(false);
-    }
-  }, []);
+  const {
+    refreshMarketTokenStatus,
+    refreshMarketIngestRuns,
+    refreshMarketIngestControl,
+    refreshMarketSchedulerConfig,
+    refreshMarketUniversePool,
+    refreshMarketUniversePoolOverview,
+    refreshMarketRegistry,
+    refreshMarketIngestRunDetail
+  } = useDashboardMarketAdminRefresh({
+    marketRegistryQuery,
+    marketRegistryAutoFilter,
+    toUserErrorMessage,
+    setError,
+    setMarketTokenStatus,
+    setMarketIngestRuns,
+    setMarketIngestRunsLoading,
+    setMarketIngestControlStatus,
+    setMarketSchedulerConfig,
+    setMarketSchedulerSavedConfig,
+    setMarketSchedulerLoading,
+    setMarketUniversePoolConfig,
+    setMarketUniversePoolSavedConfig,
+    setMarketUniversePoolOverview,
+    setMarketUniversePoolLoading,
+    setMarketRegistryResult,
+    setMarketRegistryLoading,
+    setMarketRegistrySelectedSymbols,
+    setMarketSelectedIngestRunId,
+    setMarketSelectedIngestRun,
+    setMarketSelectedIngestRunLoading
+  });
 
   const handleSaveMarketToken = useCallback(async () => {
     if (!window.mytrader) return;
