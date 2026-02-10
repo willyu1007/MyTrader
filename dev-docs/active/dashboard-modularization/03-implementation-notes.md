@@ -1,0 +1,103 @@
+# 03 Implementation Notes
+
+## Status
+- Current status: `in-progress`
+- Last updated: 2026-02-10
+
+## What changed
+- 初始化 `dashboard-modularization` task bundle。
+- 写入 roadmap 与执行计划、架构边界、验证矩阵。
+- 记录 baseline（`typecheck/build` 已通过）。
+- Phase 1 落地：将原 `apps/frontend/src/components/Dashboard.tsx` 迁移为兼容壳，
+  主实现移动到 `apps/frontend/src/components/dashboard/DashboardContainer.tsx`。
+- 新增 `apps/frontend/src/components/dashboard/` 目录结构（`types/constants/hooks/views/components/primitives/utils`）。
+- 为原语/展示组件/工具函数提供模块出口（当前通过 `DashboardContainer` 导出复用，行为不变）。
+- 更新 `apps/frontend/scripts/verify-theme-contract.mjs`：
+  - 允许在 `DashboardContainer.tsx` 校验原语。
+  - 修复 `export function` 场景下函数块提取逻辑。
+- Phase 2 实拆分落地：
+  - 新增 `apps/frontend/src/components/dashboard/shared.tsx`，承载原语组件、展示组件与工具函数真实实现。
+  - `DashboardContainer.tsx` 删除尾部定义，改为从 `shared.tsx` 导入并使用。
+  - `primitives/components/utils` 模块出口从 `DashboardContainer` re-export 改为 `shared.tsx` re-export。
+  - `verify-theme-contract` 增加 `shared.tsx` 候选扫描，保证主题契约校验覆盖拆分后主定义位置。
+- Phase 2.5 结构收敛：
+  - `DashboardContainer.tsx` 改为从 `constants.ts` 与 `types.ts` 引入导航/范围/存储 key 与主视图类型。
+  - `views/SidebarNav.tsx`、`views/TopToolbar.tsx`、`views/AccountView.tsx` 实现并接入容器，替换内联 JSX。
+- Phase 3 视图实拆分（继续）：
+  - `views/RiskView.tsx` 完成真实实现迁移并接线。
+  - `views/DataAnalysisView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/OtherView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/MarketView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/PortfolioView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/DashboardOverlays.tsx` 抽离容器尾部 overlay（目标池弹窗/详情弹窗/删除确认/全局通知）。
+  - `DashboardContainer.tsx` 行数从 `9897` 进一步下降到 `4811`。
+- Phase 3 hooks 下沉（本轮）：
+  - `hooks/use-dashboard-ui.ts` 接管 `error/notice/activeView/otherTab/analysisTab/isNavCollapsed` 状态。
+  - 导航自动折叠副作用（进入/离开 market 视图）从 `DashboardContainer.tsx` 下沉到 `use-dashboard-ui.ts`。
+  - `hooks/use-dashboard-portfolio.ts` 接管 portfolio/position/risk/ledger/csv path 相关状态及重置副作用。
+  - `hooks/use-dashboard-analysis.ts` 从骨架升级为真实状态 hook，接管 instrument analysis 状态域（查询、结果、选中标的、区间、画像、标签、行情、K 线、加载与错误）。
+  - `hooks/use-dashboard-market.ts` 从骨架升级为真实状态 hook，接管 market 主状态域（搜索/筛选/标签/行情/图表/watchlist/token/ingest/详情面板等）。
+  - `hooks/use-dashboard-market.ts` 继续下沉 market 高级状态（targets/target-pool/scheduler/universe-pool/registry/ingest-run 选择与 loading flags）。
+  - `hooks/use-dashboard-market.ts` 下沉一批 market 副作用：本地持久化（explorer 宽度 / targets split）、hover 重置、临时标的选择集同步。
+  - `hooks/use-dashboard-market.ts` 下沉异步请求副作用：`marketSearch` 防抖查询与 `tagSeries` 加载（含 requestId 并发保护）。
+  - `hooks/use-dashboard-market.ts` 继续下沉副作用：tag picker 标签拉取、主图 `daily bars` 加载。
+  - 新增 `useDashboardMarketRuntimeEffects`（同文件导出）承接容器中的 market 运行时 effect，已接管：按 scope 拉取 quotes（holdings/search）与默认 scope 回退（含 watchlist:all 自动选择）。
+  - `useDashboardMarketRuntimeEffects` 继续接管初始化/联动 effect：进入 market 时刷新 watchlist+tags、analysis-instrument 模式下 watchlist 兜底加载、详情面板打开时刷新 manual theme options。
+  - `useDashboardMarketRuntimeEffects` 继续接管 ingest run 联动 effect：选中 run 失效自动清理、data-status 下自动刷新选中 run 详情。
+  - `DashboardContainer.tsx` 删除对应重复 `useState/useEffect`，改为消费 hook 返回值。
+  - `DashboardContainer.tsx` 维持在约 `4.6k` 行（当前 `4558`）。
+- 回归结果：
+  - `pnpm -C apps/frontend typecheck` ✅
+  - `pnpm -C apps/frontend build` ✅
+  - `pnpm -C apps/frontend verify:theme` ✅
+
+## Files/modules touched (high level)
+- `dev-docs/active/dashboard-modularization/roadmap.md`
+- `dev-docs/active/dashboard-modularization/00-overview.md`
+- `dev-docs/active/dashboard-modularization/01-plan.md`
+- `dev-docs/active/dashboard-modularization/02-architecture.md`
+- `dev-docs/active/dashboard-modularization/03-implementation-notes.md`
+- `dev-docs/active/dashboard-modularization/04-verification.md`
+- `dev-docs/active/dashboard-modularization/05-pitfalls.md`
+- `apps/frontend/src/components/Dashboard.tsx`
+- `apps/frontend/src/components/dashboard/index.ts`
+- `apps/frontend/src/components/dashboard/DashboardContainer.tsx`
+- `apps/frontend/src/components/dashboard/shared.tsx`
+- `apps/frontend/src/components/dashboard/types.ts`
+- `apps/frontend/src/components/dashboard/constants.ts`
+- `apps/frontend/src/components/dashboard/hooks/*`
+- `apps/frontend/src/components/dashboard/views/*`
+- `apps/frontend/src/components/dashboard/views/portfolio/*`
+- `apps/frontend/src/components/dashboard/components/*`
+- `apps/frontend/src/components/dashboard/primitives/*`
+- `apps/frontend/src/components/dashboard/utils/*`
+- `apps/frontend/scripts/verify-theme-contract.mjs`
+
+## Decisions & tradeoffs
+- Decision:
+  - 先进行兼容入口迁移，再做内部模块化拆分。
+  - Rationale:
+    - 先稳定外部接口，可降低后续大规模移动风险。
+  - Alternatives considered:
+    - 一次性抽 hooks + views（风险更高）。
+- Decision:
+  - `components/Dashboard.tsx` 只保留 re-export，路径明确写成 `./dashboard/index`。
+  - Rationale:
+    - 在大小写不敏感文件系统下，`./dashboard` 会与 `Dashboard.tsx` 发生同名解析冲突并自引用。
+  - Alternatives considered:
+    - 目录改名（会偏离既定目标布局）。
+
+## Deviations from plan
+- Change:
+  - 目前四个 domain hooks（`ui/portfolio/analysis/market`）均已进入真实接线；其中 market 的副作用与请求编排仍主要保留在容器。
+  - Why:
+    - 先下沉状态，再逐步下沉高复杂度副作用，降低一次性迁移风险。
+  - Impact:
+    - hooks 下沉模式已成型；后续重点转向 market 副作用与超大透传对象收敛。
+
+## Known issues / follow-ups
+- 后续需重点关注 market 视图拆分时的状态时序一致性。
+- `DashboardContainer.tsx` 仍约 4.8k 行，后续需继续将状态与副作用下沉到 `hooks/`，并逐步减少超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView` 目前均为大体量透传）。
+
+## Pitfalls / dead ends (do not repeat)
+- Keep the detailed log in `05-pitfalls.md` (append-only).

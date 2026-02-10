@@ -1,0 +1,183 @@
+# 04 Verification
+
+## Automated checks
+- 2026-02-10 baseline:
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+- 2026-02-10 (after modularization compatibility shell):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `13069` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after shared extraction + partial view wiring):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/shared.tsx`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `9897` lines (较上一阶段继续下降)
+    - `shared.tsx`: `3189` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after real extraction of Risk/DataAnalysis/Other views):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/views/RiskView.tsx apps/frontend/src/components/dashboard/views/DataAnalysisView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `7516` lines（继续下降）
+    - `RiskView.tsx`: `144` lines
+    - `DataAnalysisView.tsx`: `641` lines
+    - `OtherView.tsx`: `2137` lines
+- 2026-02-10 (after real extraction of Market view):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/views/MarketView.tsx`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `5605` lines（继续下降）
+    - `MarketView.tsx`: `2173` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after real extraction of Portfolio view + overlays):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/views/PortfolioView.tsx apps/frontend/src/components/dashboard/views/DashboardOverlays.tsx`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4811` lines（继续下降）
+    - `PortfolioView.tsx`: `804` lines
+    - `DashboardOverlays.tsx`: `273` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after hook downshift: ui + portfolio):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-ui.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-portfolio.ts`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4804` lines（继续下降）
+    - `use-dashboard-ui.ts`: `64` lines
+    - `use-dashboard-portfolio.ts`: `179` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after hook downshift: analysis state domain):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-ui.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-portfolio.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-analysis.ts`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4807` lines
+    - `use-dashboard-ui.ts`: `64` lines
+    - `use-dashboard-portfolio.ts`: `179` lines
+    - `use-dashboard-analysis.ts`: `98` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after hook downshift: market state domain):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-ui.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-portfolio.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-analysis.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4795` lines
+    - `use-dashboard-ui.ts`: `64` lines
+    - `use-dashboard-portfolio.ts`: `179` lines
+    - `use-dashboard-analysis.ts`: `98` lines
+    - `use-dashboard-market.ts`: `307` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after hook downshift: market advanced state domain):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-ui.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-portfolio.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-analysis.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4796` lines
+    - `use-dashboard-ui.ts`: `64` lines
+    - `use-dashboard-portfolio.ts`: `179` lines
+    - `use-dashboard-analysis.ts`: `98` lines
+    - `use-dashboard-market.ts`: `521` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after hook downshift: market side effects batch):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-ui.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-portfolio.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-analysis.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4755` lines
+    - `use-dashboard-ui.ts`: `64` lines
+    - `use-dashboard-portfolio.ts`: `179` lines
+    - `use-dashboard-analysis.ts`: `98` lines
+    - `use-dashboard-market.ts`: `562` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after hook downshift: market async search/tag-series effects):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4643` lines
+    - `use-dashboard-market.ts`: `695` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after hook downshift: market tag-picker/chart effects):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/Dashboard.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts`
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+    - `DashboardContainer.tsx`: `4599` lines
+    - `use-dashboard-market.ts`: `764` lines
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after market runtime effects hook extraction):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `4588` lines
+    - `use-dashboard-market.ts`: `837` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after market runtime effects hook expansion):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `4570` lines
+    - `use-dashboard-market.ts`: `865` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after market runtime effects ingest linkage):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `4558` lines
+    - `use-dashboard-market.ts`: `902` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+
+## Manual smoke checks
+- 本轮未执行（仅完成结构迁移与自动化回归）。待执行并记录：
+  - A: 左侧主导航切换
+  - B: Portfolio 总览/持仓/收益/交易/风险
+  - C: Data Analysis（portfolio/instrument）
+  - D: Market（搜索/标签/自选/详情/targets/ingest/scheduler）
+  - E: Other 子 tab
+  - F: 锁定账号
+
+## Rollout / Backout (if applicable)
+- Rollout:
+  - 按 phase 小步提交，阶段性验证通过后再进入下一阶段。
+- Backout:
+  - 按 phase 回滚对应提交，不使用 destructive git 命令。
