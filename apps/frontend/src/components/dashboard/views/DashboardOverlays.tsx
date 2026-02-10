@@ -1,12 +1,52 @@
+import type { Dispatch, SetStateAction } from "react";
+
+import type { LedgerEntry, ResolvedTargetSymbol } from "@mytrader/shared";
+
+import type { TargetPoolStructureStats } from "../types";
+import { Button, ConfirmDialog, Input } from "../shared";
+
+interface TargetPoolDetailCategoryRow {
+  key: string;
+  label: string;
+  count: number;
+  ratio: number | null;
+  symbols: string[];
+}
+
 export interface DashboardOverlaysProps {
-  [key: string]: any;
+  error: string | null;
+  notice: string | null;
+  toastMessage: string;
+  formatPct: (value: number) => string;
+  formatTargetsReasons: (reasons: string[]) => string;
+  handleCancelDeleteLedgerEntry: () => void;
+  handleConfirmDeleteLedgerEntry: () => Promise<void>;
+  ledgerDeleteSummary: string;
+  ledgerDeleteTarget: LedgerEntry | null;
+  marketActiveTargetPoolStats: Pick<TargetPoolStructureStats, "symbolNames">;
+  marketCurrentTargetsFilter: string;
+  marketCurrentTargetsModalOpen: boolean;
+  marketCurrentTargetsSource: ResolvedTargetSymbol[];
+  marketFilteredCurrentTargets: ResolvedTargetSymbol[];
+  marketTargetPoolActiveCategoryRow: TargetPoolDetailCategoryRow | null;
+  marketTargetPoolDetailCategoryRows: TargetPoolDetailCategoryRow[];
+  marketTargetPoolDetailDescription: string;
+  marketTargetPoolDetailMemberFilter: string;
+  marketTargetPoolDetailMembers: string[];
+  marketTargetPoolDetailMetric: string | null;
+  marketTargetPoolDetailTitle: string;
+  marketTargetPoolDetailValue: string;
+  setError: Dispatch<SetStateAction<string | null>>;
+  setNotice: Dispatch<SetStateAction<string | null>>;
+  setMarketCurrentTargetsFilter: Dispatch<SetStateAction<string>>;
+  setMarketCurrentTargetsModalOpen: Dispatch<SetStateAction<boolean>>;
+  setMarketTargetPoolDetailCategoryKey: Dispatch<SetStateAction<string | null>>;
+  setMarketTargetPoolDetailMemberFilter: Dispatch<SetStateAction<string>>;
+  setMarketTargetPoolDetailMetric: Dispatch<SetStateAction<string | null>>;
 }
 
 export function DashboardOverlays(props: DashboardOverlaysProps) {
   const {
-    Button,
-    ConfirmDialog,
-    Input,
     error,
     formatPct,
     formatTargetsReasons,
@@ -78,13 +118,13 @@ export function DashboardOverlays(props: DashboardOverlaysProps) {
 
               <Input
                 value={marketCurrentTargetsFilter}
-                onChange={(event: any) => setMarketCurrentTargetsFilter(event.target.value)}
+                onChange={(event) => setMarketCurrentTargetsFilter(event.target.value)}
                 placeholder="按代码过滤当前目标池"
                 className="font-mono text-xs"
               />
 
               <div className="max-h-[520px] overflow-auto rounded-md border border-slate-200 dark:border-border-dark p-2">
-                {marketFilteredCurrentTargets.slice(0, 500).map((row: any) => (
+                {marketFilteredCurrentTargets.slice(0, 500).map((row) => (
                   <div
                     key={`current-target-${row.symbol}`}
                     className="flex items-start justify-between gap-3 py-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"
@@ -151,13 +191,13 @@ export function DashboardOverlays(props: DashboardOverlaysProps) {
                   <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                     分类列表
                   </div>
-                  <div className="max-h-[360px] overflow-auto space-y-1">
-                    {marketTargetPoolDetailCategoryRows.length === 0 && (
-                      <div className="text-xs text-slate-500 dark:text-slate-400 px-1 py-1">
-                        暂无分类数据
-                      </div>
-                    )}
-                    {marketTargetPoolDetailCategoryRows.map((row: any) => {
+                    <div className="max-h-[360px] overflow-auto space-y-1">
+                      {marketTargetPoolDetailCategoryRows.length === 0 && (
+                        <div className="text-xs text-slate-500 dark:text-slate-400 px-1 py-1">
+                          暂无分类数据
+                        </div>
+                      )}
+                    {marketTargetPoolDetailCategoryRows.map((row) => {
                       const active = row.key === marketTargetPoolActiveCategoryRow?.key;
                       return (
                         <button
@@ -197,7 +237,7 @@ export function DashboardOverlays(props: DashboardOverlaysProps) {
                   </div>
                   <Input
                     value={marketTargetPoolDetailMemberFilter}
-                    onChange={(event: any) =>
+                    onChange={(event) =>
                       setMarketTargetPoolDetailMemberFilter(event.target.value)
                     }
                     placeholder="按代码或名称过滤成分"
@@ -209,7 +249,7 @@ export function DashboardOverlays(props: DashboardOverlaysProps) {
                         暂无匹配成分
                       </div>
                     )}
-                    {marketTargetPoolDetailMembers.slice(0, 500).map((symbol: any) => (
+                    {marketTargetPoolDetailMembers.slice(0, 500).map((symbol) => (
                       <div
                         key={`target-pool-member-${symbol}`}
                         className="py-1.5 px-1 border-b border-slate-200/60 dark:border-border-dark/60 last:border-b-0"

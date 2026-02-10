@@ -92,6 +92,9 @@
   - 新增 `views/DashboardContainerLayout.tsx`，将 `DashboardContainer` 内部主渲染壳（导航/toolbar/tabs/各视图条件渲染/overlays）整体迁出，容器仅负责状态编排与数据装配。
   - 将容器内多段 `derived/actions/orchestration` 调用从大解构改为对象持有，减少中间变量噪音并降低容器体积。
   - `DashboardContainer.tsx` 继续下降到 `547` 行，达成本阶段 `<= 800` 目标。
+  - `DashboardContainerLayoutProps` 类型从宽类型收敛到显式类型：移除 `any`，改为 hook 返回类型 + 明确函数签名（`loadLedgerEntries/loadPerformance/loadAnalysisInstrument`）。
+  - `views/RiskView.tsx` 收敛 `snapshot` / `riskLimit` 类型，移除 `any` 迭代项与 handler 参数。
+  - `views/DashboardOverlays.tsx` 取消 `[key: string]: any` 字典 props，改为显式 `DashboardOverlaysProps`；并改为组件内直接导入 `Button/ConfirmDialog/Input`，减少跨层 UI 原语透传。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -143,8 +146,9 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `547` 行、`DashboardContainerLayout.tsx` 当前 `755` 行，均低于 `800`。
+- `DashboardContainer.tsx` 当前 `547` 行、`DashboardContainerLayout.tsx` 当前 `752` 行，均低于 `800`。
 - `DashboardContainerLayoutProps` 的 `any` 宽类型已全部移除（改为 hook 返回类型与明确函数签名），后续重点从“减行”转向“manual smoke 覆盖 + view-model 结构继续清晰化”。
+- `RiskView.tsx` 与 `DashboardOverlays.tsx` 已移除 `any` 宽类型（包含 props 字典与事件参数）；下一步收敛重点转向 `PortfolioView.tsx` / `DataAnalysisView.tsx` / `MarketView.tsx` / `OtherView.tsx` 的大体量宽类型。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

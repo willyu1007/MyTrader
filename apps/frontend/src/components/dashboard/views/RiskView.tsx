@@ -1,5 +1,9 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { RiskLimitType } from "@mytrader/shared";
+import type {
+  PortfolioSnapshot,
+  RiskLimit,
+  RiskLimitType
+} from "@mytrader/shared";
 
 import {
   Button,
@@ -17,12 +21,12 @@ interface RiskFormViewState {
 }
 
 export interface RiskViewProps {
-  snapshot: any;
+  snapshot: PortfolioSnapshot | null;
   formatAssetClassLabel: (value: string) => string;
   formatPct: (value: number) => string;
   formatCurrency: (value: number | null) => string;
   formatRiskLimitTypeLabel: (value: RiskLimitType) => string;
-  handleEditRiskLimit: (limit: any) => void;
+  handleEditRiskLimit: (limit: RiskLimit) => void;
   handleDeleteRiskLimit: (id: string) => void;
   riskForm: RiskFormViewState;
   setRiskForm: Dispatch<SetStateAction<RiskFormViewState>>;
@@ -62,7 +66,7 @@ export function RiskView({
                   </tr>
                 </thead>
                 <tbody className="bg-white dark:bg-surface-dark/70 divide-y divide-slate-200 dark:divide-border-dark">
-                  {snapshot.exposures.byAssetClass.map((item: any) => (
+                  {snapshot.exposures.byAssetClass.map((item) => (
                     <tr key={item.key}>
                       <td className="px-4 py-2 text-sm text-slate-700 dark:text-slate-300">{formatAssetClassLabel(item.key)}</td>
                       <td className="px-4 py-2 text-sm text-right font-mono text-slate-600 dark:text-slate-400">{formatPct(item.weight)}</td>
@@ -86,7 +90,7 @@ export function RiskView({
             </div>
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {snapshot.riskLimits.map((limit: any) => (
+                {snapshot.riskLimits.map((limit) => (
                   <div key={limit.id} className="bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark border border-slate-200 dark:border-border-dark p-4 flex flex-col justify-between hover:border-slate-300 dark:hover:border-border-dark/80 transition-colors">
                     <div className="flex justify-between items-start mb-2">
                       <div>

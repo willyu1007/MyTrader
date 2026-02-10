@@ -457,3 +457,15 @@
     - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
   - `rg -n "\\bany\\b" apps/frontend/src/components/dashboard/views/DashboardContainerLayout.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx`
     - no matches ✅ (容器与 layout 边界不再使用 `any`)
+- 2026-02-10 (after tightening `RiskView` + `DashboardOverlays` typings and removing overlay dictionary props):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/views/DashboardContainerLayout.tsx apps/frontend/src/components/dashboard/views/RiskView.tsx apps/frontend/src/components/dashboard/views/DashboardOverlays.tsx apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainerLayout.tsx`: `752` lines ✅ (`<= 800`)
+    - `RiskView.tsx`: `148` lines
+    - `DashboardOverlays.tsx`: `313` lines
+    - `DashboardContainer.tsx`: `547` lines ✅ (`<= 800`)
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "\\bany\\b" apps/frontend/src/components/dashboard/views/RiskView.tsx apps/frontend/src/components/dashboard/views/DashboardOverlays.tsx apps/frontend/src/components/dashboard/views/DashboardContainerLayout.tsx`
+    - no matches ✅ (`RiskView`/`DashboardOverlays`/`Layout` 三个边界文件已无 `any`)

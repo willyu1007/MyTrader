@@ -26,7 +26,6 @@ import {
   Badge,
   Button,
   ChartErrorBoundary,
-  ConfirmDialog,
   ContributionTable,
   DataQualityCard,
   DescriptionItem,
@@ -716,8 +715,6 @@ export function DashboardContainerLayout({
           {...{
             ...marketState,
             Button,
-            ConfirmDialog,
-            Input,
             error,
             formatPct,
             formatTargetsReasons,
