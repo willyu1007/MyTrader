@@ -167,3 +167,17 @@
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).
+- 2026-02-10（继续执行“1/2/3”拆分：`Other data-management` + `Other instrument-management` + `Market sidebar/detail/dialogs`）
+  - 新增 `views/other/OtherDataManagementTab.tsx`，将 `OtherView` 的 `data-management` 区块整体迁出（含 token/source、scheduler、target-pool editor、registry、manual ingest）。
+  - 新增 `views/other/OtherInstrumentManagementTab.tsx`，将 `OtherView` 的 `instrument-management` 区块整体迁出（标签管理 + 临时标的状态）。
+  - `views/OtherView.tsx` 收敛为页签编排壳，仅保留 tab header 与条件渲染。
+  - 新增 `views/market/MarketSidebar.tsx`、`views/market/MarketDetailWorkspace.tsx`、`views/market/MarketDialogs.tsx`，分别承接 `MarketView` 的左侧 explorer、右侧详情工作区、全部弹窗。
+  - `views/MarketView.tsx` 收敛为分栏编排壳，仅保留 resize 分隔条与三块子组件拼装。
+  - 本轮收敛后的关键体量：
+    - `OtherView.tsx`: `155` 行
+    - `MarketView.tsx`: `113` 行
+    - `OtherDataManagementTab.tsx`: `1373` 行
+    - `OtherInstrumentManagementTab.tsx`: `205` 行
+    - `MarketSidebar.tsx`: `381` 行
+    - `MarketDetailWorkspace.tsx`: `555` 行
+    - `MarketDialogs.tsx`: `566` 行

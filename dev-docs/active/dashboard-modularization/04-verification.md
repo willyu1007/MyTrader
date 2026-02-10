@@ -511,3 +511,15 @@
     - `MarketView.tsx`: `1707` lines
   - `rg -n "\\bany\\b|as any" apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/OtherView.tsx apps/frontend/src/components/dashboard/views/other/OtherDataStatusTab.tsx apps/frontend/src/components/dashboard/views/other/OtherTestTab.tsx`
     - no matches ✅（新增子组件与主视图均无 `any`）
+- 2026-02-10 (after extracting `OtherDataManagementTab` + `OtherInstrumentManagementTab` and splitting `MarketView` into `MarketSidebar/MarketDetailWorkspace/MarketDialogs`):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/views/OtherView.tsx apps/frontend/src/components/dashboard/views/MarketView.tsx apps/frontend/src/components/dashboard/views/other/OtherDataManagementTab.tsx apps/frontend/src/components/dashboard/views/other/OtherInstrumentManagementTab.tsx apps/frontend/src/components/dashboard/views/market/MarketSidebar.tsx apps/frontend/src/components/dashboard/views/market/MarketDetailWorkspace.tsx apps/frontend/src/components/dashboard/views/market/MarketDialogs.tsx`
+    - `OtherView.tsx`: `155` lines
+    - `MarketView.tsx`: `113` lines
+    - `OtherDataManagementTab.tsx`: `1373` lines
+    - `OtherInstrumentManagementTab.tsx`: `205` lines
+    - `MarketSidebar.tsx`: `381` lines
+    - `MarketDetailWorkspace.tsx`: `555` lines
+    - `MarketDialogs.tsx`: `566` lines
