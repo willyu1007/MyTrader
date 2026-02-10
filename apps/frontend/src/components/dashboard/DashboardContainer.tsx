@@ -1,7 +1,5 @@
 import {
   useCallback,
-  useEffect,
-  useMemo,
   useState
 } from "react";
 
@@ -145,10 +143,8 @@ import { useDashboardMarketResize } from "./hooks/use-dashboard-market-resize";
 import { useDashboardPortfolioActions } from "./hooks/use-dashboard-portfolio-actions";
 import { useDashboardLedgerActions } from "./hooks/use-dashboard-ledger-actions";
 import { useDashboardPortfolioDerived } from "./hooks/use-dashboard-portfolio-derived";
-import {
-  useDashboardPortfolio
-} from "./hooks/use-dashboard-portfolio";
 import { useDashboardPortfolioRuntime } from "./hooks/use-dashboard-portfolio-runtime";
+import { useDashboardPortfolioState } from "./hooks/use-dashboard-portfolio-state";
 import { useDashboardUiEffects } from "./hooks/use-dashboard-ui-effects";
 import { useDashboardUi } from "./hooks/use-dashboard-ui";
 
@@ -481,21 +477,16 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setMarketDiffSectionOpen
   });
 
-  const activePortfolio = useMemo(
-    () => portfolios.find((portfolio) => portfolio.id === activePortfolioId) ?? null,
-    [portfolios, activePortfolioId]
-  );
-
-  const portfolioState = useDashboardPortfolio<
+  const { activePortfolio, portfolioState } = useDashboardPortfolioState<
     PositionFormState,
     RiskFormState,
     LedgerFormState,
     LedgerEntry,
     LedgerFilter
   >({
-    activePortfolioName: activePortfolio?.name ?? null,
-    activePortfolioBaseCurrency: activePortfolio?.baseCurrency ?? null,
-    activePortfolioResetKey: activePortfolio?.id ?? null,
+    portfolios,
+    activePortfolioId,
+    onActivePortfolioChange,
     emptyPositionForm,
     emptyRiskForm,
     createEmptyLedgerForm,
@@ -558,14 +549,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setPerformanceError,
     setPerformanceResult
   });
-
-  useEffect(() => {
-    if (!onActivePortfolioChange) return;
-    onActivePortfolioChange({
-      id: activePortfolio?.id ?? null,
-      name: activePortfolio?.name ?? null
-    });
-  }, [activePortfolio?.id, activePortfolio?.name, onActivePortfolioChange]);
 
   const {
     marketHoldingsSymbols,
