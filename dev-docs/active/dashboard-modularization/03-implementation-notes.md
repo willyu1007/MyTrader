@@ -65,6 +65,9 @@
   - 新增 `hooks/use-dashboard-portfolio-actions.ts`，承接 portfolio/position/risk 管理动作函数（创建/重命名/删除组合、持仓 CRUD、风险限额 CRUD）。
   - 新增 `hooks/use-dashboard-ledger-actions.ts`，承接 ledger/csv import 动作函数（编辑、提交、删除确认、持仓与行情 CSV 导入）。
   - `DashboardContainer.tsx` 进一步下降到 `2867` 行；`use-dashboard-market.ts` `1360` 行，`use-dashboard-market-target-actions.ts` `420` 行，`use-dashboard-market-instrument-actions.ts` `397` 行，`use-dashboard-market-admin-refresh.ts` `227` 行，`use-dashboard-market-target-pool-stats.ts` `271` 行，`use-dashboard-market-data-loaders.ts` `235` 行，`use-dashboard-market-admin-actions.ts` `230` 行，`use-dashboard-portfolio-actions.ts` `287` 行，`use-dashboard-ledger-actions.ts` `482` 行。
+  - 新增 `hooks/use-dashboard-portfolio-runtime.ts`，承接 `loadPortfolios/loadSnapshot/loadLedgerEntries/loadPerformance` 与其相关 lifecycle effects。
+  - 新增 `hooks/use-dashboard-analysis-runtime.ts`，承接 `loadAnalysisInstrument`、instrument 搜索防抖、副作用自动选中逻辑（requestId 并发保护保持不变）。
+  - `DashboardContainer.tsx` 继续下降到 `2670` 行；新增 runtime hooks 行数：`use-dashboard-portfolio-runtime.ts` `213` 行、`use-dashboard-analysis-runtime.ts` `199` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -116,7 +119,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `2867` 行，仍明显偏大；后续需继续将 market 事件处理器与数据编排下沉，并逐步收敛超大透传对象（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `2670` 行，仍明显偏大；后续需继续将 resize/生命周期编排与超大视图透传对象下沉（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

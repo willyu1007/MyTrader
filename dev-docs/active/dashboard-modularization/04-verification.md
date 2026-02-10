@@ -326,3 +326,16 @@
   - 按 phase 小步提交，阶段性验证通过后再进入下一阶段。
 - Backout:
   - 按 phase 回滚对应提交，不使用 destructive git 命令。
+- 2026-02-10 (after extracting portfolio/analysis runtime loaders and effects to dedicated hooks):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-portfolio-runtime.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-analysis-runtime.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-ledger-actions.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `2670` lines
+    - `use-dashboard-portfolio-runtime.ts`: `213` lines
+    - `use-dashboard-analysis-runtime.ts`: `199` lines
+    - `use-dashboard-ledger-actions.ts`: `482` lines
+    - `use-dashboard-market.ts`: `1360` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)

@@ -124,6 +124,7 @@ import { RiskView } from "./views/RiskView";
 import { SidebarNav } from "./views/SidebarNav";
 import { TopToolbar } from "./views/TopToolbar";
 import { useDashboardAnalysis } from "./hooks/use-dashboard-analysis";
+import { useDashboardAnalysisRuntime } from "./hooks/use-dashboard-analysis-runtime";
 import {
   useDashboardMarket,
   useDashboardMarketManagementActions,
@@ -140,6 +141,7 @@ import { useDashboardLedgerActions } from "./hooks/use-dashboard-ledger-actions"
 import {
   useDashboardPortfolio
 } from "./hooks/use-dashboard-portfolio";
+import { useDashboardPortfolioRuntime } from "./hooks/use-dashboard-portfolio-runtime";
 import { useDashboardUi } from "./hooks/use-dashboard-ui";
 
 interface PositionFormState {
@@ -359,10 +361,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   const [showAllAssetContribution, setShowAllAssetContribution] =
     useState(false);
   const [riskAnnualized, setRiskAnnualized] = useState(true);
-
-  const analysisInstrumentSearchTimerRef = useRef<number | null>(null);
-  const analysisInstrumentSearchRequestIdRef = useRef(0);
-  const analysisInstrumentLoadRequestIdRef = useRef(0);
 
   const {
     marketCatalogSyncing,
@@ -1016,6 +1014,32 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     defaultLedgerEndDate: DEFAULT_LEDGER_END_DATE
   });
 
+  const {
+    loadPortfolios,
+    loadSnapshot,
+    loadLedgerEntries,
+    loadPerformance
+  } = useDashboardPortfolioRuntime({
+    activePortfolioId,
+    activeView,
+    analysisTab,
+    portfolioTab,
+    performanceRange,
+    toUserErrorMessage,
+    setError,
+    setIsLoading,
+    setPortfolios,
+    setActivePortfolioId,
+    setPortfolioRename,
+    setSnapshot,
+    setLedgerEntries,
+    setLedgerLoading,
+    setLedgerError,
+    setPerformanceLoading,
+    setPerformanceError,
+    setPerformanceResult
+  });
+
   useEffect(() => {
     if (!onActivePortfolioChange) return;
     onActivePortfolioChange({
@@ -1338,6 +1362,28 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     return Array.from(set).slice(0, 16);
   }, [marketWatchlistItems, snapshot]);
 
+  const { loadAnalysisInstrument } = useDashboardAnalysisRuntime({
+    activeView,
+    analysisTab,
+    analysisInstrumentQuery,
+    analysisInstrumentSymbol,
+    analysisInstrumentRange,
+    analysisInstrumentQuickSymbols,
+    snapshotPriceAsOf: snapshot?.priceAsOf,
+    toUserErrorMessage,
+    resolveMarketChartDateRange,
+    formatInputDate,
+    setAnalysisInstrumentSearchResults,
+    setAnalysisInstrumentSearchLoading,
+    setAnalysisInstrumentSymbol,
+    setAnalysisInstrumentLoading,
+    setAnalysisInstrumentError,
+    setAnalysisInstrumentProfile,
+    setAnalysisInstrumentUserTags,
+    setAnalysisInstrumentQuote,
+    setAnalysisInstrumentBars
+  });
+
   const analysisInstrumentLatestBar = useMemo(() => {
     for (let idx = analysisInstrumentBars.length - 1; idx >= 0; idx -= 1) {
       const bar = analysisInstrumentBars[idx];
@@ -1497,249 +1543,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     }
     return null;
   }, [performance]);
-
-  const loadPortfolios = useCallback(
-    async (preferredId?: string | null) => {
-      if (!window.mytrader) {
-        setError("未检测到桌面端后端接口。");
-        return;
-      }
-      const list = await window.mytrader.portfolio.list();
-      setPortfolios(list);
-      const nextId = preferredId ?? list[0]?.id ?? null;
-      setActivePortfolioId(nextId);
-      if (nextId) {
-        const selected = list.find((item) => item.id === nextId);
-        setPortfolioRename(selected?.name ?? "");
-      }
-    },
-    []
-  );
-
-  const loadSnapshot = useCallback(async (portfolioId: string) => {
-    if (!window.mytrader) {
-      setError("未检测到桌面端后端接口。");
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await window.mytrader.portfolio.getSnapshot(portfolioId);
-      setSnapshot(data);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      setSnapshot(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const loadLedgerEntries = useCallback(async (portfolioId: string) => {
-    if (!window.mytrader) {
-      setLedgerError("未检测到桌面端后端接口。");
-      return;
-    }
-    setLedgerLoading(true);
-    setLedgerError(null);
-    try {
-      const entries = await window.mytrader.ledger.list(portfolioId);
-      setLedgerEntries(entries);
-    } catch (err) {
-      setLedgerError(toUserErrorMessage(err));
-    } finally {
-      setLedgerLoading(false);
-    }
-  }, []);
-
-  const loadPerformance = useCallback(
-    async (portfolioId: string, range: PerformanceRangeKey) => {
-      if (!window.mytrader) {
-        setPerformanceError("未检测到桌面端后端接口。");
-        return;
-      }
-      setPerformanceLoading(true);
-      setPerformanceError(null);
-      try {
-        const data = await window.mytrader.portfolio.getPerformance({
-          portfolioId,
-          range
-        });
-        setPerformanceResult(data);
-      } catch (err) {
-        setPerformanceError(toUserErrorMessage(err));
-        setPerformanceResult(null);
-      } finally {
-        setPerformanceLoading(false);
-      }
-    },
-    []
-  );
-
-  const loadAnalysisInstrument = useCallback(
-    async (symbol: string) => {
-      if (!window.mytrader) {
-        setAnalysisInstrumentError("未检测到桌面端后端接口。");
-        return;
-      }
-      const key = symbol.trim();
-      if (!key) return;
-
-      const requestId = analysisInstrumentLoadRequestIdRef.current + 1;
-      analysisInstrumentLoadRequestIdRef.current = requestId;
-
-      setAnalysisInstrumentLoading(true);
-      setAnalysisInstrumentError(null);
-
-      try {
-        const [profile, tags, quotes] = await Promise.all([
-          window.mytrader.market.getInstrumentProfile(key),
-          window.mytrader.market.listInstrumentTags(key),
-          window.mytrader.market.getQuotes({ symbols: [key] })
-        ]);
-        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
-
-        const quote = quotes[0] ?? null;
-        setAnalysisInstrumentProfile(profile);
-        setAnalysisInstrumentUserTags(tags);
-        setAnalysisInstrumentQuote(quote);
-
-        const endDate =
-          quote?.tradeDate ?? snapshot?.priceAsOf ?? formatInputDate(new Date());
-        const { startDate, endDate: resolvedEndDate } = resolveMarketChartDateRange(
-          analysisInstrumentRange,
-          endDate
-        );
-        const bars = await window.mytrader.market.getDailyBars({
-          symbol: key,
-          startDate,
-          endDate: resolvedEndDate,
-          includeMoneyflow: false
-        });
-        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
-        setAnalysisInstrumentBars(bars);
-      } catch (err) {
-        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
-        setAnalysisInstrumentError(toUserErrorMessage(err));
-        setAnalysisInstrumentProfile(null);
-        setAnalysisInstrumentUserTags([]);
-        setAnalysisInstrumentQuote(null);
-        setAnalysisInstrumentBars([]);
-      } finally {
-        if (analysisInstrumentLoadRequestIdRef.current !== requestId) return;
-        setAnalysisInstrumentLoading(false);
-      }
-    },
-    [analysisInstrumentRange, snapshot?.priceAsOf]
-  );
-
-  useEffect(() => {
-    loadPortfolios().catch((err) => setError(toUserErrorMessage(err)));
-  }, [loadPortfolios]);
-
-  useEffect(() => {
-    if (!activePortfolioId) {
-      setSnapshot(null);
-      return;
-    }
-    loadSnapshot(activePortfolioId).catch((err) =>
-      setError(toUserErrorMessage(err))
-    );
-  }, [activePortfolioId, loadSnapshot]);
-
-  useEffect(() => {
-    if (!activePortfolioId) {
-      setPerformanceResult(null);
-      return;
-    }
-
-    const shouldLoadPerformance =
-      (activeView === "data-analysis" && analysisTab === "portfolio") ||
-      (activeView === "portfolio" &&
-        (portfolioTab === "performance" || portfolioTab === "risk"));
-    if (!shouldLoadPerformance) return;
-
-    loadPerformance(activePortfolioId, performanceRange).catch((err) =>
-      setPerformanceError(toUserErrorMessage(err))
-    );
-  }, [
-    activePortfolioId,
-    activeView,
-    analysisTab,
-    loadPerformance,
-    performanceRange,
-    portfolioTab
-  ]);
-
-  useEffect(() => {
-    if (!activePortfolioId) {
-      setLedgerEntries([]);
-      return;
-    }
-    if (portfolioTab !== "trades") return;
-    loadLedgerEntries(activePortfolioId).catch((err) =>
-      setLedgerError(toUserErrorMessage(err))
-    );
-  }, [activePortfolioId, loadLedgerEntries, portfolioTab]);
-
-  useEffect(() => {
-    if (activeView !== "data-analysis" || analysisTab !== "instrument") return;
-    if (!window.mytrader) return;
-    const query = analysisInstrumentQuery.trim();
-    if (!query) {
-      setAnalysisInstrumentSearchResults([]);
-      setAnalysisInstrumentSearchLoading(false);
-      return;
-    }
-
-    setAnalysisInstrumentSearchLoading(true);
-    const requestId = analysisInstrumentSearchRequestIdRef.current + 1;
-    analysisInstrumentSearchRequestIdRef.current = requestId;
-
-    if (analysisInstrumentSearchTimerRef.current !== null) {
-      window.clearTimeout(analysisInstrumentSearchTimerRef.current);
-    }
-
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const results = await window.mytrader!.market.searchInstruments({
-            query,
-            limit: 50
-          });
-          if (analysisInstrumentSearchRequestIdRef.current !== requestId) return;
-          setAnalysisInstrumentSearchResults(results);
-        } catch (err) {
-          if (analysisInstrumentSearchRequestIdRef.current !== requestId) return;
-          setAnalysisInstrumentError(toUserErrorMessage(err));
-          setAnalysisInstrumentSearchResults([]);
-        } finally {
-          if (analysisInstrumentSearchRequestIdRef.current !== requestId) return;
-          setAnalysisInstrumentSearchLoading(false);
-        }
-      })();
-    }, 250);
-
-    analysisInstrumentSearchTimerRef.current = timer;
-    return () => window.clearTimeout(timer);
-  }, [activeView, analysisTab, analysisInstrumentQuery]);
-
-  useEffect(() => {
-    if (activeView !== "data-analysis" || analysisTab !== "instrument") return;
-    if (!analysisInstrumentSymbol) return;
-    void loadAnalysisInstrument(analysisInstrumentSymbol);
-  }, [activeView, analysisTab, analysisInstrumentSymbol, loadAnalysisInstrument]);
-
-  useEffect(() => {
-    if (activeView !== "data-analysis" || analysisTab !== "instrument") return;
-    if (analysisInstrumentSymbol) return;
-    if (analysisInstrumentQuickSymbols.length === 0) return;
-    setAnalysisInstrumentSymbol(analysisInstrumentQuickSymbols[0]);
-  }, [
-    activeView,
-    analysisTab,
-    analysisInstrumentQuickSymbols,
-    analysisInstrumentSymbol
-  ]);
 
   useEffect(() => {
     if (activeView === "market") return;
