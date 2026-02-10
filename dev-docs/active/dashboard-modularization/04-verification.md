@@ -339,3 +339,15 @@
     - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
   - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
     - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)
+- 2026-02-10 (after extracting resize + ui lifecycle effects to dedicated hooks):
+  - `pnpm -C apps/frontend typecheck` -> ✅ pass
+  - `pnpm -C apps/frontend build` -> ✅ pass
+  - `pnpm -C apps/frontend verify:theme` -> ✅ pass
+  - `wc -l apps/frontend/src/components/dashboard/DashboardContainer.tsx apps/frontend/src/components/dashboard/hooks/use-dashboard-market-resize.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-ui-effects.ts apps/frontend/src/components/dashboard/hooks/use-dashboard-market.ts apps/frontend/src/components/Dashboard.tsx`
+    - `DashboardContainer.tsx`: `2522` lines
+    - `use-dashboard-market-resize.ts`: `211` lines
+    - `use-dashboard-ui-effects.ts`: `63` lines
+    - `use-dashboard-market.ts`: `1360` lines
+    - `Dashboard.tsx`: `1` line ✅ (`<= 800`)
+  - `rg -n "from \"./components/Dashboard\"" apps/frontend/src/App.tsx`
+    - `4:import { Dashboard } from "./components/Dashboard";` ✅ (导入路径保持不变)

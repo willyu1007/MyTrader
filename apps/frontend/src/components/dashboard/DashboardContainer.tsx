@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState
 } from "react";
 
@@ -136,12 +135,14 @@ import { useDashboardMarketAdminActions } from "./hooks/use-dashboard-market-adm
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
 import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data-loaders";
+import { useDashboardMarketResize } from "./hooks/use-dashboard-market-resize";
 import { useDashboardPortfolioActions } from "./hooks/use-dashboard-portfolio-actions";
 import { useDashboardLedgerActions } from "./hooks/use-dashboard-ledger-actions";
 import {
   useDashboardPortfolio
 } from "./hooks/use-dashboard-portfolio";
 import { useDashboardPortfolioRuntime } from "./hooks/use-dashboard-portfolio-runtime";
+import { useDashboardUiEffects } from "./hooks/use-dashboard-ui-effects";
 import { useDashboardUi } from "./hooks/use-dashboard-ui";
 
 interface PositionFormState {
@@ -607,18 +608,23 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     resolveMarketChartDateRange,
     formatInputDate
   });
-  const marketExplorerResizeRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-  } | null>(null);
-  const targetsEditorGridRef = useRef<HTMLDivElement | null>(null);
-  const targetsEditorResizeRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-    startPct: number;
-  } | null>(null);
+  const {
+    targetsEditorGridRef,
+    handleMarketExplorerResizePointerDown,
+    handleMarketExplorerResizeKeyDown,
+    handleTargetsEditorResizePointerDown,
+    handleTargetsEditorResizeKeyDown
+  } = useDashboardMarketResize({
+    clampNumber,
+    marketExplorerWidth,
+    marketExplorerMinWidth: MARKET_EXPLORER_MIN_WIDTH,
+    marketExplorerMaxWidth: MARKET_EXPLORER_MAX_WIDTH,
+    targetsEditorLeftPct,
+    targetsEditorSplitMin: TARGETS_EDITOR_SPLIT_MIN,
+    targetsEditorSplitMax: TARGETS_EDITOR_SPLIT_MAX,
+    setMarketExplorerWidth,
+    setTargetsEditorLeftPct
+  });
 
   const latestMarketIngestRun = useMemo(() => {
     if (marketIngestRuns.length === 0) return null;
@@ -1544,95 +1550,20 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     return null;
   }, [performance]);
 
-  useEffect(() => {
-    if (activeView === "market") return;
-    setMarketInstrumentDetailsOpen(false);
-    setMarketTagMembersModalOpen(false);
-  }, [activeView]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleMove = (event: PointerEvent) => {
-      const state = marketExplorerResizeRef.current;
-      if (!state) return;
-      const delta = event.clientX - state.startX;
-      const nextWidth = clampNumber(
-        state.startWidth + delta,
-        MARKET_EXPLORER_MIN_WIDTH,
-        MARKET_EXPLORER_MAX_WIDTH
-      );
-      setMarketExplorerWidth(nextWidth);
-    };
-
-    const stop = () => {
-      if (!marketExplorerResizeRef.current) return;
-      marketExplorerResizeRef.current = null;
-      document.body.style.userSelect = "";
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-    return () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      document.body.style.userSelect = "";
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleMove = (event: PointerEvent) => {
-      const state = targetsEditorResizeRef.current;
-      if (!state) return;
-      if (state.startWidth <= 0) return;
-      const delta = event.clientX - state.startX;
-      const deltaPct = (delta / state.startWidth) * 100;
-      const next = clampNumber(
-        state.startPct + deltaPct,
-        TARGETS_EDITOR_SPLIT_MIN,
-        TARGETS_EDITOR_SPLIT_MAX
-      );
-      setTargetsEditorLeftPct(next);
-    };
-
-    const stop = () => {
-      if (!targetsEditorResizeRef.current) return;
-      targetsEditorResizeRef.current = null;
-      document.body.style.userSelect = "";
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-    return () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      document.body.style.userSelect = "";
-    };
-  }, []);
-
-  useEffect(() => {
-    if (activeView === "portfolio") {
-      setPortfolioTab("overview");
-    }
-  }, [activeView]);
-
-  useEffect(() => {
-    setShowAllSymbolContribution(false);
-    setShowAllAssetContribution(false);
-  }, [performanceRange, activePortfolioId]);
-
-  useEffect(() => {
-    if (!error && !notice) return;
-    const timer = window.setTimeout(() => {
-      setError(null);
-      setNotice(null);
-    }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [error, notice]);
+  useDashboardUiEffects({
+    activeView,
+    activePortfolioId,
+    performanceRange,
+    error,
+    notice,
+    setMarketInstrumentDetailsOpen,
+    setMarketTagMembersModalOpen,
+    setPortfolioTab,
+    setShowAllSymbolContribution,
+    setShowAllAssetContribution,
+    setError,
+    setNotice
+  });
 
   const {
     handleCreatePortfolio,
@@ -1943,85 +1874,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setMarketRegistrySelectedSymbols,
     setMarketRegistryUpdating
   });
-
-  const handleMarketExplorerResizePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      marketExplorerResizeRef.current = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startWidth: marketExplorerWidth
-      };
-      event.currentTarget.setPointerCapture(event.pointerId);
-      document.body.style.userSelect = "none";
-    },
-    [marketExplorerWidth]
-  );
-
-  const handleMarketExplorerResizeKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      const step = event.shiftKey ? 32 : 16;
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        setMarketExplorerWidth((prev) =>
-          clampNumber(
-            prev - step,
-            MARKET_EXPLORER_MIN_WIDTH,
-            MARKET_EXPLORER_MAX_WIDTH
-          )
-        );
-      }
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        setMarketExplorerWidth((prev) =>
-          clampNumber(
-            prev + step,
-            MARKET_EXPLORER_MIN_WIDTH,
-            MARKET_EXPLORER_MAX_WIDTH
-          )
-        );
-      }
-    },
-    []
-  );
-
-  const handleTargetsEditorResizePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) return;
-      const width = targetsEditorGridRef.current?.getBoundingClientRect().width ?? 0;
-      if (width <= 0) return;
-      event.preventDefault();
-      targetsEditorResizeRef.current = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startWidth: width,
-        startPct: targetsEditorLeftPct
-      };
-      event.currentTarget.setPointerCapture(event.pointerId);
-      document.body.style.userSelect = "none";
-    },
-    [targetsEditorLeftPct]
-  );
-
-  const handleTargetsEditorResizeKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLDivElement>) => {
-      const step = event.shiftKey ? 6 : 3;
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        setTargetsEditorLeftPct((prev) =>
-          clampNumber(prev - step, TARGETS_EDITOR_SPLIT_MIN, TARGETS_EDITOR_SPLIT_MAX)
-        );
-      }
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        setTargetsEditorLeftPct((prev) =>
-          clampNumber(prev + step, TARGETS_EDITOR_SPLIT_MIN, TARGETS_EDITOR_SPLIT_MAX)
-        );
-      }
-    },
-    []
-  );
 
   const restoreDataManagementView = useCallback(() => {
     setActiveView("other");

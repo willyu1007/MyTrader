@@ -68,6 +68,9 @@
   - 新增 `hooks/use-dashboard-portfolio-runtime.ts`，承接 `loadPortfolios/loadSnapshot/loadLedgerEntries/loadPerformance` 与其相关 lifecycle effects。
   - 新增 `hooks/use-dashboard-analysis-runtime.ts`，承接 `loadAnalysisInstrument`、instrument 搜索防抖、副作用自动选中逻辑（requestId 并发保护保持不变）。
   - `DashboardContainer.tsx` 继续下降到 `2670` 行；新增 runtime hooks 行数：`use-dashboard-portfolio-runtime.ts` `213` 行、`use-dashboard-analysis-runtime.ts` `199` 行。
+  - 新增 `hooks/use-dashboard-market-resize.ts`，承接 market explorer/targets editor 的 resize refs、pointer/keyboard handlers 与拖拽生命周期副作用。
+  - 新增 `hooks/use-dashboard-ui-effects.ts`，承接容器通用 UI 副作用（market 详情面板收敛、portfolio tab 重置、contribution 展开状态重置、toast 自动消失）。
+  - `DashboardContainer.tsx` 继续下降到 `2522` 行；新增 hooks 行数：`use-dashboard-market-resize.ts` `211` 行、`use-dashboard-ui-effects.ts` `63` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -119,7 +122,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `2670` 行，仍明显偏大；后续需继续将 resize/生命周期编排与超大视图透传对象下沉（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `2522` 行，仍明显偏大；后续需继续将 market 领域编排与超大视图透传对象下沉（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).
