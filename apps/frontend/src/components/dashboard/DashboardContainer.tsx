@@ -16,7 +16,6 @@ import type {
   LedgerEventType,
   LedgerSide,
   LedgerSource,
-  MarketTargetsConfig,
   MarketDailyBar,
   MarketUniversePoolBucketStatus,
   PerformanceRangeKey,
@@ -113,7 +112,6 @@ import {
   formatInputDate,
   formatCnDate,
   parseTargetPriceFromTags,
-  buildManualThemeOptions,
   formatThemeLabel,
   computeFifoUnitCost,
   resolveMarketChartDateRange,
@@ -149,6 +147,7 @@ import { useDashboardMarketInstrumentActions } from "./hooks/use-dashboard-marke
 import { useDashboardMarketAdminRefresh } from "./hooks/use-dashboard-market-admin-refresh";
 import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-target-actions";
 import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
+import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data-loaders";
 import {
   useDashboardPortfolio
 } from "./hooks/use-dashboard-portfolio";
@@ -2382,119 +2381,39 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setNotice(`行情导入：新增 ${result.inserted} 条，跳过 ${result.skipped} 条。`);
   }, [pricesCsvPath, activePortfolio, loadSnapshot]);
 
-  const refreshMarketWatchlist = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketWatchlistLoading(true);
-    try {
-      const items = await window.mytrader.market.listWatchlist();
-      setMarketWatchlistItems(items);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketWatchlistLoading(false);
-    }
-  }, []);
-
-  const refreshMarketTags = useCallback(async (query: string) => {
-    if (!window.mytrader) return;
-    setMarketTagsLoading(true);
-    try {
-      const tags = await window.mytrader.market.listTags({
-        query: query.trim() ? query.trim() : null,
-        limit: 200
-      });
-      setMarketTags(tags);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      setMarketTags([]);
-    } finally {
-      setMarketTagsLoading(false);
-    }
-  }, []);
-
-  const refreshManualThemeOptions = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketManualThemeLoading(true);
-    try {
-      const tags = await window.mytrader.market.listTags({
-        query: "theme:ths:",
-        limit: 500
-      });
-      const options = buildManualThemeOptions(tags);
-      setMarketManualThemeOptions(options);
-      setMarketManualThemeDraft((prev) =>
-        options.some((opt) => opt.value === prev) ? prev : ""
-      );
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      setMarketManualThemeOptions([]);
-      setMarketManualThemeDraft("");
-    } finally {
-      setMarketManualThemeLoading(false);
-    }
-  }, []);
-
-  const resetMarketFilters = useCallback(() => {
-    setMarketFilterMarket("all");
-    setMarketFilterAssetClasses([]);
-    setMarketFilterKinds([]);
-  }, []);
-
-  const loadMarketQuotes = useCallback(async (symbols: string[]) => {
-    if (!window.mytrader) return;
-    const unique = Array.from(new Set(symbols.map((s) => s.trim()).filter(Boolean)));
-    if (unique.length === 0) return;
-
-    setMarketQuotesLoading(true);
-    try {
-      const quotes = await window.mytrader.market.getQuotes({ symbols: unique });
-      setMarketQuotesBySymbol((prev) => {
-        const next = { ...prev };
-        quotes.forEach((quote) => {
-          next[quote.symbol] = quote;
-        });
-        return next;
-      });
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketQuotesLoading(false);
-    }
-  }, []);
-
-  const refreshMarketTargets = useCallback(async () => {
-    if (!window.mytrader) return;
-    setMarketTargetsLoading(true);
-    try {
-      const config = await window.mytrader.market.getTargets();
-      const normalizedConfig: MarketTargetsConfig = {
-        ...config,
-        includeRegistryAutoIngest: false,
-        tagFilters: []
-      };
-      setMarketTargetsSavedConfig(normalizedConfig);
-      setMarketTargetsConfig(normalizedConfig);
-      const diff = await window.mytrader.market.previewTargetsDraft({
-        config: normalizedConfig
-      });
-      setMarketTargetsDiffPreview(diff);
-      setMarketTargetsPreview(diff.draft);
-      setMarketTempTargetsLoading(true);
-      const temp = await window.mytrader.market.listTempTargets();
-      setMarketTempTargets(temp);
-      setMarketManualSymbolPreview({
-        addable: [],
-        existing: [],
-        invalid: [],
-        duplicates: 0
-      });
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    } finally {
-      setMarketTempTargetsLoading(false);
-      setMarketTargetsLoading(false);
-    }
-  }, []);
+  const {
+    refreshMarketWatchlist,
+    refreshMarketTags,
+    refreshManualThemeOptions,
+    resetMarketFilters,
+    loadMarketQuotes,
+    refreshMarketTargets,
+    refreshMarketTargetsDiff
+  } = useDashboardMarketDataLoaders({
+    marketTargetsConfig,
+    toUserErrorMessage,
+    setError,
+    setMarketWatchlistLoading,
+    setMarketWatchlistItems,
+    setMarketTagsLoading,
+    setMarketTags,
+    setMarketManualThemeLoading,
+    setMarketManualThemeOptions,
+    setMarketManualThemeDraft,
+    setMarketFilterMarket,
+    setMarketFilterAssetClasses,
+    setMarketFilterKinds,
+    setMarketQuotesLoading,
+    setMarketQuotesBySymbol,
+    setMarketTargetsLoading,
+    setMarketTargetsSavedConfig,
+    setMarketTargetsConfig,
+    setMarketTargetsDiffPreview,
+    setMarketTargetsPreview,
+    setMarketTempTargetsLoading,
+    setMarketTempTargets,
+    setMarketManualSymbolPreview
+  });
 
   const refreshMarketTargetPoolStats = useDashboardMarketTargetPoolStats({
     marketFocusTargetSymbols,
@@ -2741,19 +2660,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     },
     [marketTargetsTagDraft]
   );
-
-  const refreshMarketTargetsDiff = useCallback(async () => {
-    if (!window.mytrader) return;
-    try {
-      const diff = await window.mytrader.market.previewTargetsDraft({
-        config: marketTargetsConfig
-      });
-      setMarketTargetsDiffPreview(diff);
-      setMarketTargetsPreview(diff.draft);
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-    }
-  }, [marketTargetsConfig]);
 
   const {
     handlePreviewManualTargetSymbols,
