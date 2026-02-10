@@ -9,7 +9,6 @@ import {
 import type {
   AssetClass,
   CorporateActionKind,
-  CreateLedgerEntryInput,
   LedgerEntry,
   LedgerEventType,
   LedgerSide,
@@ -86,7 +85,6 @@ import {
   formatAssetClassLabel,
   formatRiskLimitTypeLabel,
   formatLedgerEventType,
-  isCorporateActionMeta,
   formatDateTime,
   formatDurationMs,
   formatMarketTokenSource,
@@ -102,7 +100,6 @@ import {
   isSameSchedulerConfig,
   isSameUniversePoolConfig,
   isSameTargetsConfig,
-  formatDateTimeInput,
   sanitizeToastMessage,
   toUserErrorMessage,
   formatInputDate,
@@ -111,13 +108,6 @@ import {
   formatThemeLabel,
   computeFifoUnitCost,
   resolveMarketChartDateRange,
-  loadStoredRates,
-  deriveRateValue,
-  parseOptionalNumberInput,
-  parseOptionalIntegerInput,
-  formatCorporateAfterShares,
-  parseCorporateAfterShares,
-  parseOptionalDateTimeInput,
   createEmptyLedgerForm,
   DescriptionItem,
   PerformanceChart,
@@ -146,6 +136,7 @@ import { useDashboardMarketTargetActions } from "./hooks/use-dashboard-market-ta
 import { useDashboardMarketTargetPoolStats } from "./hooks/use-dashboard-market-target-pool-stats";
 import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data-loaders";
 import { useDashboardPortfolioActions } from "./hooks/use-dashboard-portfolio-actions";
+import { useDashboardLedgerActions } from "./hooks/use-dashboard-ledger-actions";
 import {
   useDashboardPortfolio
 } from "./hooks/use-dashboard-portfolio";
@@ -1871,361 +1862,35 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setRiskForm
   });
 
-  const updateLedgerForm = useCallback((patch: Partial<LedgerFormState>) => {
-    setLedgerForm((prev) => ({ ...prev, ...patch }));
-  }, []);
-
-  const handleOpenLedgerForm = useCallback(() => {
-    if (!activePortfolio) return;
-    setLedgerForm(createEmptyLedgerForm(activePortfolio.baseCurrency));
-    setIsLedgerFormOpen(true);
-  }, [activePortfolio]);
-
-  const handleEditLedgerEntry = useCallback((entry: LedgerEntry) => {
-    const storedRates = loadStoredRates(entry.eventType);
-    const derivedFeeRate = deriveRateValue(entry.fee, entry.quantity, entry.price);
-    const derivedTaxRate = deriveRateValue(entry.tax, entry.quantity, entry.price);
-    const isDividendEntry = entry.eventType === "dividend";
-    const corporateMeta = isCorporateActionMeta(entry.meta) ? entry.meta : null;
-    const corporateAfterShares =
-      !isDividendEntry && corporateMeta && corporateMeta.kind !== "info"
-        ? formatCorporateAfterShares(corporateMeta.numerator, corporateMeta.denominator)
-        : "";
-    setLedgerForm({
-      id: entry.id,
-      eventType: isDividendEntry ? "corporate_action" : entry.eventType,
-      tradeDate: entry.tradeDate,
-      eventTime: formatDateTimeInput(entry.eventTs),
-      sequence: entry.sequence?.toString() ?? "",
-      accountKey: entry.accountKey ?? "",
-      instrumentId: entry.instrumentId ?? "",
-      symbol: entry.symbol ?? "",
-      side: entry.side ?? "",
-      quantity: entry.quantity?.toString() ?? "",
-      price: entry.price?.toString() ?? "",
-      priceCurrency: entry.priceCurrency ?? "",
-      cashAmount: entry.cashAmount?.toString() ?? "",
-      cashCurrency: entry.cashCurrency ?? "",
-      fee: entry.fee?.toString() ?? "",
-      tax: entry.tax?.toString() ?? "",
-      feeRate: derivedFeeRate || storedRates.feeRate,
-      taxRate: derivedTaxRate || storedRates.taxRate,
-      cashAmountAuto: entry.cashAmount === null,
-      note: entry.note ?? "",
-      source: entry.source,
-      externalId: entry.externalId ?? "",
-      corporateKind: isDividendEntry ? "dividend" : corporateMeta?.kind ?? "split",
-      corporateAfterShares
-    });
-    setIsLedgerFormOpen(true);
-  }, []);
-
-  const handleCancelLedgerEdit = useCallback(() => {
-    setLedgerForm(createEmptyLedgerForm(activePortfolio?.baseCurrency ?? "CNY"));
-    setIsLedgerFormOpen(false);
-  }, [activePortfolio]);
-
-  const handleSubmitLedgerEntry = useCallback(async () => {
-    if (!window.mytrader || !activePortfolio) return;
-    setError(null);
-    setNotice(null);
-
-    const tradeDate = ledgerForm.tradeDate.trim();
-    if (!tradeDate) {
-      setError("请输入交易日期。");
-      return;
-    }
-
-    const eventType = ledgerForm.eventType;
-    const isCorporateDividend =
-      eventType === "corporate_action" && ledgerForm.corporateKind === "dividend";
-    const effectiveEventType: LedgerEventType = isCorporateDividend
-      ? "dividend"
-      : eventType;
-    const symbol = ledgerForm.symbol.trim();
-    const instrumentId = ledgerForm.instrumentId.trim();
-    const side = ledgerForm.side || null;
-    const cashCurrency = ledgerForm.cashCurrency.trim();
-    const priceCurrency = ledgerForm.priceCurrency.trim();
-    const autoFeeTaxEnabled = effectiveEventType === "trade";
-    const normalizedCurrency =
-      effectiveEventType === "trade"
-        ? priceCurrency || cashCurrency || activePortfolio.baseCurrency
-        : cashCurrency || activePortfolio.baseCurrency;
-    const normalizedPriceCurrency =
-      effectiveEventType === "trade" ? normalizedCurrency : priceCurrency;
-    const normalizedCashCurrency =
-      effectiveEventType === "trade" ? normalizedCurrency : cashCurrency;
-
-    let eventTs: number | null;
-    let sequence: number | null;
-    let quantity: number | null;
-    let price: number | null;
-    let cashAmount: number | null;
-    let fee: number | null;
-    let tax: number | null;
-    let feeRate: number | null = null;
-    let taxRate: number | null = null;
-
-    try {
-      eventTs = parseOptionalDateTimeInput(ledgerForm.eventTime, "事件时间");
-      sequence = parseOptionalIntegerInput(ledgerForm.sequence, "排序序号");
-      quantity = parseOptionalNumberInput(ledgerForm.quantity, "数量");
-      price = parseOptionalNumberInput(ledgerForm.price, "价格");
-      cashAmount = parseOptionalNumberInput(ledgerForm.cashAmount, "现金腿");
-      fee = parseOptionalNumberInput(ledgerForm.fee, "费用");
-      tax = parseOptionalNumberInput(ledgerForm.tax, "税费");
-      if (autoFeeTaxEnabled) {
-        feeRate = parseOptionalNumberInput(ledgerForm.feeRate, "费用费率");
-        taxRate = parseOptionalNumberInput(ledgerForm.taxRate, "税费率");
-      }
-    } catch (err) {
-      setError(toUserErrorMessage(err));
-      return;
-    }
-
-    if (eventTs !== null && eventTs <= 0) {
-      setError("事件时间格式不正确。");
-      return;
-    }
-    if (sequence !== null && sequence < 0) {
-      setError("排序序号不能为负数。");
-      return;
-    }
-    if (quantity !== null && quantity < 0) {
-      setError("数量不能为负数。");
-      return;
-    }
-    if (price !== null && price < 0) {
-      setError("价格不能为负数。");
-      return;
-    }
-    if (fee !== null && fee < 0) {
-      setError("费用必须为非负数。");
-      return;
-    }
-    if (tax !== null && tax < 0) {
-      setError("税费必须为非负数。");
-      return;
-    }
-    if (autoFeeTaxEnabled) {
-      if (feeRate === null || taxRate === null) {
-        setError("请填写费用费率与税费率。");
-        return;
-      }
-      if (feeRate < 0 || taxRate < 0) {
-        setError("费率与税率不能为负数。");
-        return;
-      }
-      if (quantity === null || price === null || quantity <= 0 || price < 0) {
-        setError("自动计算费用/税费需要填写有效的数量与价格。");
-        return;
-      }
-      const baseAmount = quantity * price;
-      if (!Number.isFinite(baseAmount)) {
-        setError("自动计算费用/税费需要有效的数量与价格。");
-        return;
-      }
-      fee = Number((baseAmount * (feeRate / 100)).toFixed(2));
-      tax = Number((baseAmount * (taxRate / 100)).toFixed(2));
-    }
-
-    if (
-      ["trade", "dividend", "adjustment", "corporate_action"].includes(effectiveEventType) &&
-      !symbol &&
-      !instrumentId
-    ) {
-      setError("请输入代码或 instrumentId。");
-      return;
-    }
-
-    if ((ledgerForm.source === "csv" || ledgerForm.source === "broker_import") && sequence === null) {
-      setError("文件/券商导入需要填写排序序号。");
-      return;
-    }
-
-    if (effectiveEventType === "trade") {
-      if (!side) {
-        setError("交易需要填写方向。");
-        return;
-      }
-      if (!quantity || quantity <= 0) {
-        setError("交易数量必须大于 0。");
-        return;
-      }
-      if (price === null) {
-        setError("交易需要填写价格。");
-        return;
-      }
-      if (cashAmount === null || cashAmount === 0) {
-        setError("交易需要填写现金腿金额。");
-        return;
-      }
-      if (side === "buy" && cashAmount > 0) {
-        setError("买入交易现金腿必须为负数。");
-        return;
-      }
-      if (side === "sell" && cashAmount < 0) {
-        setError("卖出交易现金腿必须为正数。");
-        return;
-      }
-    }
-
-    if (effectiveEventType === "cash") {
-      if (cashAmount === null || cashAmount === 0) {
-        setError("现金流需要填写金额。");
-        return;
-      }
-      if (!normalizedCashCurrency) {
-        setError("现金流需要填写币种。");
-        return;
-      }
-    }
-
-    if (effectiveEventType === "fee" || effectiveEventType === "tax") {
-      if (cashAmount === null || cashAmount >= 0) {
-        setError(`${formatLedgerEventType(effectiveEventType)} 需要填写负数金额。`);
-        return;
-      }
-      if (!normalizedCashCurrency) {
-        setError(`${formatLedgerEventType(effectiveEventType)} 需要填写币种。`);
-        return;
-      }
-    }
-
-    if (effectiveEventType === "dividend") {
-      if (cashAmount === null || cashAmount <= 0) {
-        setError("分红需要填写正数金额。");
-        return;
-      }
-      if (!normalizedCashCurrency) {
-        setError("分红需要填写币种。");
-        return;
-      }
-    }
-
-    if (effectiveEventType === "adjustment") {
-      if (!side) {
-        setError("持仓调整需要填写方向。");
-        return;
-      }
-      if (!quantity || quantity <= 0) {
-        setError("持仓调整数量必须大于 0。");
-        return;
-      }
-    }
-
-    let meta: CreateLedgerEntryInput["meta"] = null;
-    if (eventType === "corporate_action" && !isCorporateDividend) {
-      if (ledgerForm.corporateKind === "info") {
-        setError("公司行为不支持信息类型。");
-        return;
-      }
-      let ratio: { numerator: number; denominator: number };
-      try {
-        ratio = parseCorporateAfterShares(ledgerForm.corporateAfterShares);
-      } catch (err) {
-        setError(toUserErrorMessage(err));
-        return;
-      }
-      meta = {
-        kind: ledgerForm.corporateKind,
-        numerator: ratio.numerator,
-        denominator: ratio.denominator
-      };
-    }
-
-    const payloadEventType = isCorporateDividend ? "dividend" : eventType;
-    const payload: CreateLedgerEntryInput = {
-      portfolioId: activePortfolio.id,
-      accountKey: ledgerForm.accountKey.trim() || null,
-      eventType: payloadEventType,
-      tradeDate,
-      eventTs,
-      sequence,
-      instrumentId: instrumentId || null,
-      symbol: symbol || null,
-      side,
-      quantity,
-      price,
-      priceCurrency: normalizedPriceCurrency || null,
-      cashAmount,
-      cashCurrency: normalizedCashCurrency || null,
-      fee,
-      tax,
-      note: ledgerForm.note.trim() || null,
-      source: ledgerForm.source,
-      externalId: ledgerForm.externalId.trim() || null,
-      meta
-    };
-
-    if (ledgerForm.id) {
-      await window.mytrader.ledger.update({ ...payload, id: ledgerForm.id });
-      setNotice("流水已更新。");
-    } else {
-      await window.mytrader.ledger.create(payload);
-      setNotice("流水已新增。");
-    }
-
-    setLedgerForm(createEmptyLedgerForm(activePortfolio.baseCurrency));
-    setIsLedgerFormOpen(false);
-    await loadLedgerEntries(activePortfolio.id);
-    await loadSnapshot(activePortfolio.id);
-  }, [activePortfolio, ledgerForm, loadLedgerEntries, loadSnapshot]);
-
-  const handleRequestDeleteLedgerEntry = useCallback((entry: LedgerEntry) => {
-    setLedgerDeleteTarget(entry);
-  }, []);
-
-  const handleConfirmDeleteLedgerEntry = useCallback(async () => {
-    if (!window.mytrader || !activePortfolio || !ledgerDeleteTarget) return;
-    setError(null);
-    setNotice(null);
-    const entryId = ledgerDeleteTarget.id;
-    setLedgerDeleteTarget(null);
-    await window.mytrader.ledger.remove(entryId);
-    await loadLedgerEntries(activePortfolio.id);
-    await loadSnapshot(activePortfolio.id);
-    setNotice("流水已删除。");
-  }, [activePortfolio, ledgerDeleteTarget, loadLedgerEntries, loadSnapshot]);
-
-  const handleCancelDeleteLedgerEntry = useCallback(() => {
-    setLedgerDeleteTarget(null);
-  }, []);
-
-  const handleChooseCsv = useCallback(async (kind: "holdings" | "prices") => {
-    if (!window.mytrader) return;
-    setError(null);
-    const selected = await window.mytrader.market.chooseCsvFile(kind);
-    if (kind === "holdings") setHoldingsCsvPath(selected);
-    else setPricesCsvPath(selected);
-  }, []);
-
-  const handleImportHoldings = useCallback(async () => {
-    if (!window.mytrader || !activePortfolio || !holdingsCsvPath) return;
-    setError(null);
-    setNotice(null);
-    const result = await window.mytrader.market.importHoldingsCsv({
-      portfolioId: activePortfolio.id,
-      filePath: holdingsCsvPath
-    });
-    await loadSnapshot(activePortfolio.id);
-    setNotice(
-      `持仓导入：新增 ${result.inserted}，更新 ${result.updated}，跳过 ${result.skipped}。`
-    );
-  }, [activePortfolio, holdingsCsvPath, loadSnapshot]);
-
-  const handleImportPrices = useCallback(async () => {
-    if (!window.mytrader || !pricesCsvPath) return;
-    setError(null);
-    setNotice(null);
-    const result = await window.mytrader.market.importPricesCsv({
-      filePath: pricesCsvPath,
-      source: "csv"
-    });
-    if (activePortfolio) await loadSnapshot(activePortfolio.id);
-    setNotice(`行情导入：新增 ${result.inserted} 条，跳过 ${result.skipped} 条。`);
-  }, [pricesCsvPath, activePortfolio, loadSnapshot]);
+  const {
+    updateLedgerForm,
+    handleOpenLedgerForm,
+    handleEditLedgerEntry,
+    handleCancelLedgerEdit,
+    handleSubmitLedgerEntry,
+    handleRequestDeleteLedgerEntry,
+    handleConfirmDeleteLedgerEntry,
+    handleCancelDeleteLedgerEntry,
+    handleChooseCsv,
+    handleImportHoldings,
+    handleImportPrices
+  } = useDashboardLedgerActions({
+    activePortfolio,
+    ledgerForm,
+    ledgerDeleteTarget,
+    holdingsCsvPath,
+    pricesCsvPath,
+    toUserErrorMessage,
+    loadLedgerEntries,
+    loadSnapshot,
+    setError,
+    setNotice,
+    setLedgerForm,
+    setIsLedgerFormOpen,
+    setLedgerDeleteTarget,
+    setHoldingsCsvPath,
+    setPricesCsvPath
+  });
 
   const {
     refreshMarketWatchlist,
