@@ -73,6 +73,9 @@
   - `DashboardContainer.tsx` 继续下降到 `2522` 行；新增 hooks 行数：`use-dashboard-market-resize.ts` `211` 行、`use-dashboard-ui-effects.ts` `63` 行。
   - 新增 `hooks/use-dashboard-market-target-pool-detail.ts`，承接 target-pool detail 计算与交互（metric cards、detail rows、member filter、category 同步、副作用与 section toggle）。
   - `DashboardContainer.tsx` 继续下降到 `2324` 行；新增 hook 行数：`use-dashboard-market-target-pool-detail.ts` `312` 行。
+  - 新增 `hooks/use-dashboard-market-derived.ts`，承接 market 视图衍生计算（symbol/meta 过滤、scope/symbol 集合、tag series 统计、主图 range summary、持仓成本与目标价）。
+  - 新增 `hooks/use-dashboard-analysis-derived.ts`，承接 analysis instrument 衍生计算（symbol-name map、quick symbols、range summary、持仓成本、目标价、tone）。
+  - `DashboardContainer.tsx` 继续下降到 `1995` 行；新增 hooks 行数：`use-dashboard-market-derived.ts` `381` 行、`use-dashboard-analysis-derived.ts` `172` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -124,7 +127,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `2324` 行，仍明显偏大；后续需继续将 market/analysis 领域衍生 view-model 与超大视图透传对象下沉（尤其是 `MarketView`、`OtherView`、`PortfolioView`）。
+- `DashboardContainer.tsx` 当前 `1995` 行，仍偏大；后续需继续将 `MarketView`/`OtherView`/`PortfolioView` 的超大 props 对象收敛为分组 view-model，逐步逼近 `<= 800` 目标。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

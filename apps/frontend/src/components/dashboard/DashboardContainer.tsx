@@ -12,7 +12,6 @@ import type {
   LedgerEventType,
   LedgerSide,
   LedgerSource,
-  MarketDailyBar,
   MarketUniversePoolBucketStatus,
   PerformanceRangeKey,
   Portfolio,
@@ -79,7 +78,6 @@ import {
   getCnToneTextClass,
   formatPerformanceMethod,
   formatDateRange,
-  computeTagAggregate,
   sortTagMembersByChangePct,
   formatAssetClassLabel,
   formatRiskLimitTypeLabel,
@@ -103,9 +101,7 @@ import {
   toUserErrorMessage,
   formatInputDate,
   formatCnDate,
-  parseTargetPriceFromTags,
   formatThemeLabel,
-  computeFifoUnitCost,
   resolveMarketChartDateRange,
   createEmptyLedgerForm,
   DescriptionItem,
@@ -123,12 +119,14 @@ import { RiskView } from "./views/RiskView";
 import { SidebarNav } from "./views/SidebarNav";
 import { TopToolbar } from "./views/TopToolbar";
 import { useDashboardAnalysis } from "./hooks/use-dashboard-analysis";
+import { useDashboardAnalysisDerived } from "./hooks/use-dashboard-analysis-derived";
 import { useDashboardAnalysisRuntime } from "./hooks/use-dashboard-analysis-runtime";
 import {
   useDashboardMarket,
   useDashboardMarketManagementActions,
   useDashboardMarketRuntimeEffects
 } from "./hooks/use-dashboard-market";
+import { useDashboardMarketDerived } from "./hooks/use-dashboard-market-derived";
 import { useDashboardMarketInstrumentActions } from "./hooks/use-dashboard-market-instrument-actions";
 import { useDashboardMarketAdminRefresh } from "./hooks/use-dashboard-market-admin-refresh";
 import { useDashboardMarketAdminActions } from "./hooks/use-dashboard-market-admin-actions";
@@ -856,319 +854,72 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     });
   }, [activePortfolio?.id, activePortfolio?.name, onActivePortfolioChange]);
 
-  const marketHoldingsSymbols = useMemo(() => {
-    if (!snapshot) return [];
-    return snapshot.positions
-      .filter((pos) => pos.position.assetClass !== "cash")
-      .map((pos) => pos.position.symbol)
-      .filter(Boolean);
-  }, [snapshot]);
-
-  const marketHoldingsMetaBySymbol = useMemo(() => {
-    const map = new Map<
-      string,
-      { assetClass: AssetClass | null; market: string | null }
-    >();
-    snapshot?.positions.forEach((pos) => {
-      if (pos.position.assetClass === "cash") return;
-      const symbol = pos.position.symbol;
-      if (!symbol) return;
-      map.set(symbol, {
-        assetClass: pos.position.assetClass ?? null,
-        market: pos.position.market ?? null
-      });
-    });
-    return map;
-  }, [snapshot]);
-
-  const marketHoldingsSymbolsFiltered = useMemo(() => {
-    return marketHoldingsSymbols.filter((symbol) => {
-      const meta = marketHoldingsMetaBySymbol.get(symbol) ?? null;
-      if (marketFilterMarket !== "all") {
-        if (!meta?.market || meta.market !== marketFilterMarket) return false;
-      }
-      if (marketFilterAssetClasses.length > 0) {
-        if (!meta?.assetClass) return false;
-        if (!marketFilterAssetClasses.includes(meta.assetClass)) return false;
-      }
-      return true;
-    });
-  }, [
-    marketFilterAssetClasses,
-    marketFilterMarket,
-    marketHoldingsMetaBySymbol,
-    marketHoldingsSymbols
-  ]);
-
-  const marketSelectedQuote = useMemo(() => {
-    if (!marketSelectedSymbol) return null;
-    return marketQuotesBySymbol[marketSelectedSymbol] ?? null;
-  }, [marketQuotesBySymbol, marketSelectedSymbol]);
-
-  const marketBarsByDate = useMemo(() => {
-    const map = new Map<string, MarketDailyBar>();
-    marketChartBars.forEach((bar) => {
-      map.set(bar.date, bar);
-    });
-    return map;
-  }, [marketChartBars]);
-
-  const marketActiveVolume = useMemo(() => {
-    if (!marketChartHoverDate) return null;
-    const bar = marketBarsByDate.get(marketChartHoverDate) ?? null;
-    return bar?.volume ?? null;
-  }, [marketBarsByDate, marketChartHoverDate]);
-
-  const marketActiveMoneyflowVol = useMemo(() => {
-    if (!marketChartHoverDate) return null;
-    const bar = marketBarsByDate.get(marketChartHoverDate) ?? null;
-    const value = bar?.netMfVol ?? null;
-    return value !== null && Number.isFinite(value) ? value : null;
-  }, [marketBarsByDate, marketChartHoverDate]);
-
-  const marketActiveMoneyflowRatio = useMemo(() => {
-    if (!marketChartHoverDate) return null;
-    const bar = marketBarsByDate.get(marketChartHoverDate) ?? null;
-    const volume = bar?.volume ?? null;
-    const mf = bar?.netMfVol ?? null;
-    if (
-      volume === null ||
-      !Number.isFinite(volume) ||
-      volume <= 0 ||
-      mf === null ||
-      !Number.isFinite(mf)
-    ) {
-      return null;
-    }
-    return Math.abs(mf) / volume;
-  }, [marketBarsByDate, marketChartHoverDate]);
-
-  const marketNameBySymbol = useMemo(() => {
-    const map = new Map<string, string>();
-    snapshot?.positions.forEach((pos) => {
-      const symbol = pos.position.symbol;
-      if (symbol) map.set(symbol, pos.position.name ?? symbol);
-    });
-    marketWatchlistItems.forEach((item) => {
-      map.set(item.symbol, item.name ?? item.symbol);
-    });
-    marketSearchResults.forEach((item) => {
-      map.set(item.symbol, item.name ?? item.symbol);
-    });
-    if (marketSelectedProfile) {
-      map.set(
-        marketSelectedProfile.symbol,
-        marketSelectedProfile.name ?? marketSelectedProfile.symbol
-      );
-    }
-    return map;
-  }, [marketSearchResults, marketSelectedProfile, marketWatchlistItems, snapshot]);
-
-  const marketListFilter = marketSearchQuery.trim().toLowerCase();
-  const marketEffectiveScope: MarketScope =
-    marketListFilter.length > 0 ? "search" : marketScope;
-  const marketCollectionSelectValue = useMemo(() => {
-    if (marketScope === "holdings") return "builtin:holdings";
-    if (marketScope === "tags") {
-      if (marketSelectedTag === "watchlist:all") return "builtin:watchlist";
-      if (marketSelectedTag) return `tag:${marketSelectedTag}`;
-    }
-    return "builtin:holdings";
-  }, [marketScope, marketSelectedTag]);
-
-  const marketSearchResultsFiltered = useMemo(() => {
-    return marketSearchResults.filter((item) => {
-      if (marketFilterMarket !== "all") {
-        if (!item.market || item.market !== marketFilterMarket) return false;
-      }
-      if (marketFilterKinds.length > 0) {
-        if (!marketFilterKinds.includes(item.kind)) return false;
-      }
-      if (marketFilterAssetClasses.length > 0) {
-        if (!item.assetClass) return false;
-        if (!marketFilterAssetClasses.includes(item.assetClass)) return false;
-      }
-      return true;
-    });
-  }, [marketFilterAssetClasses, marketFilterKinds, marketFilterMarket, marketSearchResults]);
-
-  const marketSearchResultSymbols = useMemo(
-    () => marketSearchResultsFiltered.map((item) => item.symbol),
-    [marketSearchResultsFiltered]
-  );
-
-  const marketCurrentListSymbols = useMemo(() => {
-    if (marketEffectiveScope === "holdings") return marketHoldingsSymbolsFiltered;
-    if (marketEffectiveScope === "search")
-      return marketSearchResults.map((item) => item.symbol);
-    if (marketEffectiveScope === "tags") return marketSelectedTag ? marketTagMembers : [];
-    return [];
-  }, [
+  const {
+    marketHoldingsSymbols,
     marketHoldingsSymbolsFiltered,
+    marketSelectedQuote,
+    marketActiveVolume,
+    marketActiveMoneyflowVol,
+    marketActiveMoneyflowRatio,
+    marketNameBySymbol,
     marketEffectiveScope,
-    marketSearchResults,
-    marketSelectedTag,
-    marketTagMembers
-  ]);
-
-  const marketFilteredListSymbols = useMemo(() => {
-    if (!marketListFilter || marketEffectiveScope === "search") return marketCurrentListSymbols;
-    return marketCurrentListSymbols.filter((symbol) => {
-      const name = marketNameBySymbol.get(symbol) ?? "";
-      return (
-        symbol.toLowerCase().includes(marketListFilter) ||
-        name.toLowerCase().includes(marketListFilter)
-      );
-    });
-  }, [marketCurrentListSymbols, marketListFilter, marketNameBySymbol, marketEffectiveScope]);
-
-  const marketSelectedTagAggregate = useMemo(() => {
-    if (!marketSelectedTag) return null;
-    return computeTagAggregate(marketTagMembers, marketQuotesBySymbol);
-  }, [marketQuotesBySymbol, marketSelectedTag, marketTagMembers]);
-
-  const marketSelectedTagSeriesReturnPct = useMemo(() => {
-    const closes = marketTagSeriesBars
-      .map((bar) => bar.close)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    if (closes.length < 2) return null;
-    const first = closes[0];
-    const last = closes[closes.length - 1];
-    if (first === 0) return null;
-    return (last - first) / first;
-  }, [marketTagSeriesBars]);
-
-  const marketSelectedTagSeriesTone = useMemo(() => {
-    return getCnChangeTone(marketSelectedTagSeriesReturnPct);
-  }, [marketSelectedTagSeriesReturnPct]);
-
-  const marketTagSeriesLatestCoverageLabel = useMemo(() => {
-    const points = marketTagSeriesResult?.points ?? [];
-    if (points.length === 0) return "--";
-    const last = points[points.length - 1];
-    return `覆盖 ${last.includedCount}/${last.totalCount}`;
-  }, [marketTagSeriesResult]);
-
-  const marketFiltersActiveCount = useMemo(() => {
-    let count = 0;
-    if (marketFilterMarket !== "all") count += 1;
-    if (marketFilterAssetClasses.length > 0) count += 1;
-    if (marketFilterKinds.length > 0) count += 1;
-    return count;
-  }, [marketFilterAssetClasses, marketFilterKinds, marketFilterMarket]);
-
-  const marketLatestBar = useMemo(() => {
-    for (let idx = marketChartBars.length - 1; idx >= 0; idx -= 1) {
-      const bar = marketChartBars[idx];
-      if (bar.close !== null) return bar;
-    }
-    return null;
-  }, [marketChartBars]);
-
-  const marketChartHasEnoughData = useMemo(() => {
-    let count = 0;
-    for (const bar of marketChartBars) {
-      const close = bar.close;
-      if (close !== null && Number.isFinite(close)) count += 1;
-      if (count >= 2) return true;
-    }
-    return false;
-  }, [marketChartBars]);
-
-  const marketRangeSummary = useMemo(() => {
-    const closes = marketChartBars
-      .map((bar) => bar.close)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    const highs = marketChartBars
-      .map((bar) => bar.high)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    const lows = marketChartBars
-      .map((bar) => bar.low)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    const volumes = marketChartBars
-      .map((bar) => bar.volume)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-
-    const firstClose = closes.length > 0 ? closes[0] : null;
-    const lastClose = closes.length > 0 ? closes[closes.length - 1] : null;
-    const rangeReturn =
-      firstClose !== null && lastClose !== null && firstClose !== 0
-        ? (lastClose - firstClose) / firstClose
-        : null;
-
-    const rangeHigh = highs.length > 0 ? Math.max(...highs) : null;
-    const rangeLow = lows.length > 0 ? Math.min(...lows) : null;
-    const avgVolume =
-      volumes.length > 0
-        ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length
-        : null;
-
-    return { rangeHigh, rangeLow, avgVolume, rangeReturn };
-  }, [marketChartBars]);
-
-  const marketSelectedPositionValuation = useMemo(() => {
-    if (!snapshot || !marketSelectedSymbol) return null;
-    return (
-      snapshot.positions.find((pos) => pos.position.symbol === marketSelectedSymbol) ??
-      null
-    );
-  }, [marketSelectedSymbol, snapshot]);
-
-  const marketHoldingUnitCost = useMemo(() => {
-    if (!marketSelectedSymbol) return null;
-    const position = marketSelectedPositionValuation?.position ?? null;
-    if (!position || position.quantity <= 0) return null;
-
-    const direct = position.cost;
-    if (direct !== null && Number.isFinite(direct) && direct > 0) return direct;
-
-    const fifo = computeFifoUnitCost(ledgerEntries, marketSelectedSymbol);
-    if (fifo !== null && Number.isFinite(fifo) && fifo > 0) return fifo;
-    return null;
-  }, [ledgerEntries, marketSelectedPositionValuation, marketSelectedSymbol]);
-
-  const marketTargetPrice = useMemo(() => {
-    return parseTargetPriceFromTags(marketSelectedUserTags);
-  }, [marketSelectedUserTags]);
-
-  const analysisInstrumentNameBySymbol = useMemo(() => {
-    const map = new Map<string, string>();
-    snapshot?.positions.forEach((pos) => {
-      const symbol = pos.position.symbol;
-      if (symbol) map.set(symbol, pos.position.name ?? symbol);
-    });
-    marketWatchlistItems.forEach((item) => {
-      map.set(item.symbol, item.name ?? item.symbol);
-    });
-    analysisInstrumentSearchResults.forEach((item) => {
-      map.set(item.symbol, item.name ?? item.symbol);
-    });
-    if (analysisInstrumentProfile) {
-      map.set(
-        analysisInstrumentProfile.symbol,
-        analysisInstrumentProfile.name ?? analysisInstrumentProfile.symbol
-      );
-    }
-    return map;
-  }, [
-    analysisInstrumentProfile,
-    analysisInstrumentSearchResults,
+    marketCollectionSelectValue,
+    marketSearchResultsFiltered,
+    marketSearchResultSymbols,
+    marketFilteredListSymbols,
+    marketSelectedTagAggregate,
+    marketSelectedTagSeriesReturnPct,
+    marketSelectedTagSeriesTone,
+    marketTagSeriesLatestCoverageLabel,
+    marketFiltersActiveCount,
+    marketLatestBar,
+    marketChartHasEnoughData,
+    marketRangeSummary,
+    marketHoldingUnitCost,
+    marketTargetPrice
+  } = useDashboardMarketDerived({
+    snapshot,
+    marketFilterMarket,
+    marketFilterAssetClasses,
+    marketFilterKinds,
+    marketSelectedSymbol,
+    marketQuotesBySymbol,
+    marketChartBars,
+    marketChartHoverDate,
     marketWatchlistItems,
-    snapshot
-  ]);
+    marketSearchResults,
+    marketSelectedProfile,
+    marketSearchQuery,
+    marketScope,
+    marketSelectedTag,
+    marketTagMembers,
+    marketTagSeriesBars,
+    marketTagSeriesResult,
+    marketSelectedUserTags,
+    ledgerEntries
+  });
 
-  const analysisInstrumentQuickSymbols = useMemo(() => {
-    const set = new Set<string>();
-    snapshot?.positions.forEach((pos) => {
-      if (pos.position.assetClass === "cash") return;
-      if (!pos.position.symbol) return;
-      set.add(pos.position.symbol);
-    });
-    marketWatchlistItems.forEach((item) => {
-      if (item.symbol) set.add(item.symbol);
-    });
-    return Array.from(set).slice(0, 16);
-  }, [marketWatchlistItems, snapshot]);
+  const {
+    analysisInstrumentNameBySymbol,
+    analysisInstrumentQuickSymbols,
+    analysisInstrumentLatestBar,
+    analysisInstrumentHasEnoughData,
+    analysisInstrumentRangeSummary,
+    analysisInstrumentPositionValuation,
+    analysisInstrumentHoldingUnitCost,
+    analysisInstrumentTargetPrice,
+    analysisInstrumentTone
+  } = useDashboardAnalysisDerived({
+    snapshot,
+    marketWatchlistItems,
+    analysisInstrumentSearchResults,
+    analysisInstrumentProfile,
+    analysisInstrumentBars,
+    analysisInstrumentSymbol,
+    ledgerEntries,
+    analysisInstrumentUserTags,
+    analysisInstrumentQuote
+  });
 
   const { loadAnalysisInstrument } = useDashboardAnalysisRuntime({
     activeView,
@@ -1191,86 +942,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setAnalysisInstrumentQuote,
     setAnalysisInstrumentBars
   });
-
-  const analysisInstrumentLatestBar = useMemo(() => {
-    for (let idx = analysisInstrumentBars.length - 1; idx >= 0; idx -= 1) {
-      const bar = analysisInstrumentBars[idx];
-      if (bar.close !== null) return bar;
-    }
-    return null;
-  }, [analysisInstrumentBars]);
-
-  const analysisInstrumentHasEnoughData = useMemo(() => {
-    let count = 0;
-    for (const bar of analysisInstrumentBars) {
-      if (bar.close !== null && Number.isFinite(bar.close)) {
-        count += 1;
-      }
-      if (count >= 2) return true;
-    }
-    return false;
-  }, [analysisInstrumentBars]);
-
-  const analysisInstrumentRangeSummary = useMemo(() => {
-    const closes = analysisInstrumentBars
-      .map((bar) => bar.close)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    const highs = analysisInstrumentBars
-      .map((bar) => bar.high)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    const lows = analysisInstrumentBars
-      .map((bar) => bar.low)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    const volumes = analysisInstrumentBars
-      .map((bar) => bar.volume)
-      .filter((value): value is number => value !== null && Number.isFinite(value));
-    const firstClose = closes.length > 0 ? closes[0] : null;
-    const lastClose = closes.length > 0 ? closes[closes.length - 1] : null;
-    const rangeReturn =
-      firstClose !== null && lastClose !== null && firstClose !== 0
-        ? (lastClose - firstClose) / firstClose
-        : null;
-    const rangeHigh = highs.length > 0 ? Math.max(...highs) : null;
-    const rangeLow = lows.length > 0 ? Math.min(...lows) : null;
-    const avgVolume =
-      volumes.length > 0
-        ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length
-        : null;
-    const startDate = analysisInstrumentBars[0]?.date ?? null;
-    const endDate = analysisInstrumentBars[analysisInstrumentBars.length - 1]?.date ?? null;
-    return { rangeHigh, rangeLow, avgVolume, rangeReturn, startDate, endDate };
-  }, [analysisInstrumentBars]);
-
-  const analysisInstrumentPositionValuation = useMemo(() => {
-    if (!snapshot || !analysisInstrumentSymbol) return null;
-    return (
-      snapshot.positions.find((pos) => pos.position.symbol === analysisInstrumentSymbol) ??
-      null
-    );
-  }, [analysisInstrumentSymbol, snapshot]);
-
-  const analysisInstrumentHoldingUnitCost = useMemo(() => {
-    if (!analysisInstrumentSymbol) return null;
-    const position = analysisInstrumentPositionValuation?.position ?? null;
-    if (!position || position.quantity <= 0) return null;
-
-    const direct = position.cost;
-    if (direct !== null && Number.isFinite(direct) && direct > 0) return direct;
-
-    const fifo = computeFifoUnitCost(ledgerEntries, analysisInstrumentSymbol);
-    if (fifo !== null && Number.isFinite(fifo) && fifo > 0) return fifo;
-    return null;
-  }, [analysisInstrumentPositionValuation, analysisInstrumentSymbol, ledgerEntries]);
-
-  const analysisInstrumentTargetPrice = useMemo(() => {
-    return parseTargetPriceFromTags(analysisInstrumentUserTags);
-  }, [analysisInstrumentUserTags]);
-
-  const analysisInstrumentTone = useMemo(() => {
-    return getCnChangeTone(
-      analysisInstrumentQuote?.changePct ?? analysisInstrumentRangeSummary.rangeReturn
-    );
-  }, [analysisInstrumentQuote?.changePct, analysisInstrumentRangeSummary.rangeReturn]);
 
   const cashTotal = useMemo(() => {
     if (!snapshot) return 0;
