@@ -384,10 +384,6 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   const analysisInstrumentSearchRequestIdRef = useRef(0);
   const analysisInstrumentLoadRequestIdRef = useRef(0);
 
-  const marketDataManagementPrevViewRef = useRef(activeView);
-  const marketDataManagementPrevOtherTabRef = useRef(otherTab);
-  const marketDataManagementNavigationGuardRef = useRef(false);
-
   const {
     marketCatalogSyncing,
     setMarketCatalogSyncing,
@@ -3793,146 +3789,10 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     []
   );
 
-  useEffect(() => {
-    if (activeView !== "other") return;
-    if (!window.mytrader) return;
-
-    if (otherTab === "data-management") {
-      refreshMarketTokenStatus().catch(() => undefined);
-      refreshMarketTargets().catch(() => undefined);
-      refreshMarketIngestRuns().catch(() => undefined);
-      refreshMarketIngestControl().catch(() => undefined);
-      refreshMarketSchedulerConfig().catch(() => undefined);
-      refreshMarketUniversePool().catch(() => undefined);
-      if (marketRegistryEntryEnabled) {
-        refreshMarketRegistry().catch(() => undefined);
-      }
-      return;
-    }
-
-    if (otherTab === "instrument-management") {
-      refreshMarketTargets().catch(() => undefined);
-      refreshMarketTags(marketTagManagementQuery).catch(() => undefined);
-      return;
-    }
-
-    if (otherTab === "data-status") {
-      refreshMarketTokenStatus().catch(() => undefined);
-      refreshMarketIngestRuns().catch(() => undefined);
-      refreshMarketIngestControl().catch(() => undefined);
-    }
-  }, [
-    activeView,
-    otherTab,
-    refreshMarketIngestControl,
-    refreshMarketIngestRuns,
-    refreshMarketRegistry,
-    refreshMarketSchedulerConfig,
-    refreshMarketUniversePool,
-    refreshMarketTags,
-    marketTagManagementQuery,
-    marketRegistryEntryEnabled,
-    refreshMarketTargets,
-    refreshMarketTokenStatus
-  ]);
-
-  useEffect(() => {
-    if (activeView !== "other" || otherTab !== "data-management") return;
-    if (!window.mytrader) return;
-    const timer = window.setTimeout(() => {
-      refreshMarketTargetsDiff().catch(() => undefined);
-    }, 220);
-    return () => window.clearTimeout(timer);
-  }, [activeView, otherTab, marketTargetsConfig, refreshMarketTargetsDiff]);
-
-  useEffect(() => {
-    if (activeView !== "other" || otherTab !== "data-management") return;
-    if (!window.mytrader) return;
-    const timer = window.setTimeout(() => {
-      refreshMarketTargetPoolStats().catch(() => undefined);
-    }, 260);
-    return () => window.clearTimeout(timer);
-  }, [
-    activeView,
-    otherTab,
-    marketFocusTargetSymbols,
-    refreshMarketTargetPoolStats
-  ]);
-
-  useEffect(() => {
-    if (activeView !== "other" || otherTab !== "instrument-management") return;
-    if (!window.mytrader) return;
-    const timer = window.setTimeout(() => {
-      refreshMarketTags(marketTagManagementQuery).catch(() => undefined);
-    }, 220);
-    return () => window.clearTimeout(timer);
-  }, [activeView, otherTab, marketTagManagementQuery, refreshMarketTags]);
-
-  useEffect(() => {
-    if (activeView !== "other" || otherTab !== "data-management") return;
-    if (!marketRegistryEntryEnabled) return;
-    if (!window.mytrader) return;
-    const timer = window.setTimeout(() => {
-      refreshMarketRegistry().catch(() => undefined);
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [
-    activeView,
-    otherTab,
-    marketRegistryEntryEnabled,
-    marketRegistryAutoFilter,
-    marketRegistryQuery,
-    refreshMarketRegistry
-  ]);
-
-  useEffect(() => {
-    if (activeView !== "other") return;
-    if (otherTab !== "data-management" && otherTab !== "data-status") return;
-    if (!window.mytrader) return;
-    const interval = window.setInterval(() => {
-      refreshMarketIngestControl().catch(() => undefined);
-      refreshMarketIngestRuns().catch(() => undefined);
-      if (otherTab === "data-management") {
-        refreshMarketUniversePoolOverview().catch(() => undefined);
-      }
-    }, 8000);
-    return () => window.clearInterval(interval);
-  }, [
-    activeView,
-    otherTab,
-    refreshMarketIngestControl,
-    refreshMarketIngestRuns,
-    refreshMarketUniversePoolOverview
-  ]);
-
-  useEffect(() => {
-    const previousView = marketDataManagementPrevViewRef.current;
-    const previousOtherTab = marketDataManagementPrevOtherTabRef.current;
-    const leftDataManagement =
-      previousView === "other" &&
-      previousOtherTab === "data-management" &&
-      (activeView !== "other" || otherTab !== "data-management");
-
-    marketDataManagementPrevViewRef.current = activeView;
-    marketDataManagementPrevOtherTabRef.current = otherTab;
-
-    if (!leftDataManagement || !marketTargetsDirty) {
-      marketDataManagementNavigationGuardRef.current = false;
-      return;
-    }
-
-    if (marketDataManagementNavigationGuardRef.current) {
-      marketDataManagementNavigationGuardRef.current = false;
-      return;
-    }
-
-    const confirmed = window.confirm("目标池有未保存修改，确定离开吗？");
-    if (confirmed) return;
-
-    marketDataManagementNavigationGuardRef.current = true;
+  const restoreDataManagementView = useCallback(() => {
     setActiveView("other");
     setOtherTab("data-management");
-  }, [activeView, marketTargetsDirty, otherTab]);
+  }, []);
 
   useDashboardMarketRuntimeEffects({
     activeView,
@@ -3949,14 +3809,32 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     marketSelectedSymbol,
     marketSelectedTag,
     marketSearchQuery,
+    marketTagManagementQuery,
     marketWatchlistCount: marketWatchlistItems.length,
     marketInstrumentDetailsOpen,
     marketIngestRuns,
     marketSelectedIngestRunId,
+    marketRegistryEntryEnabled,
+    marketRegistryAutoFilter,
+    marketRegistryQuery,
+    marketTargetsConfig,
+    marketFocusTargetSymbols,
+    marketTargetsDirty,
+    restoreDataManagementView,
     setMarketSelectedIngestRunId,
     setMarketSelectedIngestRun,
     setMarketScope,
     selectDefaultTag: handleSelectTag,
+    refreshMarketTokenStatus,
+    refreshMarketTargets,
+    refreshMarketIngestRuns,
+    refreshMarketIngestControl,
+    refreshMarketSchedulerConfig,
+    refreshMarketUniversePool,
+    refreshMarketRegistry,
+    refreshMarketTargetsDiff,
+    refreshMarketTargetPoolStats,
+    refreshMarketUniversePoolOverview,
     refreshMarketWatchlist,
     refreshMarketTags,
     refreshManualThemeOptions,
