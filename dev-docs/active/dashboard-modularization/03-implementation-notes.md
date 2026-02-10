@@ -76,6 +76,8 @@
   - 新增 `hooks/use-dashboard-market-derived.ts`，承接 market 视图衍生计算（symbol/meta 过滤、scope/symbol 集合、tag series 统计、主图 range summary、持仓成本与目标价）。
   - 新增 `hooks/use-dashboard-analysis-derived.ts`，承接 analysis instrument 衍生计算（symbol-name map、quick symbols、range summary、持仓成本、目标价、tone）。
   - `DashboardContainer.tsx` 继续下降到 `1995` 行；新增 hooks 行数：`use-dashboard-market-derived.ts` `381` 行、`use-dashboard-analysis-derived.ts` `172` 行。
+  - 新增 `hooks/use-dashboard-portfolio-derived.ts`，承接 portfolio/ledger/toast/performance 派生计算（`cashTotal`、`filteredLedgerEntries`、`cashFlowTotals`、`selectedPerformance` 等）。
+  - `DashboardContainer.tsx` 继续下降到 `1939` 行；新增 hook 行数：`use-dashboard-portfolio-derived.ts` `135` 行。
 - 回归结果：
   - `pnpm -C apps/frontend typecheck` ✅
   - `pnpm -C apps/frontend build` ✅
@@ -127,7 +129,7 @@
 
 ## Known issues / follow-ups
 - 后续需重点关注 market 视图拆分时的状态时序一致性。
-- `DashboardContainer.tsx` 当前 `1995` 行，仍偏大；后续需继续将 `MarketView`/`OtherView`/`PortfolioView` 的超大 props 对象收敛为分组 view-model，逐步逼近 `<= 800` 目标。
+- `DashboardContainer.tsx` 当前 `1939` 行，仍偏大；后续需继续将 `MarketView`/`OtherView`/`PortfolioView` 的超大 props 对象收敛为分组 view-model，逐步逼近 `<= 800` 目标。
 
 ## Pitfalls / dead ends (do not repeat)
 - Keep the detailed log in `05-pitfalls.md` (append-only).

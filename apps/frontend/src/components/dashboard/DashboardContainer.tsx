@@ -81,7 +81,6 @@ import {
   sortTagMembersByChangePct,
   formatAssetClassLabel,
   formatRiskLimitTypeLabel,
-  formatLedgerEventType,
   formatDateTime,
   formatDurationMs,
   formatMarketTokenSource,
@@ -97,7 +96,6 @@ import {
   isSameSchedulerConfig,
   isSameUniversePoolConfig,
   isSameTargetsConfig,
-  sanitizeToastMessage,
   toUserErrorMessage,
   formatInputDate,
   formatCnDate,
@@ -137,6 +135,7 @@ import { useDashboardMarketDataLoaders } from "./hooks/use-dashboard-market-data
 import { useDashboardMarketResize } from "./hooks/use-dashboard-market-resize";
 import { useDashboardPortfolioActions } from "./hooks/use-dashboard-portfolio-actions";
 import { useDashboardLedgerActions } from "./hooks/use-dashboard-ledger-actions";
+import { useDashboardPortfolioDerived } from "./hooks/use-dashboard-portfolio-derived";
 import {
   useDashboardPortfolio
 } from "./hooks/use-dashboard-portfolio";
@@ -943,85 +942,30 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setAnalysisInstrumentBars
   });
 
-  const cashTotal = useMemo(() => {
-    if (!snapshot) return 0;
-    return snapshot.positions.reduce((sum, valuation) => {
-      if (valuation.position.assetClass !== "cash") return sum;
-      return sum + (valuation.marketValue ?? valuation.position.quantity);
-    }, 0);
-  }, [snapshot]);
-
-  const performance = performanceResult?.performance ?? null;
-  const performanceSeries = performanceResult?.series ?? null;
-  const performanceAnalysis = performanceResult?.analysis ?? null;
-  const contributionBreakdown = performanceAnalysis?.contributions ?? null;
-  const riskMetrics = performanceAnalysis?.riskMetrics ?? null;
-  const dataQuality = snapshot?.dataQuality ?? null;
-  const hhiValue = useMemo(() => {
-    if (!snapshot) return null;
-    return snapshot.exposures.bySymbol.reduce((sum, entry) => {
-      return sum + entry.weight * entry.weight;
-    }, 0);
-  }, [snapshot]);
-  const filteredLedgerEntries = useMemo(() => {
-    let entries = ledgerEntries;
-    if (ledgerFilter !== "all") {
-      entries = entries.filter((entry) => {
-        if (ledgerFilter === "corporate_action") {
-          return (
-            entry.eventType === "corporate_action" ||
-            entry.eventType === "dividend"
-          );
-        }
-        return entry.eventType === ledgerFilter;
-      });
-    }
-    if (ledgerStartDate) {
-      entries = entries.filter((entry) => entry.tradeDate >= ledgerStartDate);
-    }
-    if (ledgerEndDate) {
-      entries = entries.filter((entry) => entry.tradeDate <= ledgerEndDate);
-    }
-    return entries;
-  }, [ledgerEntries, ledgerFilter, ledgerStartDate, ledgerEndDate]);
-  const cashFlowTotals = useMemo(() => {
-    const totals = new Map<string, number>();
-    filteredLedgerEntries.forEach((entry) => {
-      if (entry.cashAmount === null || !entry.cashCurrency) return;
-      totals.set(
-        entry.cashCurrency,
-        (totals.get(entry.cashCurrency) ?? 0) + entry.cashAmount
-      );
-    });
-    return Array.from(totals.entries()).map(([currency, amount]) => ({
-      currency,
-      amount
-    }));
-  }, [filteredLedgerEntries]);
-
-  const ledgerDeleteSummary = useMemo(() => {
-    if (!ledgerDeleteTarget) return "";
-    const symbolLabel =
-      ledgerDeleteTarget.symbol ??
-      ledgerDeleteTarget.instrumentId ??
-      "\u65e0\u6807\u7684";
-    return `${formatLedgerEventType(ledgerDeleteTarget.eventType)} · ${ledgerDeleteTarget.tradeDate} · ${symbolLabel}`;
-  }, [ledgerDeleteTarget]);
-  const toastMessage = useMemo(() => {
-    if (error) return sanitizeToastMessage(error);
-    return notice ?? "";
-  }, [error, notice]);
-
-  const selectedPerformance = useMemo(() => {
-    if (!performance) return null;
-    if (performance.selectedMethod === "twr") {
-      return performance.twr;
-    }
-    if (performance.selectedMethod === "mwr") {
-      return performance.mwr;
-    }
-    return null;
-  }, [performance]);
+  const {
+    cashTotal,
+    performance,
+    performanceSeries,
+    contributionBreakdown,
+    riskMetrics,
+    dataQuality,
+    hhiValue,
+    filteredLedgerEntries,
+    cashFlowTotals,
+    ledgerDeleteSummary,
+    toastMessage,
+    selectedPerformance
+  } = useDashboardPortfolioDerived({
+    snapshot,
+    performanceResult,
+    ledgerEntries,
+    ledgerFilter,
+    ledgerStartDate,
+    ledgerEndDate,
+    ledgerDeleteTarget,
+    error,
+    notice
+  });
 
   useDashboardUiEffects({
     activeView,
