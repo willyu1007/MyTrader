@@ -14,7 +14,8 @@ type WorkerLike = {
   onerror: ((event: unknown) => void) | null;
   postMessage: (data: unknown, transferList?: ArrayBuffer[]) => void;
   terminate: () => void;
-  addEventListener?: (type: string, listener: (event: { data: unknown }) => void) => void;
+  addEventListener: (type: string, listener: (event: unknown) => void) => void;
+  removeEventListener: (type: string, listener: (event: unknown) => void) => void;
 };
 
 let duckdbModule: DuckdbModule | null = null;
@@ -66,9 +67,30 @@ function createNodeWebWorker(modulePath: string): WorkerLike {
     workerData: { modulePath }
   });
 
+  const messageListeners = new Set<(event: { data: unknown }) => void>();
+  const errorListeners = new Set<(event: unknown) => void>();
+
   const wrapper: WorkerLike = {
     onmessage: null,
     onerror: null,
+    addEventListener(type, listener) {
+      if (type === "message") {
+        messageListeners.add(listener as (event: { data: unknown }) => void);
+        return;
+      }
+      if (type === "error") {
+        errorListeners.add(listener);
+      }
+    },
+    removeEventListener(type, listener) {
+      if (type === "message") {
+        messageListeners.delete(listener as (event: { data: unknown }) => void);
+        return;
+      }
+      if (type === "error") {
+        errorListeners.delete(listener);
+      }
+    },
     postMessage(data, transferList) {
       worker.postMessage(data, transferList as any);
     },
@@ -78,10 +100,17 @@ function createNodeWebWorker(modulePath: string): WorkerLike {
   };
 
   worker.on("message", (data) => {
-    if (typeof wrapper.onmessage === "function") wrapper.onmessage({ data });
+    const event = { data };
+    if (typeof wrapper.onmessage === "function") wrapper.onmessage(event);
+    messageListeners.forEach((listener) => {
+      listener(event);
+    });
   });
   worker.on("error", (error) => {
     if (typeof wrapper.onerror === "function") wrapper.onerror(error);
+    errorListeners.forEach((listener) => {
+      listener(error);
+    });
   });
 
   return wrapper;

@@ -108,6 +108,8 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEST_MODULE_CONNECTIVITY, input),
     listConnectivityTests: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_LIST_CONNECTIVITY_TESTS),
+    runIngestPreflight: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_PREFLIGHT_RUN, input ?? null),
     validateDataSourceReadiness: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_VALIDATE_SOURCE_READINESS, input ?? null),
     openProviderHomepage: (input) =>

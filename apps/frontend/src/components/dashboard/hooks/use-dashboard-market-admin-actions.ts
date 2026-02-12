@@ -195,11 +195,11 @@ export function useDashboardMarketAdminActions(
       options.setNotice(null);
       options.setMarketIngestTriggering(true);
       try {
-        const readiness = await window.mytrader.market.validateDataSourceReadiness({
+        const preflight = await window.mytrader.market.runIngestPreflight({
           scope
         });
-        if (!readiness.ready) {
-          const message = formatReadinessBlockMessage(readiness);
+        if (!preflight.readiness.ready) {
+          const message = formatReadinessBlockMessage(preflight.readiness);
           options.setError(message);
           options.setMarketTriggerIngestBlockedMessage?.(message);
           options.setMarketTriggerIngestBlockedOpen?.(true);

@@ -679,6 +679,10 @@ export interface ValidateDataSourceReadinessInput {
   scope?: "targets" | "universe" | "both" | null;
 }
 
+export interface RunIngestPreflightInput {
+  scope?: "targets" | "universe" | "both" | null;
+}
+
 export type DataSourceReadinessIssueLevel = "error" | "warning";
 
 export interface DataSourceReadinessIssue {
@@ -694,6 +698,16 @@ export interface DataSourceReadinessResult {
   selectedDomains: DataDomainId[];
   selectedModules: { domainId: DataDomainId; moduleId: string }[];
   issues: DataSourceReadinessIssue[];
+  updatedAt: number;
+}
+
+export interface IngestPreflightResult {
+  scope: "targets" | "universe" | "both";
+  selectedDomains: DataDomainId[];
+  selectedModules: Array<{ domainId: DataDomainId; moduleId: string }>;
+  refreshedDomainTests: ConnectivityTestRecord[];
+  refreshedModuleTests: ConnectivityTestRecord[];
+  readiness: DataSourceReadinessResult;
   updatedAt: number;
 }
 
@@ -924,6 +938,9 @@ export interface MyTraderApi {
     testDomainConnectivity(input: TestMarketDomainConnectivityInput): Promise<ConnectivityTestRecord>;
     testModuleConnectivity(input: TestMarketModuleConnectivityInput): Promise<ConnectivityTestRecord>;
     listConnectivityTests(): Promise<ConnectivityTestRecord[]>;
+    runIngestPreflight(
+      input?: RunIngestPreflightInput
+    ): Promise<IngestPreflightResult>;
     validateDataSourceReadiness(
       input?: ValidateDataSourceReadinessInput
     ): Promise<DataSourceReadinessResult>;
@@ -1015,6 +1032,7 @@ export const IPC_CHANNELS = {
   MARKET_TEST_DOMAIN_CONNECTIVITY: "market:dataSource:testDomainConnectivity",
   MARKET_TEST_MODULE_CONNECTIVITY: "market:dataSource:testModuleConnectivity",
   MARKET_LIST_CONNECTIVITY_TESTS: "market:dataSource:listConnectivityTests",
+  MARKET_INGEST_PREFLIGHT_RUN: "market:ingest:preflightRun",
   MARKET_VALIDATE_SOURCE_READINESS: "market:dataSource:validateReadiness",
   MARKET_PROVIDER_OPEN: "market:provider:open",
   MARKET_INGEST_RUNS_LIST: "market:ingestRuns:list",

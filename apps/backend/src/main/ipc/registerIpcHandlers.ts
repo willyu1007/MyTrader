@@ -43,6 +43,7 @@ import type {
   UpdatePositionInput,
   UpdateRiskLimitInput,
   UnlockAccountInput,
+  RunIngestPreflightInput,
   ValidateDataSourceReadinessInput
 } from "@mytrader/shared";
 import { ensureBusinessSchema } from "../storage/businessSchema";
@@ -145,6 +146,7 @@ import { previewTargets, previewTargetsDraft } from "../market/targetsService";
 import { getIngestRunById, listIngestRuns } from "../market/ingestRunsRepository";
 import { getMarketProvider } from "../market/providers";
 import { validateDataSourceReadiness } from "../market/dataSourceReadinessService";
+import { runIngestPreflight } from "../market/ingestPreflightService";
 import {
   listConnectivityTests,
   testDomainConnectivity,
@@ -977,6 +979,17 @@ export async function registerIpcHandlers() {
   });
 
   ipcMain.handle(
+    IPC_CHANNELS.MARKET_INGEST_PREFLIGHT_RUN,
+    async (_event, input: RunIngestPreflightInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await runIngestPreflight({
+        businessDb,
+        scope: input?.scope ?? "both"
+      });
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.MARKET_VALIDATE_SOURCE_READINESS,
     async (_event, input: ValidateDataSourceReadinessInput | null | undefined) => {
       const businessDb = requireActiveBusinessDb();
@@ -1048,18 +1061,9 @@ export async function registerIpcHandlers() {
   );
 
   ipcMain.handle(IPC_CHANNELS.MARKET_INGEST_TRIGGER, async (_event, input) => {
-    const businessDb = requireActiveBusinessDb();
     const scope = input?.scope;
     if (!scope || (scope !== "targets" && scope !== "universe" && scope !== "both")) {
       throw new Error("scope must be targets/universe/both.");
-    }
-
-    const readiness = await validateDataSourceReadiness({
-      businessDb,
-      scope
-    });
-    if (!readiness.ready) {
-      throw new Error(buildReadinessBlockMessage(readiness));
     }
 
     await enqueueManagedIngest({
@@ -1192,17 +1196,6 @@ const PERFORMANCE_RANGES = new Set([
   "YTD",
   "ALL"
 ]);
-
-function buildReadinessBlockMessage(readiness: {
-  issues: Array<{ level: string; message: string }>;
-}): string {
-  const errors = readiness.issues.filter((item) => item.level === "error");
-  if (errors.length === 0) {
-    return "数据来源未就绪。";
-  }
-  const top = errors.slice(0, 8).map((item, index) => `${index + 1}. ${item.message}`);
-  return `数据来源未就绪：\\n${top.join("\\n")}`;
-}
 
 function safeParseJsonObject(value: string): Record<string, unknown> | null {
   try {
