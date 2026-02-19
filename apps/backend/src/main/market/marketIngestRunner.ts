@@ -34,6 +34,7 @@ import {
   getLatestOpenTradeDate,
   listOpenTradeDatesBetween,
   listTradingCalendarDaysBetween,
+  type TradingCalendarDayRow,
   upsertTradingCalendarDays
 } from "./tradingCalendarRepository";
 
@@ -56,6 +57,20 @@ type TargetGapBackfillStats = {
   startDate: string;
   endDate: string;
 };
+
+const EQUITY_CALENDAR_MARKET = "CN_EQ";
+const FALLBACK_EQUITY_CALENDAR_MARKET = "CN";
+const CALENDAR_MARKETS: string[] = [
+  EQUITY_CALENDAR_MARKET,
+  FALLBACK_EQUITY_CALENDAR_MARKET,
+  "SHFE",
+  "DCE",
+  "CZCE",
+  "CFFEX",
+  "INE",
+  "GFEX",
+  "SGE"
+];
 
 export type IngestCheckpointResult = "continue" | "cancel";
 
@@ -114,9 +129,12 @@ export async function runTargetsIngest(input: {
 
       const now = input.now ?? new Date();
       const today = formatDate(now);
-      await ensureTradingCalendar(input.marketDb, token, "CN", today);
+      await ensureTradingCalendars(input.marketDb, token, today);
 
-      const asOfTradeDate = await getLatestOpenTradeDate(input.marketDb, "CN", today);
+      const asOfTradeDate = await getLatestEquityTradeDate(
+        input.marketDb,
+        today
+      );
       if (!asOfTradeDate) {
         throw new Error("无法确定最新交易日（trade_calendar 缺失）。");
       }
@@ -240,9 +258,12 @@ export async function runUniverseIngest(input: {
 
       const now = input.now ?? new Date();
       const today = formatDate(now);
-      await ensureTradingCalendar(input.marketDb, token, "CN", today);
+      await ensureTradingCalendars(input.marketDb, token, today);
 
-      const asOfTradeDate = await getLatestOpenTradeDate(input.marketDb, "CN", today);
+      const asOfTradeDate = await getLatestEquityTradeDate(
+        input.marketDb,
+        today
+      );
       if (!asOfTradeDate) {
         throw new Error("无法确定最新交易日（trade_calendar 缺失）。");
       }
@@ -250,7 +271,7 @@ export async function runUniverseIngest(input: {
       handle = await openAnalysisDuckdb(input.analysisDbPath);
       await ensureAnalysisDuckdbSchema(handle);
 
-      await syncDuckdbTradeCalendar(handle, input.marketDb, "CN", today);
+      await syncDuckdbTradeCalendars(handle, input.marketDb, today);
 
       const dataSourceConfig = await getMarketDataSourceConfig(input.businessDb);
       const selectedBuckets = toLegacyUniversePoolBuckets(dataSourceConfig);
@@ -298,9 +319,8 @@ export async function runUniverseIngest(input: {
 
       const windowStart = formatDate(addDays(parseDate(asOfTradeDate) ?? now, -365 * 3));
       const startDate = await getUniverseCursorDate(handle, windowStart);
-      const tradeDates = await listOpenTradeDatesBetween(
+      const tradeDates = await listEquityOpenTradeDatesBetween(
         input.marketDb,
-        "CN",
         startDate,
         asOfTradeDate
       );
@@ -437,9 +457,8 @@ async function backfillMissingTargetsFromUniverse(input: {
     };
   }
 
-  const tradeDates = await listOpenTradeDatesBetween(
+  const tradeDates = await listEquityOpenTradeDatesBetween(
     input.marketDb,
-    "CN",
     startDate,
     endDate
   );
@@ -486,44 +505,63 @@ async function backfillMissingTargetsFromUniverse(input: {
   };
 }
 
-async function ensureTradingCalendar(
+async function ensureTradingCalendars(
   marketDb: SqliteDatabase,
   token: string,
-  market: string,
   today: string
 ): Promise<void> {
   const provider = getMarketProvider("tushare");
   const start = formatDate(addDays(parseDate(today) ?? new Date(), -365 * 5));
   const end = formatDate(addDays(parseDate(today) ?? new Date(), 40));
+  const rows: Array<{
+    market: string;
+    date: string;
+    isOpen: boolean;
+    source: MarketDataSource;
+  }> = [];
 
-  const days = await provider.fetchTradingCalendar({
-    token,
-    market,
-    startDate: start,
-    endDate: end
-  });
+  for (const market of CALENDAR_MARKETS) {
+    try {
+      const days = await provider.fetchTradingCalendar({
+        token,
+        market,
+        startDate: start,
+        endDate: end
+      });
+      days.forEach((day) => {
+        rows.push({
+          market: day.market,
+          date: day.date,
+          isOpen: day.isOpen,
+          source: day.provider satisfies MarketDataSource
+        });
+      });
+    } catch (error) {
+      console.warn(
+        `[mytrader] trading calendar skipped ${market}: ${toErrorMessage(error)}`
+      );
+    }
+  }
 
-  await upsertTradingCalendarDays(
-    marketDb,
-    days.map((day) => ({
-      market: day.market,
-      date: day.date,
-      isOpen: day.isOpen,
-      source: day.provider satisfies MarketDataSource
-    }))
-  );
+  if (rows.length === 0) return;
+  await upsertTradingCalendarDays(marketDb, rows);
 }
 
-async function syncDuckdbTradeCalendar(
+async function syncDuckdbTradeCalendars(
   analysisHandle: Awaited<ReturnType<typeof openAnalysisDuckdb>>,
   marketDb: SqliteDatabase,
-  market: string,
   today: string
 ): Promise<void> {
   const start = formatDate(addDays(parseDate(today) ?? new Date(), -365 * 5));
   const end = formatDate(addDays(parseDate(today) ?? new Date(), 40));
+  const days: TradingCalendarDayRow[] = [];
+  for (const market of CALENDAR_MARKETS) {
+    const rows = await listTradingCalendarDaysBetween(marketDb, market, start, end);
+    if (rows.length > 0) {
+      days.push(...rows);
+    }
+  }
 
-  const days = await listTradingCalendarDaysBetween(marketDb, market, start, end);
   if (days.length === 0) return;
 
   const conn = await analysisHandle.connect();
@@ -544,6 +582,43 @@ async function syncDuckdbTradeCalendar(
   } finally {
     await conn.close();
   }
+}
+
+async function getLatestEquityTradeDate(
+  marketDb: SqliteDatabase,
+  onOrBeforeDate: string
+): Promise<string | null> {
+  const next = await getLatestOpenTradeDate(
+    marketDb,
+    EQUITY_CALENDAR_MARKET,
+    onOrBeforeDate
+  );
+  if (next) return next;
+  return await getLatestOpenTradeDate(
+    marketDb,
+    FALLBACK_EQUITY_CALENDAR_MARKET,
+    onOrBeforeDate
+  );
+}
+
+async function listEquityOpenTradeDatesBetween(
+  marketDb: SqliteDatabase,
+  startDate: string,
+  endDate: string
+): Promise<string[]> {
+  const dates = await listOpenTradeDatesBetween(
+    marketDb,
+    EQUITY_CALENDAR_MARKET,
+    startDate,
+    endDate
+  );
+  if (dates.length > 0) return dates;
+  return await listOpenTradeDatesBetween(
+    marketDb,
+    FALLBACK_EQUITY_CALENDAR_MARKET,
+    startDate,
+    endDate
+  );
 }
 
 async function syncUniverseInstrumentMeta(

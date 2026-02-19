@@ -26,6 +26,10 @@
 - 2026-02-19: 写入统计口径修正：
   - `materializeTargetsFromSsot` 新增 `insertedRows/updatedRows/missingSymbols` 输出，按主键存在性计算新增/更新。
   - DuckDB upsert 统一返回 inserted/updated 计数，Universe 跑批改为真实 upsert 统计。
+- 2026-02-19: 交易日历 market 口径扩展：
+  - `ensureTradingCalendars` 按 `CN_EQ/CN/SHFE/DCE/CZCE/CFFEX/INE/GFEX/SGE` 批量刷新到 `market-cache`.
+  - Universe 写 DuckDB 日历改为多 market 同步，`trade_calendar` 覆盖交易所口径。
+  - Equity 日期决策改为优先 `CN_EQ`，回退 `CN`，保证旧数据可读。
 - 2026-02-19: 前端数据管理页补齐双池控制面板：
   - 新增“目标任务矩阵（SSOT-first）”面板，支持模块开关、回补窗口、覆盖率预览、状态筛选、手动物化。
   - 启用并接线“全量池配置”面板，恢复 `metal_futures/metal_spot` 的可视化配置入口。

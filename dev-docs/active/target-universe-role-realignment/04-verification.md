@@ -9,3 +9,4 @@
 - 2026-02-19 `pnpm -C apps/backend typecheck` ✅（Target 缺口回补与 upsert 统计口径修正后复验）
 - 2026-02-19 `pnpm -C apps/frontend typecheck` ✅（目标任务矩阵面板与全量池面板接线后复验）
 - 2026-02-19 `pnpm -C packages/shared build` ✅（联调前最终复验）
+- 2026-02-19 `pnpm -C apps/backend typecheck` ✅（trade_calendar 多 market 同步改造后复验）
