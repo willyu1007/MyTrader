@@ -56,6 +56,7 @@ type TargetGapBackfillStats = {
   errors: number;
   startDate: string;
   endDate: string;
+  latencyMs: number;
 };
 
 const EQUITY_CALENDAR_MARKET = "CN_EQ";
@@ -420,6 +421,7 @@ async function backfillMissingTargetsFromUniverse(input: {
   symbols: string[];
   control?: IngestExecutionControl;
 }): Promise<TargetGapBackfillStats> {
+  const startedAt = Date.now();
   const normalizedSymbols = Array.from(
     new Set(input.symbols.map((value) => value.trim()).filter(Boolean))
   );
@@ -453,7 +455,8 @@ async function backfillMissingTargetsFromUniverse(input: {
       updated: 0,
       errors: 0,
       startDate,
-      endDate
+      endDate,
+      latencyMs: Date.now() - startedAt
     };
   }
 
@@ -469,7 +472,8 @@ async function backfillMissingTargetsFromUniverse(input: {
       updated: 0,
       errors: 0,
       startDate,
-      endDate
+      endDate,
+      latencyMs: Date.now() - startedAt
     };
   }
 
@@ -501,7 +505,8 @@ async function backfillMissingTargetsFromUniverse(input: {
     updated: totals.updated,
     errors: totals.errors,
     startDate,
-    endDate
+    endDate,
+    latencyMs: Date.now() - startedAt
   };
 }
 

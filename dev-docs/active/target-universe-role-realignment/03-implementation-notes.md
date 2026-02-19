@@ -23,6 +23,7 @@
   - `runTargetsIngest` 改为两阶段：先 SSOT 物化并记录 missing，再按 `defaultLookbackDays` 定向回补，再二次物化刷新状态。
   - 回补默认窗口读取 `target_task_matrix_config_v1.defaultLookbackDays`（默认 180 天）。
   - `ingest_runs` 的 `errors` 改为不可恢复错误口径；missing 不再直接计入 errors。
+  - run meta 追加 `backfill.latencyMs`，用于追踪首次补齐延迟。
 - 2026-02-19: 写入统计口径修正：
   - `materializeTargetsFromSsot` 新增 `insertedRows/updatedRows/missingSymbols` 输出，按主键存在性计算新增/更新。
   - DuckDB upsert 统一返回 inserted/updated 计数，Universe 跑批改为真实 upsert 统计。
