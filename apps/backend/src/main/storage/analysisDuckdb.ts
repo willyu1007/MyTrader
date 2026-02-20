@@ -14,7 +14,8 @@ type WorkerLike = {
   onerror: ((event: unknown) => void) | null;
   postMessage: (data: unknown, transferList?: ArrayBuffer[]) => void;
   terminate: () => void;
-  addEventListener?: (type: string, listener: (event: { data: unknown }) => void) => void;
+  addEventListener?: (type: string, listener: (event: unknown) => void) => void;
+  removeEventListener?: (type: string, listener: (event: unknown) => void) => void;
 };
 
 let duckdbModule: DuckdbModule | null = null;
@@ -77,11 +78,29 @@ function createNodeWebWorker(modulePath: string): WorkerLike {
     }
   };
 
+  const listeners = {
+    message: new Set<(event: unknown) => void>(),
+    error: new Set<(event: unknown) => void>()
+  } as const;
+
+  wrapper.addEventListener = (type, listener) => {
+    if (type === "message") listeners.message.add(listener);
+    else if (type === "error") listeners.error.add(listener);
+  };
+
+  wrapper.removeEventListener = (type, listener) => {
+    if (type === "message") listeners.message.delete(listener);
+    else if (type === "error") listeners.error.delete(listener);
+  };
+
   worker.on("message", (data) => {
-    if (typeof wrapper.onmessage === "function") wrapper.onmessage({ data });
+    const event = { data };
+    if (typeof wrapper.onmessage === "function") wrapper.onmessage(event);
+    for (const listener of listeners.message) listener(event);
   });
   worker.on("error", (error) => {
     if (typeof wrapper.onerror === "function") wrapper.onerror(error);
+    for (const listener of listeners.error) listener(error);
   });
 
   return wrapper;

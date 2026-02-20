@@ -22,7 +22,17 @@ export async function ensureAccountDataLayout(
   await ensureBusinessSchema(businessDb);
   await close(businessDb);
 
-  await fs.promises.open(analysisDbPath, "a").then((f) => f.close());
+  // duckdb-wasm expects a valid DuckDB file; a pre-created empty file is invalid.
+  // For historical accounts, remove the zero-byte placeholder before first open.
+  try {
+    const stat = await fs.promises.stat(analysisDbPath);
+    if (stat.size === 0) {
+      await fs.promises.unlink(analysisDbPath);
+    }
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError.code !== "ENOENT") throw error;
+  }
 
   return { businessDbPath, analysisDbPath };
 }
