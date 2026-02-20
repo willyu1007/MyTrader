@@ -108,6 +108,10 @@ const api: MyTraderApi = {
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_GET),
     setIngestSchedulerConfig: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_INGEST_SCHEDULER_SET, input),
+    getRolloutFlags: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_ROLLOUT_FLAGS_GET),
+    setRolloutFlags: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.MARKET_ROLLOUT_FLAGS_SET, input),
     listTempTargets: () =>
       ipcRenderer.invoke(IPC_CHANNELS.MARKET_TEMP_TARGETS_LIST),
     touchTempTarget: (input) =>

@@ -4,6 +4,7 @@ import type {
 } from "@mytrader/shared";
 
 import {
+  getMarketRolloutFlags,
   getPersistedIngestControlState,
   setPersistedIngestControlState
 } from "../storage/marketSettingsRepository";
@@ -217,6 +218,16 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
   if (sessionId !== state.sessionId) return;
   const businessDb = requireBusinessDb();
   const marketDb = requireMarketDb();
+  const rolloutFlags = await getMarketRolloutFlags(businessDb);
+  if (!rolloutFlags.p0Enabled) {
+    if (job.source === "manual") {
+      throw new Error("当前已关闭 P0 批次开关，禁止执行数据拉取。");
+    }
+    console.warn(
+      `[mytrader] ${job.source} ingest skipped: P0 rollout is disabled.`
+    );
+    return;
+  }
   const resolved = await getResolvedTushareToken(businessDb);
   const token = resolved.token?.trim() ?? "";
 

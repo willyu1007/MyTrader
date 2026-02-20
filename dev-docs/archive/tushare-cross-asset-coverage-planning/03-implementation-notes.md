@@ -15,3 +15,5 @@
 - 2026-02-19: 完成 P0/P1/P2 实施批次与验收门禁阈值定稿（含通用准入/退出门禁、批次级覆盖阈值与回滚策略）。
 - 2026-02-19: Open questions 收敛：`stk_premarket` 从当前规划中排除；统一表 `instrument_master/basket_membership_daily/corporate_events` 在 P0 一次建齐。
 - 2026-02-19: 补充宏观 `available_date` 发布滞后规则建议定稿（release_date 优先 + fallback_lag + next_trade_date 生效 + revision 追溯）。
+- 2026-02-20: 创建承接实施任务 `dev-docs/active/tushare-cross-asset-p0-implementation/`，用于执行 P0 模块开发与门禁回归。
+- 2026-02-20: 按“全批次承接”要求，已将承接任务升级为 `dev-docs/active/tushare-cross-asset-rollout/`（覆盖 P0/P1/P2），原 P0-only 任务迁移至 `dev-docs/archive/tushare-cross-asset-p0-implementation/` 作为 superseded 记录。

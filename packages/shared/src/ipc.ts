@@ -608,6 +608,27 @@ export interface MarketIngestSchedulerConfig {
   catchUpMissed: boolean;
 }
 
+export interface MarketRolloutFlags {
+  p0Enabled: boolean;
+  p1Enabled: boolean;
+  p2Enabled: boolean;
+  p2RealtimeIndexV1: boolean;
+  p2RealtimeEquityEtfV1: boolean;
+  p2FuturesMicrostructureV1: boolean;
+  p2SpecialPermissionStkPremarketV1: boolean;
+  updatedAt: number;
+}
+
+export interface SetMarketRolloutFlagsInput {
+  p0Enabled?: boolean | null;
+  p1Enabled?: boolean | null;
+  p2Enabled?: boolean | null;
+  p2RealtimeIndexV1?: boolean | null;
+  p2RealtimeEquityEtfV1?: boolean | null;
+  p2FuturesMicrostructureV1?: boolean | null;
+  p2SpecialPermissionStkPremarketV1?: boolean | null;
+}
+
 export interface InstrumentRegistryEntry {
   symbol: string;
   name: string | null;
@@ -764,6 +785,8 @@ export interface MyTraderApi {
     setIngestSchedulerConfig(
       input: MarketIngestSchedulerConfig
     ): Promise<MarketIngestSchedulerConfig>;
+    getRolloutFlags(): Promise<MarketRolloutFlags>;
+    setRolloutFlags(input: SetMarketRolloutFlagsInput): Promise<MarketRolloutFlags>;
     listTempTargets(): Promise<TempTargetSymbol[]>;
     touchTempTarget(input: TouchTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
     removeTempTarget(input: RemoveTempTargetSymbolInput): Promise<TempTargetSymbol[]>;
@@ -837,6 +860,8 @@ export const IPC_CHANNELS = {
   MARKET_INGEST_CONTROL_CANCEL: "market:ingest:cancel",
   MARKET_INGEST_SCHEDULER_GET: "market:ingestScheduler:get",
   MARKET_INGEST_SCHEDULER_SET: "market:ingestScheduler:set",
+  MARKET_ROLLOUT_FLAGS_GET: "market:rolloutFlags:get",
+  MARKET_ROLLOUT_FLAGS_SET: "market:rolloutFlags:set",
   MARKET_TEMP_TARGETS_LIST: "market:targetsTemp:list",
   MARKET_TEMP_TARGETS_TOUCH: "market:targetsTemp:touch",
   MARKET_TEMP_TARGETS_REMOVE: "market:targetsTemp:remove",

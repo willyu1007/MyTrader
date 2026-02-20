@@ -24,6 +24,7 @@ import type {
   ImportHoldingsCsvInput,
   ImportPricesCsvInput,
   ListTagsInput,
+  SetMarketRolloutFlagsInput,
   MarketIngestSchedulerConfig,
   MarketTargetsConfig,
   PreviewTargetsDraftInput,
@@ -113,9 +114,11 @@ import { config } from "../config";
 import {
   getMarketTargetsConfig,
   getMarketIngestSchedulerConfig,
+  getMarketRolloutFlags,
   listTempTargetSymbols,
   removeTempTargetSymbol,
   setMarketIngestSchedulerConfig,
+  setMarketRolloutFlags,
   setMarketTargetsConfig,
   touchTempTargetSymbol
 } from "../storage/marketSettingsRepository";
@@ -955,6 +958,19 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const saved = await setMarketIngestSchedulerConfig(businessDb, input);
       return saved;
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.MARKET_ROLLOUT_FLAGS_GET, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getMarketRolloutFlags(businessDb);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MARKET_ROLLOUT_FLAGS_SET,
+    async (_event, input: SetMarketRolloutFlagsInput | null) => {
+      const businessDb = requireActiveBusinessDb();
+      return await setMarketRolloutFlags(businessDb, input ?? null);
     }
   );
 

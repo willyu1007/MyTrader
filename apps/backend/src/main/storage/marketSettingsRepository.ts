@@ -1,5 +1,7 @@
 import type {
+  MarketRolloutFlags,
   MarketIngestSchedulerConfig,
+  SetMarketRolloutFlagsInput,
   MarketTargetsConfig
 } from "@mytrader/shared";
 
@@ -10,6 +12,7 @@ const TARGETS_KEY = "targets_config_v1";
 const TEMP_TARGETS_KEY = "targets_temp_symbols_v1";
 const INGEST_SCHEDULER_KEY = "ingest_scheduler_config_v1";
 const INGEST_CONTROL_STATE_KEY = "ingest_control_state_v1";
+const ROLLOUT_FLAGS_KEY = "rollout_flags_v1";
 
 export interface PersistedIngestControlState {
   paused: boolean;
@@ -29,6 +32,16 @@ const DEFAULT_INGEST_SCHEDULER_CONFIG: MarketIngestSchedulerConfig = {
   scope: "both",
   runOnStartup: true,
   catchUpMissed: true
+};
+
+const DEFAULT_MARKET_ROLLOUT_FLAGS: Omit<MarketRolloutFlags, "updatedAt"> = {
+  p0Enabled: true,
+  p1Enabled: false,
+  p2Enabled: false,
+  p2RealtimeIndexV1: false,
+  p2RealtimeEquityEtfV1: false,
+  p2FuturesMicrostructureV1: false,
+  p2SpecialPermissionStkPremarketV1: false
 };
 
 export async function getMarketTargetsConfig(
@@ -303,6 +316,126 @@ export async function setPersistedIngestControlState(
     [INGEST_CONTROL_STATE_KEY, JSON.stringify(normalized)]
   );
   return normalized;
+}
+
+export async function getMarketRolloutFlags(
+  db: SqliteDatabase
+): Promise<MarketRolloutFlags> {
+  const row = await get<{ value_json: string }>(
+    db,
+    `select value_json from market_settings where key = ?`,
+    [ROLLOUT_FLAGS_KEY]
+  );
+  if (!row?.value_json) {
+    const defaults = buildDefaultRolloutFlags();
+    await writeMarketRolloutFlags(db, defaults);
+    return defaults;
+  }
+  const parsed = safeParseMarketRolloutFlags(row.value_json);
+  if (!parsed) {
+    const defaults = buildDefaultRolloutFlags();
+    await writeMarketRolloutFlags(db, defaults);
+    return defaults;
+  }
+  return parsed;
+}
+
+export async function setMarketRolloutFlags(
+  db: SqliteDatabase,
+  input: SetMarketRolloutFlagsInput | null | undefined
+): Promise<MarketRolloutFlags> {
+  const current = await getMarketRolloutFlags(db);
+  const next: MarketRolloutFlags = {
+    p0Enabled:
+      typeof input?.p0Enabled === "boolean" ? input.p0Enabled : current.p0Enabled,
+    p1Enabled:
+      typeof input?.p1Enabled === "boolean" ? input.p1Enabled : current.p1Enabled,
+    p2Enabled:
+      typeof input?.p2Enabled === "boolean" ? input.p2Enabled : current.p2Enabled,
+    p2RealtimeIndexV1:
+      typeof input?.p2RealtimeIndexV1 === "boolean"
+        ? input.p2RealtimeIndexV1
+        : current.p2RealtimeIndexV1,
+    p2RealtimeEquityEtfV1:
+      typeof input?.p2RealtimeEquityEtfV1 === "boolean"
+        ? input.p2RealtimeEquityEtfV1
+        : current.p2RealtimeEquityEtfV1,
+    p2FuturesMicrostructureV1:
+      typeof input?.p2FuturesMicrostructureV1 === "boolean"
+        ? input.p2FuturesMicrostructureV1
+        : current.p2FuturesMicrostructureV1,
+    p2SpecialPermissionStkPremarketV1:
+      typeof input?.p2SpecialPermissionStkPremarketV1 === "boolean"
+        ? input.p2SpecialPermissionStkPremarketV1
+        : current.p2SpecialPermissionStkPremarketV1,
+    updatedAt: Date.now()
+  };
+  await writeMarketRolloutFlags(db, next);
+  return next;
+}
+
+function buildDefaultRolloutFlags(now = Date.now()): MarketRolloutFlags {
+  return {
+    ...DEFAULT_MARKET_ROLLOUT_FLAGS,
+    updatedAt: now
+  };
+}
+
+function safeParseMarketRolloutFlags(value: string): MarketRolloutFlags | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return normalizeMarketRolloutFlags(parsed as Partial<MarketRolloutFlags>);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMarketRolloutFlags(
+  input: Partial<MarketRolloutFlags>
+): MarketRolloutFlags {
+  const updatedAtRaw = Number(input.updatedAt);
+  return {
+    p0Enabled: Boolean(input.p0Enabled ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p0Enabled),
+    p1Enabled: Boolean(input.p1Enabled ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p1Enabled),
+    p2Enabled: Boolean(input.p2Enabled ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p2Enabled),
+    p2RealtimeIndexV1: Boolean(
+      input.p2RealtimeIndexV1 ?? DEFAULT_MARKET_ROLLOUT_FLAGS.p2RealtimeIndexV1
+    ),
+    p2RealtimeEquityEtfV1: Boolean(
+      input.p2RealtimeEquityEtfV1 ??
+        DEFAULT_MARKET_ROLLOUT_FLAGS.p2RealtimeEquityEtfV1
+    ),
+    p2FuturesMicrostructureV1: Boolean(
+      input.p2FuturesMicrostructureV1 ??
+        DEFAULT_MARKET_ROLLOUT_FLAGS.p2FuturesMicrostructureV1
+    ),
+    p2SpecialPermissionStkPremarketV1: Boolean(
+      input.p2SpecialPermissionStkPremarketV1 ??
+        DEFAULT_MARKET_ROLLOUT_FLAGS.p2SpecialPermissionStkPremarketV1
+    ),
+    updatedAt:
+      Number.isFinite(updatedAtRaw) && updatedAtRaw > 0
+        ? Math.floor(updatedAtRaw)
+        : Date.now()
+  };
+}
+
+async function writeMarketRolloutFlags(
+  db: SqliteDatabase,
+  flags: MarketRolloutFlags
+): Promise<void> {
+  const normalized = normalizeMarketRolloutFlags(flags);
+  await run(
+    db,
+    `
+      insert into market_settings (key, value_json)
+      values (?, ?)
+      on conflict(key) do update set
+        value_json = excluded.value_json
+    `,
+    [ROLLOUT_FLAGS_KEY, JSON.stringify(normalized)]
+  );
 }
 
 function safeParseMarketIngestSchedulerConfig(
