@@ -1,4 +1,5 @@
 import type {
+  IngestPreflightResult,
   IngestRunMode,
   MarketIngestControlStatus
 } from "@mytrader/shared";
@@ -7,10 +8,16 @@ import {
   getPersistedIngestControlState,
   setPersistedIngestControlState
 } from "../storage/marketSettingsRepository";
-import { getResolvedTushareToken } from "../storage/marketTokenRepository";
+import {
+  getResolvedTokenForDomain,
+  getResolvedTushareToken
+} from "../storage/marketTokenRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
 import type { IngestExecutionControl } from "./marketIngestRunner";
 import { runTargetsIngest, runUniverseIngest } from "./marketIngestRunner";
+import { createIngestRun, finishIngestRun } from "./ingestRunsRepository";
+import { runIngestPreflight } from "./ingestPreflightService";
+import { validateDataSourceReadiness } from "./dataSourceReadinessService";
 
 type OrchestratorScope = "targets" | "universe" | "both";
 type JobScope = Exclude<OrchestratorScope, "both">;
@@ -38,6 +45,8 @@ type OrchestratorState = {
   updatedAt: number;
   waiters: Array<() => void>;
 };
+
+type BlockedStage = "preflight" | "readiness" | "token" | "analysis_init";
 
 const state: OrchestratorState = {
   businessDb: null,
@@ -217,34 +226,120 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
   if (sessionId !== state.sessionId) return;
   const businessDb = requireBusinessDb();
   const marketDb = requireMarketDb();
-  const resolved = await getResolvedTushareToken(businessDb);
-  const token = resolved.token?.trim() ?? "";
+  let preflight: IngestPreflightResult | null = null;
+
+  try {
+    preflight = await runIngestPreflight({
+      businessDb,
+      scope: job.scope
+    });
+  } catch (error) {
+    const message = `预检执行失败：${toErrorMessage(error)}`;
+    await persistBlockedRun({
+      marketDb,
+      job,
+      stage: "preflight",
+      errorCode: "PREFLIGHT_FAILED",
+      message,
+      preflight: null
+    });
+    if (job.source === "manual") {
+      throw new Error(message);
+    }
+    console.warn(`[mytrader] ${job.source} ingest skipped: ${message}`);
+    return;
+  }
+
+  const readiness = await validateDataSourceReadiness({
+    businessDb,
+    scope: job.scope
+  });
+  if (!readiness.ready) {
+    const message = buildReadinessBlockMessage(readiness.issues.map((item) => item.message));
+    await persistBlockedRun({
+      marketDb,
+      job,
+      stage: "readiness",
+      errorCode: "READINESS_BLOCKED",
+      message,
+      preflight
+    });
+    if (job.source === "manual") {
+      throw new Error(message);
+    }
+    console.warn(`[mytrader] ${job.source} ingest skipped: ${message}`);
+    return;
+  }
+
+  const tokenSourcesByDomain: Record<string, string> = {};
+  let token: string | null = null;
+  for (const domainId of readiness.selectedDomains) {
+    const resolved = await getResolvedTokenForDomain(businessDb, domainId);
+    tokenSourcesByDomain[domainId] = resolved.source;
+    if (!token && resolved.token) {
+      token = resolved.token;
+    }
+  }
 
   if (!token) {
+    const fallback = await getResolvedTushareToken(businessDb);
+    token = fallback.token?.trim() ?? null;
+  }
+
+  if (!token) {
+    const message = "未配置可用数据源令牌。";
+    await persistBlockedRun({
+      marketDb,
+      job,
+      stage: "token",
+      errorCode: "TOKEN_MISSING",
+      message,
+      preflight
+    });
     if (job.source === "manual") {
-      throw new Error("未配置 Tushare token。");
+      throw new Error(message);
     }
-    console.warn(
-      `[mytrader] ${job.source} ingest skipped: missing Tushare token.`
-    );
+    console.warn(`[mytrader] ${job.source} ingest skipped: ${message}`);
     return;
   }
 
   const control = buildControl(sessionId);
+  const preflightUpdatedAt = preflight?.updatedAt ?? null;
   if (job.scope === "targets") {
     await runTargetsIngest({
       businessDb,
       marketDb,
       token,
       mode: job.mode,
-      meta: { ...(job.meta ?? {}), source: job.source },
+      meta: {
+        ...(job.meta ?? {}),
+        source: job.source,
+        selectedDomains: readiness.selectedDomains,
+        selectedModules: readiness.selectedModules,
+        blockedModules: [],
+        tokenSourcesByDomain,
+        preflightUpdatedAt
+      },
       control
     });
     return;
   }
 
   if (!state.analysisDbPath) {
-    throw new Error("analysis.duckdb 尚未初始化。");
+    const message = "analysis.duckdb 尚未初始化。";
+    await persistBlockedRun({
+      marketDb,
+      job,
+      stage: "analysis_init",
+      errorCode: "ANALYSIS_DB_NOT_INITIALIZED",
+      message,
+      preflight
+    });
+    if (job.source === "manual") {
+      throw new Error(message);
+    }
+    console.warn(`[mytrader] ${job.source} ingest skipped: ${message}`);
+    return;
   }
   await runUniverseIngest({
     businessDb,
@@ -252,9 +347,68 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
     analysisDbPath: state.analysisDbPath,
     token,
     mode: job.mode,
-    meta: { ...(job.meta ?? {}), source: job.source, windowYears: 3 },
+    meta: {
+      ...(job.meta ?? {}),
+      source: job.source,
+      windowYears: 3,
+      selectedDomains: readiness.selectedDomains,
+      selectedModules: readiness.selectedModules,
+      blockedModules: [],
+      tokenSourcesByDomain,
+      preflightUpdatedAt
+    },
     control
   });
+}
+
+async function persistBlockedRun(input: {
+  marketDb: SqliteDatabase;
+  job: QueueJob;
+  stage: BlockedStage;
+  errorCode: string;
+  message: string;
+  preflight: IngestPreflightResult | null;
+}): Promise<void> {
+  const meta: Record<string, unknown> = {
+    ...(input.job.meta ?? {}),
+    source: input.job.source,
+    scope: input.job.scope,
+    blockedStage: input.stage,
+    errorCode: input.errorCode
+  };
+  if (input.preflight) {
+    meta.preflightUpdatedAt = input.preflight.updatedAt;
+    meta.selectedDomains = input.preflight.selectedDomains;
+    meta.selectedModules = input.preflight.selectedModules;
+  }
+
+  const runId = await createIngestRun(input.marketDb, {
+    scope: input.job.scope,
+    mode: input.job.mode,
+    meta
+  });
+  await finishIngestRun(input.marketDb, {
+    id: runId,
+    status: "failed",
+    errors: 1,
+    errorMessage: input.message,
+    meta
+  });
+}
+
+function buildReadinessBlockMessage(messages: string[]): string {
+  if (messages.length === 0) {
+    return "数据来源未就绪。";
+  }
+  const lines = messages.slice(0, 8).map((item, index) => `${index + 1}. ${item}`);
+  return `数据来源未就绪：${lines.join(" | ")}`;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return String(error);
 }
 
 function buildControl(sessionId: number): IngestExecutionControl {

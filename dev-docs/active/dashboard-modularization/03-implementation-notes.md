@@ -1,0 +1,250 @@
+# 03 Implementation Notes
+
+## Status
+- Current status: `in-progress`
+- Last updated: 2026-02-10
+
+## What changed
+- 初始化 `dashboard-modularization` task bundle。
+- 写入 roadmap 与执行计划、架构边界、验证矩阵。
+- 记录 baseline（`typecheck/build` 已通过）。
+- Phase 1 落地：将原 `apps/frontend/src/components/Dashboard.tsx` 迁移为兼容壳，
+  主实现移动到 `apps/frontend/src/components/dashboard/DashboardContainer.tsx`。
+- 新增 `apps/frontend/src/components/dashboard/` 目录结构（`types/constants/hooks/views/components/primitives/utils`）。
+- 为原语/展示组件/工具函数提供模块出口（当前通过 `DashboardContainer` 导出复用，行为不变）。
+- 更新 `apps/frontend/scripts/verify-theme-contract.mjs`：
+  - 允许在 `DashboardContainer.tsx` 校验原语。
+  - 修复 `export function` 场景下函数块提取逻辑。
+- Phase 2 实拆分落地：
+  - 新增 `apps/frontend/src/components/dashboard/shared.tsx`，承载原语组件、展示组件与工具函数真实实现。
+  - `DashboardContainer.tsx` 删除尾部定义，改为从 `shared.tsx` 导入并使用。
+  - `primitives/components/utils` 模块出口从 `DashboardContainer` re-export 改为 `shared.tsx` re-export。
+  - `verify-theme-contract` 增加 `shared.tsx` 候选扫描，保证主题契约校验覆盖拆分后主定义位置。
+- Phase 2.5 结构收敛：
+  - `DashboardContainer.tsx` 改为从 `constants.ts` 与 `types.ts` 引入导航/范围/存储 key 与主视图类型。
+  - `views/SidebarNav.tsx`、`views/TopToolbar.tsx`、`views/AccountView.tsx` 实现并接入容器，替换内联 JSX。
+- Phase 3 视图实拆分（继续）：
+  - `views/RiskView.tsx` 完成真实实现迁移并接线。
+  - `views/DataAnalysisView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/OtherView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/MarketView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/PortfolioView.tsx` 完成真实实现迁移并接线（保持行为不变，容器仅透传）。
+  - `views/DashboardOverlays.tsx` 抽离容器尾部 overlay（目标池弹窗/详情弹窗/删除确认/全局通知）。
+  - `DashboardContainer.tsx` 行数从 `9897` 进一步下降到 `4811`。
+- Phase 3 hooks 下沉（本轮）：
+  - `hooks/use-dashboard-ui.ts` 接管 `error/notice/activeView/otherTab/analysisTab/isNavCollapsed` 状态。
+  - 导航自动折叠副作用（进入/离开 market 视图）从 `DashboardContainer.tsx` 下沉到 `use-dashboard-ui.ts`。
+  - `hooks/use-dashboard-portfolio.ts` 接管 portfolio/position/risk/ledger/csv path 相关状态及重置副作用。
+  - `hooks/use-dashboard-analysis.ts` 从骨架升级为真实状态 hook，接管 instrument analysis 状态域（查询、结果、选中标的、区间、画像、标签、行情、K 线、加载与错误）。
+  - `hooks/use-dashboard-market.ts` 从骨架升级为真实状态 hook，接管 market 主状态域（搜索/筛选/标签/行情/图表/watchlist/token/ingest/详情面板等）。
+  - `hooks/use-dashboard-market.ts` 继续下沉 market 高级状态（targets/target-pool/scheduler/universe-pool/registry/ingest-run 选择与 loading flags）。
+  - `hooks/use-dashboard-market.ts` 下沉一批 market 副作用：本地持久化（explorer 宽度 / targets split）、hover 重置、临时标的选择集同步。
+  - `hooks/use-dashboard-market.ts` 下沉异步请求副作用：`marketSearch` 防抖查询与 `tagSeries` 加载（含 requestId 并发保护）。
+  - `hooks/use-dashboard-market.ts` 继续下沉副作用：tag picker 标签拉取、主图 `daily bars` 加载。
+  - 新增 `useDashboardMarketRuntimeEffects`（同文件导出）承接容器中的 market 运行时 effect，已接管：按 scope 拉取 quotes（holdings/search）与默认 scope 回退（含 watchlist:all 自动选择）。
+  - `useDashboardMarketRuntimeEffects` 继续接管初始化/联动 effect：进入 market 时刷新 watchlist+tags、analysis-instrument 模式下 watchlist 兜底加载、详情面板打开时刷新 manual theme options。
+  - `useDashboardMarketRuntimeEffects` 继续接管 ingest run 联动 effect：选中 run 失效自动清理、data-status 下自动刷新选中 run 详情。
+  - `useDashboardMarketRuntimeEffects` 继续接管 `other/data-management` 运行时编排：
+    - 进入 `other` 子 tab 的初始化刷新（token/targets/ingest/scheduler/universe-pool/registry）。
+    - `targets diff` / `target-pool stats` / tag 管理 / registry 的防抖刷新。
+    - `data-management` / `data-status` 下 ingest 轮询刷新。
+    - 离开 `data-management` 且存在未保存目标池草稿时的导航确认保护。
+  - 为避免 `Dispatch<SetStateAction<...>>` 泛型不兼容导致的类型阻断，将 hook 参数收敛为 `restoreDataManagementView()` 单一回调，保持行为不变并修复 typecheck 错误。
+  - 新增 `useDashboardMarketManagementActions`（同文件导出），承接容器中的 ingest/scheduler/registry handlers：
+    - `handlePause/Resume/CancelMarketIngest`
+    - `updateMarketSchedulerConfig` / `handleSaveMarketSchedulerConfig` / `handleRunMarketIngestNow`
+    - `handleToggleRegistrySymbol` / `handleToggleSelectAllRegistry`
+    - `handleSetRegistryAutoIngest` / `handleBatchSetRegistryAutoIngest`
+  - `DashboardContainer.tsx` 删除对应重复 `useState/useEffect`，改为消费 hook 返回值。
+  - 新增 `hooks/use-dashboard-market-target-actions.ts`，承接 targets/temp-target 处理器（手动标的预览与应用、临时标的单项/批量操作、目标池保存与重置）。
+  - 新增 `hooks/use-dashboard-market-instrument-actions.ts`，承接 instrument/tag/watchlist/demo-seed 处理器（选股/选标签、标签增删、手动主题、自选增删、标的库同步、示例数据注入）。
+  - 新增 `hooks/use-dashboard-market-admin-refresh.ts`，承接 token/ingest/scheduler/universe/registry/ingest-detail 刷新函数。
+  - 新增 `hooks/use-dashboard-market-target-pool-stats.ts`，承接 `refreshMarketTargetPoolStats` 超长计算逻辑（并发拉取标签成员、分类聚合、focus/universe 结构统计）。
+  - 新增 `hooks/use-dashboard-market-data-loaders.ts`，承接 market 数据加载函数（watchlist/tags/manual-themes/quotes/targets/targets-diff）。
+  - 新增 `hooks/use-dashboard-market-admin-actions.ts`，承接 token/provider/universe-pool/ingest-trigger 操作函数（含一次类型阻断修复：bucket 参数改为 `MarketUniversePoolConfig["enabledBuckets"][number]`）。
+  - 新增 `hooks/use-dashboard-portfolio-actions.ts`，承接 portfolio/position/risk 管理动作函数（创建/重命名/删除组合、持仓 CRUD、风险限额 CRUD）。
+  - 新增 `hooks/use-dashboard-ledger-actions.ts`，承接 ledger/csv import 动作函数（编辑、提交、删除确认、持仓与行情 CSV 导入）。
+  - `DashboardContainer.tsx` 进一步下降到 `2867` 行；`use-dashboard-market.ts` `1360` 行，`use-dashboard-market-target-actions.ts` `420` 行，`use-dashboard-market-instrument-actions.ts` `397` 行，`use-dashboard-market-admin-refresh.ts` `227` 行，`use-dashboard-market-target-pool-stats.ts` `271` 行，`use-dashboard-market-data-loaders.ts` `235` 行，`use-dashboard-market-admin-actions.ts` `230` 行，`use-dashboard-portfolio-actions.ts` `287` 行，`use-dashboard-ledger-actions.ts` `482` 行。
+  - 新增 `hooks/use-dashboard-portfolio-runtime.ts`，承接 `loadPortfolios/loadSnapshot/loadLedgerEntries/loadPerformance` 与其相关 lifecycle effects。
+  - 新增 `hooks/use-dashboard-analysis-runtime.ts`，承接 `loadAnalysisInstrument`、instrument 搜索防抖、副作用自动选中逻辑（requestId 并发保护保持不变）。
+  - `DashboardContainer.tsx` 继续下降到 `2670` 行；新增 runtime hooks 行数：`use-dashboard-portfolio-runtime.ts` `213` 行、`use-dashboard-analysis-runtime.ts` `199` 行。
+  - 新增 `hooks/use-dashboard-market-resize.ts`，承接 market explorer/targets editor 的 resize refs、pointer/keyboard handlers 与拖拽生命周期副作用。
+  - 新增 `hooks/use-dashboard-ui-effects.ts`，承接容器通用 UI 副作用（market 详情面板收敛、portfolio tab 重置、contribution 展开状态重置、toast 自动消失）。
+  - `DashboardContainer.tsx` 继续下降到 `2522` 行；新增 hooks 行数：`use-dashboard-market-resize.ts` `211` 行、`use-dashboard-ui-effects.ts` `63` 行。
+  - 新增 `hooks/use-dashboard-market-target-pool-detail.ts`，承接 target-pool detail 计算与交互（metric cards、detail rows、member filter、category 同步、副作用与 section toggle）。
+  - `DashboardContainer.tsx` 继续下降到 `2324` 行；新增 hook 行数：`use-dashboard-market-target-pool-detail.ts` `312` 行。
+  - 新增 `hooks/use-dashboard-market-derived.ts`，承接 market 视图衍生计算（symbol/meta 过滤、scope/symbol 集合、tag series 统计、主图 range summary、持仓成本与目标价）。
+  - 新增 `hooks/use-dashboard-analysis-derived.ts`，承接 analysis instrument 衍生计算（symbol-name map、quick symbols、range summary、持仓成本、目标价、tone）。
+  - `DashboardContainer.tsx` 继续下降到 `1995` 行；新增 hooks 行数：`use-dashboard-market-derived.ts` `381` 行、`use-dashboard-analysis-derived.ts` `172` 行。
+  - 新增 `hooks/use-dashboard-portfolio-derived.ts`，承接 portfolio/ledger/toast/performance 派生计算（`cashTotal`、`filteredLedgerEntries`、`cashFlowTotals`、`selectedPerformance` 等）。
+  - `DashboardContainer.tsx` 继续下降到 `1939` 行；新增 hook 行数：`use-dashboard-portfolio-derived.ts` `135` 行。
+  - 顶部本地类型/常量收敛：将 `PositionFormState` 等领域类型迁入 `types.ts`，将 `UNIVERSE_POOL_BUCKET_ORDER`、`TARGET_POOL_STRUCTURE_EMPTY`、`assetClassLabels`、`ledgerEventTypeOptions` 等迁入 `constants.ts`。
+  - `DashboardContainer.tsx` 继续下降到 `1793` 行。
+  - 继续进行容器 props 收敛：`analysisState`、`marketState`、`portfolioState` 统一保留为状态对象，并在 `PortfolioView`/`DataAnalysisView`/`MarketView`/`OtherView`/`DashboardOverlays` 透传处改为优先使用 `...state`，删除大段重复枚举。
+  - 修复本轮阻断：清理 `portfolioState` 解构中的未使用字段（`ledgerLoading`、`ledgerError`、`setLedgerFilter`、`setLedgerStartDate`、`setLedgerEndDate`、`isLedgerFormOpen`），恢复 `typecheck` 通过。
+  - `DashboardContainer.tsx` 继续下降到 `1563` 行。
+  - 新增 `hooks/use-dashboard-market-admin-derived.ts`，将 market 管理区块派生状态从容器下沉（ingest/scheduler/targets diff/universe pool 衍生计算与布尔门控）。
+  - `DashboardContainer.tsx` 继续下降到 `1492` 行。
+  - 新增 `hooks/use-dashboard-portfolio-state.ts`，将 active portfolio 解析、`useDashboardPortfolio` 初始化与 `onActivePortfolioChange` 副作用从容器下沉。
+  - `DashboardContainer.tsx` 继续下降到 `1475` 行。
+  - 新增 `hooks/use-dashboard-market-orchestration.ts`，将 market 编排层（data loaders/admin refresh/admin actions/instrument actions/target actions/management actions/runtime effects）从容器下沉为单一组合 hook。
+  - `DashboardContainer.tsx` 继续下降到 `1146` 行。
+  - 新增 `views/DashboardContainerLayout.tsx`，将 `DashboardContainer` 内部主渲染壳（导航/toolbar/tabs/各视图条件渲染/overlays）整体迁出，容器仅负责状态编排与数据装配。
+  - 将容器内多段 `derived/actions/orchestration` 调用从大解构改为对象持有，减少中间变量噪音并降低容器体积。
+  - `DashboardContainer.tsx` 继续下降到 `547` 行，达成本阶段 `<= 800` 目标。
+  - `DashboardContainerLayoutProps` 类型从宽类型收敛到显式类型：移除 `any`，改为 hook 返回类型 + 明确函数签名（`loadLedgerEntries/loadPerformance/loadAnalysisInstrument`）。
+  - `views/RiskView.tsx` 收敛 `snapshot` / `riskLimit` 类型，移除 `any` 迭代项与 handler 参数。
+  - `views/DashboardOverlays.tsx` 取消 `[key: string]: any` 字典 props，改为显式 `DashboardOverlaysProps`；并改为组件内直接导入 `Button/ConfirmDialog/Input`，减少跨层 UI 原语透传。
+  - `views/PortfolioView.tsx` 改为显式 `PortfolioViewProps`（移除 `[key: string]: any`），并将事件参数、`map` 回调、`catch` 错误类型统一收敛为强类型；当前文件仍偏大（`1009` 行），后续可再做结构拆分。
+  - `views/DataAnalysisView.tsx` 改为显式 `DataAnalysisViewProps`（移除 `[key: string]: any`），并收敛搜索输入/回车事件、列表迭代、`catch` 错误与 toggle setter 类型。
+  - 本轮后 `PortfolioView/DataAnalysisView/RiskView/DashboardOverlays/DashboardContainerLayout` 五个边界视图文件已无 `any`。
+  - `views/MarketView.tsx` 收敛阻断点参数类型：补充 `ChangeEvent`/`TagSummary`/`InstrumentProfileSummary` 等参数标注，修复 `setState(prev)` 与图表 hover 回调的隐式 `any`。
+  - `views/OtherView.tsx` 收敛阻断点参数类型：补充 `ChangeEvent` 事件参数、`UniversePoolBucketId/MarketTargetsConfig/ResolvedTargetSymbol/TargetReasonsDiff/TempTargetSymbol/MarketIngestRun` 等 map/updater 参数类型。
+  - 本轮后 `MarketView/OtherView` 的隐式 `any` 阻断已清零；剩余 `any` 仅为两个兼容性索引签名（各文件 1 处）。
+  - `views/MarketView.tsx` 与 `views/OtherView.tsx` 去除最后两处索引签名（`[key: string]: any`），改为基于 `marketState/portfolioState/marketDerived/marketAdminDerived/marketOrchestration` 与 shared 原语函数的组合 props 类型。
+  - `views/DashboardContainerLayout.tsx` 为 `MarketView/OtherView` 补齐完整透传对象（`...marketDerived`、`...marketAdminDerived`、`...marketTargetPoolDetail`、`...marketOrchestration`、`...ledgerActions`），与视图层组合 props 契约对齐，不改行为。
+  - 本轮后 `MarketView/OtherView` 的 `any` 已完全清零（包含索引签名）。
+  - 新增 `views/other/OtherDataStatusTab.tsx`，将 `OtherView` 的 `data-status` 页签整块迁出，保留原有交互（缺失标的回补、run 列表、run detail）。
+  - 新增 `views/other/OtherTestTab.tsx`，将 `OtherView` 的 `test` 页签整块迁出，保留示例注入与 CSV 导入行为。
+  - `views/OtherView.tsx` 改为编排层：通过 `OtherDataStatusTab` / `OtherTestTab` 组合渲染，页面行为不变。
+  - 清理 `views/MarketView.tsx` 尾部历史注释遗留块（整段已废弃 UI 草稿，不参与运行），降低文件噪音与维护负担。
+  - 本轮后行数变化：`OtherView.tsx` 从 `2264` 行降至 `1908` 行，`MarketView.tsx` 从 `2269` 行降至 `1707` 行。
+- 回归结果：
+  - `pnpm -C apps/frontend typecheck` ✅
+  - `pnpm -C apps/frontend build` ✅
+  - `pnpm -C apps/frontend verify:theme` ✅
+
+## Files/modules touched (high level)
+- `dev-docs/active/dashboard-modularization/roadmap.md`
+- `dev-docs/active/dashboard-modularization/00-overview.md`
+- `dev-docs/active/dashboard-modularization/01-plan.md`
+- `dev-docs/active/dashboard-modularization/02-architecture.md`
+- `dev-docs/active/dashboard-modularization/03-implementation-notes.md`
+- `dev-docs/active/dashboard-modularization/04-verification.md`
+- `dev-docs/active/dashboard-modularization/05-pitfalls.md`
+- `apps/frontend/src/components/Dashboard.tsx`
+- `apps/frontend/src/components/dashboard/index.ts`
+- `apps/frontend/src/components/dashboard/DashboardContainer.tsx`
+- `apps/frontend/src/components/dashboard/shared.tsx`
+- `apps/frontend/src/components/dashboard/types.ts`
+- `apps/frontend/src/components/dashboard/constants.ts`
+- `apps/frontend/src/components/dashboard/hooks/*`
+- `apps/frontend/src/components/dashboard/views/*`
+- `apps/frontend/src/components/dashboard/views/other/*`
+- `apps/frontend/src/components/dashboard/views/portfolio/*`
+- `apps/frontend/src/components/dashboard/components/*`
+- `apps/frontend/src/components/dashboard/primitives/*`
+- `apps/frontend/src/components/dashboard/utils/*`
+- `apps/frontend/scripts/verify-theme-contract.mjs`
+
+## Decisions & tradeoffs
+- Decision:
+  - 先进行兼容入口迁移，再做内部模块化拆分。
+  - Rationale:
+    - 先稳定外部接口，可降低后续大规模移动风险。
+  - Alternatives considered:
+    - 一次性抽 hooks + views（风险更高）。
+- Decision:
+  - `components/Dashboard.tsx` 只保留 re-export，路径明确写成 `./dashboard/index`。
+  - Rationale:
+    - 在大小写不敏感文件系统下，`./dashboard` 会与 `Dashboard.tsx` 发生同名解析冲突并自引用。
+  - Alternatives considered:
+    - 目录改名（会偏离既定目标布局）。
+
+## Deviations from plan
+- Change:
+  - 目前四个 domain hooks（`ui/portfolio/analysis/market`）均已进入真实接线；其中 market 的副作用与请求编排仍主要保留在容器。
+  - Why:
+    - 先下沉状态，再逐步下沉高复杂度副作用，降低一次性迁移风险。
+  - Impact:
+    - hooks 下沉模式已成型；后续重点转向 market 副作用与超大透传对象收敛。
+
+## Known issues / follow-ups
+- 后续需重点关注 market 视图拆分时的状态时序一致性。
+- 手工冒烟（2026-02-10）曾复现阻断：进入 `市场行情` 后点击标的行触发页面卡死并持续报 `Maximum update depth exceeded`（`DashboardContainer.tsx:63:29`）；该问题已于同日修复并复验通过（见下方新增记录与 `04-verification.md` 最新条目）。
+- `DashboardContainer.tsx` 当前 `547` 行、`DashboardContainerLayout.tsx` 当前 `752` 行，均低于 `800`。
+- `DashboardContainerLayoutProps` 的 `any` 宽类型已全部移除（改为 hook 返回类型与明确函数签名），后续重点从“减行”转向“manual smoke 覆盖 + view-model 结构继续清晰化”。
+- `PortfolioView.tsx`、`DataAnalysisView.tsx`、`MarketView.tsx`、`OtherView.tsx` 的 `any` 宽类型均已清零；后续重点转为按业务块继续降低超大视图文件复杂度（优先 `PortfolioView`，随后继续拆 `OtherView` 的 `data-management` 与 `instrument-management`）。
+
+## Pitfalls / dead ends (do not repeat)
+- Keep the detailed log in `05-pitfalls.md` (append-only).
+- 2026-02-10（继续执行“1/2/3”拆分：`Other data-management` + `Other instrument-management` + `Market sidebar/detail/dialogs`）
+  - 新增 `views/other/OtherDataManagementTab.tsx`，将 `OtherView` 的 `data-management` 区块整体迁出（含 token/source、scheduler、target-pool editor、registry、manual ingest）。
+  - 新增 `views/other/OtherInstrumentManagementTab.tsx`，将 `OtherView` 的 `instrument-management` 区块整体迁出（标签管理 + 临时标的状态）。
+  - `views/OtherView.tsx` 收敛为页签编排壳，仅保留 tab header 与条件渲染。
+  - 新增 `views/market/MarketSidebar.tsx`、`views/market/MarketDetailWorkspace.tsx`、`views/market/MarketDialogs.tsx`，分别承接 `MarketView` 的左侧 explorer、右侧详情工作区、全部弹窗。
+  - `views/MarketView.tsx` 收敛为分栏编排壳，仅保留 resize 分隔条与三块子组件拼装。
+  - 本轮收敛后的关键体量：
+    - `OtherView.tsx`: `155` 行
+    - `MarketView.tsx`: `113` 行
+    - `OtherDataManagementTab.tsx`: `1373` 行
+    - `OtherInstrumentManagementTab.tsx`: `205` 行
+    - `MarketSidebar.tsx`: `381` 行
+    - `MarketDetailWorkspace.tsx`: `555` 行
+    - `MarketDialogs.tsx`: `566` 行
+- 2026-02-10（继续拆分 `OtherDataManagementTab`）
+  - 新增目录 `views/other/data-management/`，按功能块拆出 5 个子组件：
+    - `OtherDataManagementSourceSection.tsx`
+    - `OtherDataManagementSchedulerSection.tsx`
+    - `OtherDataManagementTargetPoolSection.tsx`
+    - `OtherDataManagementRegistrySection.tsx`
+    - `OtherDataManagementIngestSection.tsx`
+  - `views/other/OtherDataManagementTab.tsx` 收敛为编排壳，按顺序组合上述 5 个区块，行为保持不变。
+  - 本轮后行数变化：
+    - `OtherDataManagementTab.tsx`: `1373` -> `18`
+    - 新增子文件总计 `1409` 行（结构化拆分，无功能变更）。
+- 2026-02-10（继续拆分 `TargetPoolSection`）
+  - 新增 `OtherDataManagementTargetPoolEditorPane.tsx`，承接目标池编辑左栏（同步范围、手动 symbol 解析与预览）。
+  - 新增 `OtherDataManagementTargetPoolDiffPane.tsx`，承接目标池差异右栏（结构看板、added/removed/reasonChanged 差异列表）。
+  - `OtherDataManagementTargetPoolSection.tsx` 收敛为壳层（标题+顶部操作+两栏布局+resizer），通过子组件组合渲染。
+  - 行数变化：`TargetPoolSection.tsx` `572` -> `106`。
+- 2026-02-10（继续拆分 `SourceSection`）
+  - 新增 `OtherDataManagementTokenProviderPanel.tsx`，承接 token/provider 配置与连接测试操作。
+  - 新增 `OtherDataManagementUniversePoolPanel.tsx`，承接全量池配置（bucket 开关 + 最后更新时间展示）。
+  - `OtherDataManagementSourceSection.tsx` 收敛为编排层（顶部摘要 + 数据来源壳 + 两个子面板拼装）。
+  - 行数变化：`SourceSection.tsx` `259` -> `107`。
+- 2026-02-10（收尾修复：停止继续结构拆分，仅修复审查问题）
+  - `views/market/MarketSidebar.tsx`、`views/market/MarketDetailWorkspace.tsx`、`views/market/MarketDialogs.tsx`：新增文件内最小契约类型 `Pick<MarketViewProps, ...>`，移除 `props: MarketViewProps`。
+  - `views/MarketView.tsx`：停止对子组件整包 spread；改为显式构造 `sidebarProps/detailProps/dialogProps`（使用 `satisfies` 约束）后传入子组件。
+  - `views/other/OtherInstrumentManagementTab.tsx`：改为最小契约类型 `Pick<OtherViewProps, ...>`。
+  - `views/other/data-management/*`：
+    - `OtherDataManagementSourceSection.tsx` / `OtherDataManagementTargetPoolSection.tsx`：停止对子面板整包 spread，改为显式构造子面板 props。
+    - `OtherDataManagementTokenProviderPanel.tsx` / `OtherDataManagementUniversePoolPanel.tsx` / `OtherDataManagementSchedulerSection.tsx` / `OtherDataManagementTargetPoolEditorPane.tsx` / `OtherDataManagementTargetPoolDiffPane.tsx` / `OtherDataManagementRegistrySection.tsx` / `OtherDataManagementIngestSection.tsx`：统一改为最小 `Pick<OtherViewProps, ...>` 契约。
+    - `OtherDataManagementTab.tsx`：停止 `<Section {...props} />`，改为按 section 显式构造并传参。
+  - `views/OtherView.tsx`：停止对 `OtherDataManagementTab` 与 `OtherInstrumentManagementTab` 的整包 spread，改为显式构造最小 props 对象再传入。
+  - 一致性补齐：`OtherDataStatusTab.tsx`、`OtherTestTab.tsx` 导出其 `*Props` 类型，`OtherView.tsx` 同步改为显式构造 props 传入，消除该层剩余 spread。
+  - 变更边界：仅收敛前端内部 props 契约；未改 `Dashboard` 对外接口、未改 `App.tsx` 导入路径、未改 IPC/shared DTO/backend。
+- 2026-02-10（阻断修复：运行时更新深度循环 + data-status 重复 key）
+  - `App.tsx`：将 `onActivePortfolioChange` 从 JSX 内联函数改为稳定 `useCallback`（`handleActivePortfolioChange`），并对 `activePortfolioName` 做幂等更新，避免同值重复写入。
+  - `hooks/use-dashboard-portfolio-state.ts`：`onActivePortfolioChange` 改为 ref 持有最新回调，新增上次已通知组合的去重比较（仅在 `id/name` 变化时触发通知）。
+  - `DashboardContainer.tsx`：传入 `useDashboardMarket` 的 `reportError` 改为稳定 `useCallback`（`reportMarketError`），消除由回调引用变化触发的 effect 频繁重跑。
+  - `hooks/use-dashboard-market.ts`：搜索词为空分支改为幂等 setState（仅在状态真实变化时更新），避免空数组/false 的重复写入触发 render 风暴。
+  - `views/other/OtherDataStatusTab.tsx`：在渲染前按 `run.id` 去重 `marketIngestRuns`，表格和计数统一基于去重列表，避免重复 key 警告。
+  - 结果：`Maximum update depth exceeded` 不再复现；`OtherDataStatusTab` 不再出现重复 key 告警。
+- 2026-02-10（审查收尾：清理表单语义提示，不继续结构拆分）
+  - `App.tsx`：
+    - 登录/创建账号表单补齐 `label htmlFor` 与字段 `id/name/autocomplete`。
+    - 登录表单增加隐藏 `username` 字段（`autocomplete="username"`）以满足密码管理器可访问性建议。
+  - `views/other/data-management/OtherDataManagementTokenProviderPanel.tsx`：
+    - 将 token 密码输入放入语义化 `<form>`（`onSubmit` 仅 `preventDefault`，不改业务流程）。
+    - 为 token 字段补齐 `id/name/autocomplete`，并增加隐藏 `username` 字段。
+  - `shared.tsx`：
+    - `FormGroup` 由无关联 `label` 改为 `fieldset/legend` 语义，避免“label 未关联控件”噪音。
+    - `Input` / `Select` 原语在调用方未提供时自动补 `id/name`（使用 `useId` 生成），降低漏配概率。
+  - 其他视图原生表单项补齐 `name`：
+    - `PortfolioView.tsx`、`DataAnalysisView.tsx`、`MarketDialogs.tsx`、
+      `OtherInstrumentManagementTab.tsx`、
+      `OtherDataManagementRegistrySection.tsx`、
+      `OtherDataManagementTargetPoolEditorPane.tsx`、
+      `OtherDataManagementSchedulerSection.tsx`。
+  - 范围约束：本轮仅做审查问题修复；未新增拆分层级，未改 `Dashboard` 外部接口，未改 IPC/shared DTO/backend。
+- 2026-02-10（审查收尾：清理 Tailwind CDN 开发告警）
+  - `apps/frontend/index.html`：
+    - 移除 `https://cdn.tailwindcss.com?plugins=forms,typography` 与内联 `tailwind.config` 脚本。
+  - `apps/frontend` 新增本地构建配置：
+    - `tailwind.config.cjs`（迁移原有 `colors/fontFamily/borderRadius/boxShadow` 扩展，保留 `darkMode: "class"`）。
+    - `postcss.config.cjs`（接入 `tailwindcss + autoprefixer`）。
+    - `src/tailwind.css`（`@tailwind base/components/utilities`）。
+  - `apps/frontend/src/main.tsx`：接入 `./tailwind.css` 作为样式入口。
+  - `apps/frontend/package.json`：新增前端构建依赖 `tailwindcss`、`postcss`、`autoprefixer`、`@tailwindcss/forms`、`@tailwindcss/typography`。
+  - 范围约束：仅替换 Tailwind 运行方式（CDN -> 本地编译），不改页面交互与 Dashboard 对外接口。
