@@ -1,0 +1,55 @@
+# 04 Verification
+
+- 2026-02-19: 文档一致性检查
+  - `sed -n '120,280p' dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md | sed -n '1,260p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/00-overview.md | sed -n '1,80p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/03-implementation-notes.md | sed -n '1,80p'`
+  - 结果：指数域 v1 细化章节、状态与实现记录均已落盘并可定位。
+- 2026-02-19: 期货域文档落盘检查
+  - `sed -n '120,340p' dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md | sed -n '120,340p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/00-overview.md | sed -n '1,80p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/03-implementation-notes.md | sed -n '1,80p'`
+  - 结果：期货域 v1 章节、状态和实现记录已落盘并可定位。
+- 2026-02-19: 现货域文档落盘检查
+  - `sed -n '140,380p' dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md | sed -n '140,380p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/00-overview.md | sed -n '1,80p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/03-implementation-notes.md | sed -n '1,90p'`
+  - 结果：现货域 v1 章节、状态和实现记录已落盘并可定位。
+- 2026-02-19: Tushare token 权限与接口可用性实测
+  - 环境定位：
+    - `sqlite3 \"$HOME/Library/Application Support/@mytrader/backend/account-index.sqlite\" \"select id,label,data_dir,created_at,last_login_at from accounts;\"`
+    - `sqlite3 \"/Volumes/DataDisk/Data/Finance/mytrader-account-b8ead1c1-0878-466c-a612-52fa172b318b/business.sqlite\" \"select key, length(value_json) from market_settings order by key;\"`
+  - 探测脚本（Electron + safeStorage 同 app name）：
+    - `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/backend exec electron /tmp/tushare_probe_electron.js`
+    - `pnpm -C /Volumes/DataDisk/Project/MyTrader/apps/backend exec electron /tmp/tushare_probe_electron_dates.js`
+  - 关键结果：
+    - `stock_basic`、`etf_share_size`、`fund_daily`、`fund_adj`、`index_daily`、`fut_basic`、`sge_basic`、`fx_daily`、`shibor`、`us_tbr`、`stk_rewards` 均返回 `code=0`。
+    - `stk_premarket` 返回 `code=40203`（当前 token 未开通该接口专项权限）。
+    - 使用 `20250124` 抽样时，`daily_basic/fund_daily/etf_share_size` 均有非零返回，接口可用。
+  - 结论：
+    - 8000 积分可覆盖本规划绝大多数主链路接口，但不能替代 `stk_premarket` 专项授权。
+    - `stk_premarket` 从首期必选下调为 L2 可选增强，不阻断首期建设。
+- 2026-02-19: 全资产整体梳理文档落盘检查
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md | sed -n '70,190p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/01-plan.md | sed -n '1,220p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/02-architecture.md | sed -n '1,240p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/00-overview.md | sed -n '1,120p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/03-implementation-notes.md | sed -n '1,120p'`
+  - 结果：四点总览（权限、关联、整合、双池）与 bundle 关键文件已同步。
+- 2026-02-19: P0/P1/P2 批次与门禁定稿落盘检查
+  - `rg -n "实施批次与验收门禁定稿|P0|P1|P2|回滚策略" dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md | sed -n '430,560p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/01-plan.md | sed -n '1,220p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/00-overview.md | sed -n '1,120p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/03-implementation-notes.md | sed -n '1,140p'`
+  - 结果：批次执行清单、门禁阈值、DoD 状态与实现记录已完成同步。
+- 2026-02-19: Open questions 收敛结果落盘检查
+  - `rg -n "stk_premarket|不进入当前规划|统一表|available_date 发布滞后|fallback_lag_days|P0 一次建齐" dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md dev-docs/active/tushare-cross-asset-coverage-planning/01-plan.md dev-docs/active/tushare-cross-asset-coverage-planning/02-architecture.md dev-docs/active/tushare-cross-asset-coverage-planning/00-overview.md dev-docs/active/tushare-cross-asset-coverage-planning/03-implementation-notes.md`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md | sed -n '88,170p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/roadmap.md | sed -n '420,520p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/01-plan.md | sed -n '1,120p'`
+  - `nl -ba dev-docs/active/tushare-cross-asset-coverage-planning/02-architecture.md | sed -n '1,120p'`
+  - 结果：`stk_premarket` 已从当前规划排除；统一表已固定为 P0 一次建齐；宏观 `available_date` 滞后规则已写入定稿。
