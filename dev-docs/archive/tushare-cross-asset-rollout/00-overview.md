@@ -1,11 +1,12 @@
 # 00 Overview
 
 ## Status
-- State: in_progress
+- State: done
 - Last updated: 2026-02-21
 - Upstream planning task: `dev-docs/archive/tushare-cross-asset-coverage-planning/`
 - Related implementation base: `dev-docs/active/real-data-auto-fetch/`
-- Next step: 持续执行 Wave-1/2/3 soak（验证 `index_daily/daily_basic/moneyflow` cursor 单调推进、主链路无阻断、并按门禁判定是否放量）。
+- Closure note: 已按“历史回放 3 天口径”完成验证（`cleanAsOfTradeDateProgress=3/3`），并进入归档。
+- Next step: 归档任务包到 `dev-docs/archive/tushare-cross-asset-rollout/`，后续由发布观察跟进。
 
 ## Goal
 承接 `tushare-cross-asset-coverage-planning` 的规划定稿，完成 P0/P1/P2 三个批次的分阶段实施与门禁验收，形成可持续运行的多资产数据池（Universe + Target，SSOT-first）。
