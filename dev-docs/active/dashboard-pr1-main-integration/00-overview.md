@@ -2,7 +2,7 @@
 
 ## Status
 - State: in_progress（2026-02-22 reopen）
-- Next step: 收敛“目标任务矩阵”交互与文案，明确其为“目标池物化覆盖治理”能力而非全量池配置入口。
+- Next step: 进行 UI 验收（“目标池数据完备性”命名、问号悬停定义、状态明细默认收起）并收集是否需要继续做后端 `defaultLookbackDays` 生效改造。
 
 ## Goal
 在不回退 `main` rollout 收口与稳定修复成果的前提下，把 `codex/dashboard-modularization-pr1` 的功能与重构成果分批并入主干。

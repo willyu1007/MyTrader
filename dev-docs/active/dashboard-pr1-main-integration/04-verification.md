@@ -102,3 +102,6 @@
 - 2026-02-23 (Follow-up #3: full-pool UI de-dup): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
 - 2026-02-23 (Follow-up #3: full-pool UI de-dup): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
 - 2026-02-23 (Follow-up #3: full-pool UI de-dup): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #4: target completeness UX convergence): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #4: target completeness UX convergence): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #4: target completeness UX convergence): `pnpm verify:pr1-guardrails` -> ✅ pass

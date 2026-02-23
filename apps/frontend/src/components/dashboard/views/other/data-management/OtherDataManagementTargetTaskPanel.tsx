@@ -34,6 +34,8 @@ const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "missing", label: "missing" },
   { value: "not_applicable", label: "not_applicable" }
 ];
+const COMPLETENESS_DEFINITION_TOOLTIP =
+  "用于评估/回补目标池数据完整度，不改变抓取范围。";
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || "未知错误。";
@@ -73,6 +75,7 @@ export function OtherDataManagementTargetTaskPanel(
   const [symbolFilter, setSymbolFilter] = useState("");
   const [moduleFilter, setModuleFilter] = useState<ModuleFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusPanelExpanded, setStatusPanelExpanded] = useState(false);
 
   const refreshConfigAndCoverage = useCallback(async () => {
     if (!window.mytrader) return;
@@ -118,8 +121,9 @@ export function OtherDataManagementTargetTaskPanel(
   }, [refreshConfigAndCoverage]);
 
   useEffect(() => {
+    if (!statusPanelExpanded) return;
     void refreshStatusRows();
-  }, [refreshStatusRows]);
+  }, [refreshStatusRows, statusPanelExpanded]);
 
   const matrixDirty = useMemo(() => {
     if (!matrixConfig || !savedMatrixConfig) return false;
@@ -168,15 +172,17 @@ export function OtherDataManagementTargetTaskPanel(
       const saved = await window.mytrader.market.setTargetTaskMatrixConfig(matrixConfig);
       setMatrixConfig(saved);
       setSavedMatrixConfig(saved);
-      setNotice("目标任务矩阵已保存。");
+      setNotice("完备性配置已保存。");
       await refreshConfigAndCoverage();
-      await refreshStatusRows();
+      if (statusPanelExpanded) {
+        await refreshStatusRows();
+      }
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
       setSaving(false);
     }
-  }, [matrixConfig, refreshConfigAndCoverage, refreshStatusRows]);
+  }, [matrixConfig, refreshConfigAndCoverage, refreshStatusRows, statusPanelExpanded]);
 
   const handleRunMaterialization = useCallback(async () => {
     if (!window.mytrader) return;
@@ -191,20 +197,32 @@ export function OtherDataManagementTargetTaskPanel(
       await window.mytrader.market.runTargetMaterialization({
         symbols: symbols.length > 0 ? symbols : null
       });
-      setNotice("目标池物化已触发，状态已刷新。");
-      await Promise.all([refreshConfigAndCoverage(), refreshStatusRows()]);
+      await refreshConfigAndCoverage();
+      if (statusPanelExpanded) {
+        await refreshStatusRows();
+        setNotice("目标池物化已触发，状态已刷新。");
+      } else {
+        setNotice("目标池物化已触发。");
+      }
     } catch (err) {
       setError(toErrorMessage(err));
     } finally {
       setMaterializing(false);
     }
-  }, [refreshConfigAndCoverage, refreshStatusRows, symbolFilter]);
+  }, [refreshConfigAndCoverage, refreshStatusRows, statusPanelExpanded, symbolFilter]);
 
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold text-slate-900 dark:text-white">
-          目标任务矩阵（SSOT-first）
+        <h3 className="font-bold text-slate-900 dark:text-white inline-flex items-center gap-2">
+          <span>目标池数据完备性</span>
+          <span
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-[11px] font-semibold text-slate-500 dark:border-border-dark dark:text-slate-300 cursor-help"
+            title={COMPLETENESS_DEFINITION_TOOLTIP}
+            aria-label={COMPLETENESS_DEFINITION_TOOLTIP}
+          >
+            ?
+          </span>
         </h3>
         <div className="flex items-center gap-2">
           <props.Button
@@ -213,7 +231,9 @@ export function OtherDataManagementTargetTaskPanel(
             icon="refresh"
             onClick={() => {
               void refreshConfigAndCoverage();
-              void refreshStatusRows();
+              if (statusPanelExpanded) {
+                void refreshStatusRows();
+              }
             }}
             disabled={loading || statusLoading || materializing}
           >
@@ -278,7 +298,7 @@ export function OtherDataManagementTargetTaskPanel(
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-2 text-xs">
               <span className="font-semibold text-slate-700 dark:text-slate-200">
-                矩阵配置
+                完备性模块配置
               </span>
               <span
                 className={`inline-flex items-center rounded-full border px-2 py-0.5 ${
@@ -312,154 +332,150 @@ export function OtherDataManagementTargetTaskPanel(
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-3 items-start">
-            <div className="space-y-1.5">
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                缺口回补窗口（天）
-              </div>
-              <props.Input
-                type="number"
-                min={1}
-                max={720}
-                value={String(matrixConfig?.defaultLookbackDays ?? 180)}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  setMatrixConfig((prev) => {
-                    if (!prev) return prev;
-                    return {
-                      ...prev,
-                      defaultLookbackDays: Number.isFinite(next)
-                        ? Math.max(1, Math.min(720, Math.floor(next)))
-                        : prev.defaultLookbackDays
-                    };
-                  });
-                }}
-                className="h-8 font-mono text-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-              {TARGET_TASK_MODULES.map((module) => {
-                const enabled = Boolean(
-                  matrixConfig?.enabledModules.includes(module.id)
-                );
-                return (
-                  <button
-                    key={`task-module-${module.id}`}
-                    type="button"
-                    onClick={() => handleToggleModule(module.id)}
-                    className={`rounded-md border px-2.5 py-2 text-left text-xs ${
-                      enabled
-                        ? "border-primary/40 bg-primary/12 text-slate-800 dark:text-slate-100"
-                        : "border-slate-200/80 dark:border-border-dark/70 text-slate-500 dark:text-slate-400"
-                    }`}
-                  >
-                    <div className="font-semibold">{module.label}</div>
-                    <div className="mt-0.5 font-mono opacity-75">{module.id}</div>
-                  </button>
-                );
-              })}
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {TARGET_TASK_MODULES.map((module) => {
+              const enabled = Boolean(
+                matrixConfig?.enabledModules.includes(module.id)
+              );
+              return (
+                <button
+                  key={`task-module-${module.id}`}
+                  type="button"
+                  onClick={() => handleToggleModule(module.id)}
+                  className={`rounded-md border px-2.5 py-2 text-left text-xs ${
+                    enabled
+                      ? "border-primary/40 bg-primary/12 text-slate-800 dark:text-slate-100"
+                      : "border-slate-200/80 dark:border-border-dark/70 text-slate-500 dark:text-slate-400"
+                  }`}
+                >
+                  <div className="font-semibold">{module.label}</div>
+                  <div className="mt-0.5 font-mono opacity-75">{module.id}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div className="rounded-md border border-slate-200/70 dark:border-border-dark/70 p-2.5 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <props.Input
-              value={symbolFilter}
-              onChange={(event) => setSymbolFilter(event.target.value)}
-              placeholder="筛选 symbol（支持逗号/空格多值）"
-              className="h-8 max-w-[260px] text-xs font-mono"
-            />
-            <props.PopoverSelect
-              value={moduleFilter}
-              onChangeValue={(value: string) => setModuleFilter(value as ModuleFilter)}
-              options={moduleFilterOptions}
-              className="w-[220px]"
-              buttonClassName="h-8 text-xs"
-            />
-            <props.PopoverSelect
-              value={statusFilter}
-              onChangeValue={(value: string) => setStatusFilter(value as StatusFilter)}
-              options={STATUS_FILTER_OPTIONS}
-              className="w-[200px]"
-              buttonClassName="h-8 text-xs"
-            />
-            <props.Button
-              variant="secondary"
-              size="sm"
-              icon="refresh"
-              onClick={() => void refreshStatusRows()}
-              disabled={statusLoading}
-            >
-              刷新状态
-            </props.Button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setStatusPanelExpanded((prev) => !prev)}
+            className="w-full flex items-center justify-between text-left"
+            aria-label={statusPanelExpanded ? "收起状态明细" : "展开状态明细"}
+            title={statusPanelExpanded ? "收起状态明细" : "展开状态明细"}
+          >
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+              状态明细
+            </span>
+            <span className="material-icons-outlined text-sm text-slate-500 dark:text-slate-400">
+              {statusPanelExpanded ? "expand_less" : "expand_more"}
+            </span>
+          </button>
 
-          {statusLoading && (
-            <div className="text-xs text-slate-500 dark:text-slate-400">加载中...</div>
-          )}
-          {!statusLoading && (
-            <div className="max-h-[360px] overflow-auto rounded-md border border-slate-200/70 dark:border-border-dark/70">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-white dark:bg-background-dark">
-                  <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
-                    <th className="px-2 py-1.5 text-left font-semibold">Symbol</th>
-                    <th className="px-2 py-1.5 text-left font-semibold">Module</th>
-                    <th className="px-2 py-1.5 text-left font-semibold">Asset</th>
-                    <th className="px-2 py-1.5 text-left font-semibold">Status</th>
-                    <th className="px-2 py-1.5 text-right font-semibold">Coverage</th>
-                    <th className="px-2 py-1.5 text-left font-semibold">As Of</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(statusRows?.items ?? []).map((item) => (
-                    <tr
-                      key={`${item.symbol}-${item.moduleId}`}
-                      className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
-                    >
-                      <td className="px-2 py-1.5 font-mono text-slate-700 dark:text-slate-200">
-                        {item.symbol}
-                      </td>
-                      <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
-                        {item.moduleId}
-                      </td>
-                      <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
-                        {item.assetClass ?? "--"}
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 ${getStatusToneClass(
-                            item.status
-                          )}`}
+          {statusPanelExpanded ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <props.Input
+                  value={symbolFilter}
+                  onChange={(event) => setSymbolFilter(event.target.value)}
+                  placeholder="筛选 symbol（支持逗号/空格多值）"
+                  className="h-8 max-w-[260px] text-xs font-mono"
+                />
+                <props.PopoverSelect
+                  value={moduleFilter}
+                  onChangeValue={(value: string) => setModuleFilter(value as ModuleFilter)}
+                  options={moduleFilterOptions}
+                  className="w-[220px]"
+                  buttonClassName="h-8 text-xs"
+                />
+                <props.PopoverSelect
+                  value={statusFilter}
+                  onChangeValue={(value: string) => setStatusFilter(value as StatusFilter)}
+                  options={STATUS_FILTER_OPTIONS}
+                  className="w-[200px]"
+                  buttonClassName="h-8 text-xs"
+                />
+                <props.Button
+                  variant="secondary"
+                  size="sm"
+                  icon="refresh"
+                  onClick={() => void refreshStatusRows()}
+                  disabled={statusLoading}
+                >
+                  刷新状态
+                </props.Button>
+              </div>
+
+              {statusLoading && (
+                <div className="text-xs text-slate-500 dark:text-slate-400">加载中...</div>
+              )}
+              {!statusLoading && (
+                <div className="max-h-[360px] overflow-auto rounded-md border border-slate-200/70 dark:border-border-dark/70">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-white dark:bg-background-dark">
+                      <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
+                        <th className="px-2 py-1.5 text-left font-semibold">Symbol</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">Module</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">Asset</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">Status</th>
+                        <th className="px-2 py-1.5 text-right font-semibold">Coverage</th>
+                        <th className="px-2 py-1.5 text-left font-semibold">As Of</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(statusRows?.items ?? []).map((item) => (
+                        <tr
+                          key={`${item.symbol}-${item.moduleId}`}
+                          className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
                         >
-                          {item.status}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1.5 text-right font-mono text-slate-700 dark:text-slate-200">
-                        {item.coverageRatio === null
-                          ? "--"
-                          : `${(item.coverageRatio * 100).toFixed(1)}%`}
-                      </td>
-                      <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
-                        {item.asOfTradeDate ? props.formatCnDate(item.asOfTradeDate) : "--"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!statusRows || statusRows.items.length === 0 ? (
-                <div className="px-3 py-6 text-xs text-slate-500 dark:text-slate-400">
-                  暂无状态数据。
+                          <td className="px-2 py-1.5 font-mono text-slate-700 dark:text-slate-200">
+                            {item.symbol}
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
+                            {item.moduleId}
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
+                            {item.assetClass ?? "--"}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-0.5 ${getStatusToneClass(
+                                item.status
+                              )}`}
+                            >
+                              {item.status}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-mono text-slate-700 dark:text-slate-200">
+                            {item.coverageRatio === null
+                              ? "--"
+                              : `${(item.coverageRatio * 100).toFixed(1)}%`}
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-600 dark:text-slate-300">
+                            {item.asOfTradeDate ? props.formatCnDate(item.asOfTradeDate) : "--"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!statusRows || statusRows.items.length === 0 ? (
+                    <div className="px-3 py-6 text-xs text-slate-500 dark:text-slate-400">
+                      暂无状态数据。
+                    </div>
+                  ) : null}
+                </div>
+              )}
+              {!statusLoading && statusRows ? (
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  展示 {statusRows.items.length} / {statusRows.total}
                 </div>
               ) : null}
+            </>
+          ) : (
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              默认收起，展开后可按 symbol/module/status 排查缺口。
             </div>
           )}
-          {!statusLoading && statusRows ? (
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">
-              展示 {statusRows.items.length} / {statusRows.total}
-            </div>
-          ) : null}
         </div>
 
         {(error || notice) && (
@@ -476,7 +492,7 @@ export function OtherDataManagementTargetTaskPanel(
 
         {loading && (
           <div className="text-xs text-slate-500 dark:text-slate-400">
-            目标任务矩阵加载中...
+            完备性面板加载中...
           </div>
         )}
       </div>
