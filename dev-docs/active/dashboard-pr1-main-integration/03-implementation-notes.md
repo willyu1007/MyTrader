@@ -209,3 +209,22 @@
       - 保留原 `concept + concept_detail` 主链路；
       - 新增 `ths_index + ths_member` 回退链路（当主链路为空时启用），并保持 active member 过滤。
     - 目标：保证在不同 token 权限/接口可用性条件下，尽可能回填 `ind:sw:l1` 与 `concept` 标签，减少“有 L2 无 L1、概念全空”的概率。
+
+## 2026-02-23 Follow-up #3: 全量池入口收口（去重）
+- 触发背景：
+  - 用户反馈“全量池配置重复”，同一页面同时存在：
+    - Source Center 的“全量数据池目录”（目录/域模块配置入口）；
+    - Target Pool 区块的“全量池配置”（legacy bucket 卡片入口）。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetPoolSection.tsx`
+    - 移除 `OtherDataManagementUniversePoolPanel` 依赖与整段“全量池”渲染；
+    - 收敛为仅保留“目标池编辑”区块。
+  - `apps/frontend/src/components/dashboard/views/other/OtherDataManagementTab.tsx`
+    - 移除向 `OtherDataManagementTargetPoolSection` 透传的 legacy universe pool props。
+  - `apps/frontend/src/components/dashboard/views/OtherView.tsx`
+    - 移除 `dataManagementTabProps` 中 legacy universe pool 相关透传字段。
+  - 删除死代码文件：
+    - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementUniversePoolPanel.tsx`
+- 结果：
+  - UI 层“全量池配置”仅保留 Source Center 单入口，消除重复配置点与覆盖歧义；
+  - 后端 legacy IPC 兼容路径仍保留（未破坏兼容），本次仅做前端入口收口。

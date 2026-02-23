@@ -99,3 +99,6 @@
   - `count(distinct ind:sw:l2:*) = 124`
   - `count(distinct ind:sw:l1:*) = 0`
   - `count(distinct concept:*) = 0`
+- 2026-02-23 (Follow-up #3: full-pool UI de-dup): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #3: full-pool UI de-dup): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #3: full-pool UI de-dup): `pnpm verify:pr1-guardrails` -> ✅ pass

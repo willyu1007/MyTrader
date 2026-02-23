@@ -72,11 +72,6 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
   } satisfies OtherDataManagementSchedulerSectionProps;
   const targetPoolSectionProps = {
     Button: props.Button,
-    UNIVERSE_POOL_BUCKET_ORDER: props.UNIVERSE_POOL_BUCKET_ORDER,
-    formatCnDate: props.formatCnDate,
-    getUniversePoolBucketLabel: props.getUniversePoolBucketLabel,
-    handleSaveUniversePoolConfig: props.handleSaveUniversePoolConfig,
-    handleToggleUniversePoolBucket: props.handleToggleUniversePoolBucket,
     handleResetTargetsDraft: props.handleResetTargetsDraft,
     handleSaveTargets: props.handleSaveTargets,
     handleTargetsEditorResizeKeyDown: props.handleTargetsEditorResizeKeyDown,
@@ -113,13 +108,7 @@ export function OtherDataManagementTab(props: OtherDataManagementTabProps) {
     marketTargetPoolStatsScope: props.marketTargetPoolStatsScope,
     setMarketCurrentTargetsModalOpen: props.setMarketCurrentTargetsModalOpen,
     setMarketTargetPoolDetailMetric: props.setMarketTargetPoolDetailMetric,
-    setMarketTargetPoolStatsScope: props.setMarketTargetPoolStatsScope,
-    marketUniverseBucketStatusById: props.marketUniverseBucketStatusById,
-    marketUniverseEnabledBuckets: props.marketUniverseEnabledBuckets,
-    marketUniversePoolConfig: props.marketUniversePoolConfig,
-    marketUniversePoolDirty: props.marketUniversePoolDirty,
-    marketUniversePoolLoading: props.marketUniversePoolLoading,
-    marketUniversePoolSaving: props.marketUniversePoolSaving
+    setMarketTargetPoolStatsScope: props.setMarketTargetPoolStatsScope
   } satisfies OtherDataManagementTargetPoolSectionProps;
   const registrySectionProps = {
     Button: props.Button,
