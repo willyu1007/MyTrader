@@ -194,3 +194,18 @@
 - 当前状态：
   - 代码链路已补齐并通过类型/门禁验证；
   - 运行态要看到二级行业/概念统计恢复，仍需触发一次 universe catalog 同步以回填新标签。
+
+## 2026-02-23 Follow-up #2: L1-L2 关联修正与概念链路增强回退
+- 触发背景：
+  - 运行态核对发现 `ind:sw:l2:*` 已落库（124 类），但 `ind:sw:l1:*` 为 0；
+  - `concept:*` 仍为 0，导致概念分类卡片空值。
+- 已落地改动：
+  - `apps/backend/src/main/market/providers/tushareProvider.ts`
+    - SW 行业：
+      - `index_classify` 改为多参数聚合拉取（`src + level(L1/L2)`），并合并节点；
+      - 兼容更多 level 表示（`L1/L2`、数字、中文一级/二级）；
+      - 当 `parent_code` 缺失时，按申万代码规则回退推导 L1 code（例如 `801783.SI -> 801780.SI`）。
+    - 概念：
+      - 保留原 `concept + concept_detail` 主链路；
+      - 新增 `ths_index + ths_member` 回退链路（当主链路为空时启用），并保持 active member 过滤。
+    - 目标：保证在不同 token 权限/接口可用性条件下，尽可能回填 `ind:sw:l1` 与 `concept` 标签，减少“有 L2 无 L1、概念全空”的概率。

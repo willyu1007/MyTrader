@@ -69,11 +69,13 @@ type ConceptMemberRow = {
   conceptName: string | null;
   symbol: string;
   outDate: string | null;
+  isNew: string | null;
 };
 
 const SW_CLASSIFY_SOURCES = ["SW2021", "SW"];
 const SW_MEMBER_FALLBACK_CONCURRENCY = 6;
 const CONCEPT_DETAIL_FALLBACK_CONCURRENCY = 6;
+const THS_MEMBER_FALLBACK_CONCURRENCY = 6;
 
 export const tushareProvider: MarketProvider = {
   id: "tushare",
@@ -382,11 +384,19 @@ async function fetchSwClassificationBySymbol(
 }
 
 async function fetchSwIndustryNodes(token: string): Promise<Map<string, SwIndustryNode>> {
-  const paramsList: Array<Record<string, string | undefined>> = SW_CLASSIFY_SOURCES.map(
-    (src) => ({ src })
-  );
-  paramsList.push({});
+  const paramsList: Array<Record<string, string | undefined>> = [];
+  const sources: Array<string | null> = [...SW_CLASSIFY_SOURCES, null];
+  const levels: Array<"L1" | "L2" | null> = ["L1", "L2", null];
+  for (const src of sources) {
+    for (const level of levels) {
+      paramsList.push({
+        src: src ?? undefined,
+        level: level ?? undefined
+      });
+    }
+  }
 
+  const merged = new Map<string, SwIndustryNode>();
   let lastError: unknown = null;
   for (const params of paramsList) {
     try {
@@ -397,14 +407,43 @@ async function fetchSwIndustryNodes(token: string): Promise<Map<string, SwIndust
         "index_code,industry_name,level,parent_code,src"
       );
       const parsed = parseSwIndustryNodes(res);
-      if (parsed.size > 0) return parsed;
+      mergeSwIndustryNodes(merged, parsed);
     } catch (error) {
       lastError = error;
     }
   }
 
+  if (merged.size > 0) return merged;
   if (lastError) throw lastError;
   return new Map();
+}
+
+function mergeSwIndustryNodes(
+  target: Map<string, SwIndustryNode>,
+  incoming: Map<string, SwIndustryNode>
+): void {
+  incoming.forEach((node, code) => {
+    const current = target.get(code);
+    if (!current) {
+      target.set(code, node);
+      return;
+    }
+
+    const nextLevel =
+      current.level === "l1" || node.level !== "l1" ? current.level : node.level;
+    const nextParentCode =
+      current.parentCode && current.parentCode.trim()
+        ? current.parentCode
+        : node.parentCode;
+    const nextName = current.name?.trim() ? current.name : node.name;
+
+    target.set(code, {
+      code,
+      name: nextName,
+      level: nextLevel,
+      parentCode: nextParentCode
+    });
+  });
 }
 
 function parseSwIndustryNodes(
@@ -425,10 +464,13 @@ function parseSwIndustryNodes(
   rows.forEach((row) => {
     const code = normalizeString(row[idxCode]);
     const name = normalizeString(row[idxName]);
-    const level = normalizeSwIndustryLevel(row[idxLevel]);
-    if (!code || !name || !level) return;
+    if (!code || !name) return;
     const parentCode =
       idxParentCode === -1 ? null : normalizeString(row[idxParentCode]);
+    const level =
+      normalizeSwIndustryLevel(row[idxLevel]) ??
+      inferSwIndustryLevelFromCode(code, parentCode);
+    if (!level) return;
 
     result.set(code, {
       code,
@@ -448,7 +490,20 @@ function normalizeSwIndustryLevel(
   if (!raw) return null;
   if (raw === "L1" || raw === "1" || raw === "SWL1") return "l1";
   if (raw === "L2" || raw === "2" || raw === "SWL2") return "l2";
+  if (raw.includes("一级") || raw.includes("LEVEL1")) return "l1";
+  if (raw.includes("二级") || raw.includes("LEVEL2")) return "l2";
   return null;
+}
+
+function inferSwIndustryLevelFromCode(
+  code: string,
+  parentCode: string | null
+): SwIndustryLevel | null {
+  if (parentCode && parentCode.trim()) return "l2";
+  const numeric = parseSwNumericCode(code);
+  if (numeric === null) return null;
+  if (numeric % 10 === 0) return "l1";
+  return "l2";
 }
 
 async function fetchSwMembersWithFallback(
@@ -567,12 +622,18 @@ function buildSwClassificationBySymbol(
     if (!node) return;
 
     const l2Node = node.level === "l2" ? node : null;
-    const l1Node =
+    let l1Node =
       node.level === "l1"
         ? node
         : node.parentCode
           ? l1ByCode.get(node.parentCode) ?? null
           : null;
+    if (!l1Node && l2Node) {
+      const fallbackL1Code = deriveSwL1CodeFromL2Code(l2Node.code);
+      if (fallbackL1Code) {
+        l1Node = l1ByCode.get(fallbackL1Code) ?? null;
+      }
+    }
     const next: StockSwClassification = {
       l1Code: l1Node?.code ?? null,
       l1Name: l1Node?.name ?? null,
@@ -615,6 +676,25 @@ function shouldReplaceSwClassification(
   return false;
 }
 
+function deriveSwL1CodeFromL2Code(l2Code: string): string | null {
+  const suffixMatch = l2Code.match(/(\.[A-Z]+)$/);
+  const suffix = suffixMatch ? suffixMatch[1] : "";
+  const numeric = parseSwNumericCode(l2Code);
+  if (numeric === null) return null;
+  const l1Numeric = Math.floor(numeric / 10) * 10;
+  const code = String(l1Numeric).padStart(6, "0");
+  return `${code}${suffix}`;
+}
+
+function parseSwNumericCode(code: string): number | null {
+  const normalized = normalizeString(code);
+  if (!normalized) return null;
+  const match = normalized.match(/^(\d{6})/);
+  if (!match) return null;
+  const numeric = Number(match[1]);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 async function fetchOptionalConceptNamesBySymbol(
   token: string
 ): Promise<Map<string, string[]>> {
@@ -633,28 +713,11 @@ async function fetchConceptNamesBySymbol(token: string): Promise<Map<string, str
     token,
     Array.from(conceptNameByCode.keys())
   );
-  if (detailRows.length === 0) return new Map();
+  const standardConcepts = buildConceptNamesBySymbol(detailRows, conceptNameByCode);
+  if (standardConcepts.size > 0) return standardConcepts;
 
-  const bySymbol = new Map<string, Set<string>>();
-  detailRows.forEach((row) => {
-    if (!isConceptMemberActive(row)) return;
-    const conceptName =
-      row.conceptName ??
-      (row.conceptCode ? conceptNameByCode.get(row.conceptCode) ?? null : null);
-    if (!conceptName) return;
-    const set = bySymbol.get(row.symbol) ?? new Set<string>();
-    set.add(conceptName);
-    bySymbol.set(row.symbol, set);
-  });
-
-  const result = new Map<string, string[]>();
-  bySymbol.forEach((set, symbol) => {
-    const concepts = Array.from(set.values()).sort((a, b) => a.localeCompare(b));
-    if (concepts.length > 0) {
-      result.set(symbol, concepts);
-    }
-  });
-  return result;
+  const thsConcepts = await fetchThsConceptNamesBySymbol(token);
+  return thsConcepts;
 }
 
 async function fetchConceptNameByCode(token: string): Promise<Map<string, string>> {
@@ -735,6 +798,7 @@ function parseConceptMemberRows(response: TushareRawResponse): ConceptMemberRow[
   const idxConceptCode = fields.indexOf("id");
   const idxConceptName = fields.indexOf("concept_name");
   const idxSymbol = fields.indexOf("ts_code");
+  const idxIsNew = fields.indexOf("is_new");
   const idxOutDate = fields.indexOf("out_date");
   if (idxSymbol === -1) return [];
 
@@ -746,20 +810,195 @@ function parseConceptMemberRows(response: TushareRawResponse): ConceptMemberRow[
         idxConceptCode === -1 ? null : normalizeString(row[idxConceptCode]);
       const conceptName =
         idxConceptName === -1 ? null : normalizeString(row[idxConceptName]);
+      const isNew = idxIsNew === -1 ? null : normalizeString(row[idxIsNew]);
       const outDate = idxOutDate === -1 ? null : normalizeDate(row[idxOutDate]);
       return {
         conceptCode,
         conceptName,
         symbol,
-        outDate
+        outDate,
+        isNew
       } satisfies ConceptMemberRow;
     })
     .filter((row): row is ConceptMemberRow => Boolean(row));
 }
 
 function isConceptMemberActive(row: ConceptMemberRow): boolean {
+  const isNew = row.isNew?.trim().toUpperCase();
+  if (isNew === "Y") return true;
+  if (isNew === "N") return false;
   if (!row.outDate) return true;
   return row.outDate >= todayDate();
+}
+
+function buildConceptNamesBySymbol(
+  rows: ConceptMemberRow[],
+  conceptNameByCode: Map<string, string>
+): Map<string, string[]> {
+  if (rows.length === 0) return new Map();
+
+  const bySymbol = new Map<string, Set<string>>();
+  rows.forEach((row) => {
+    if (!isConceptMemberActive(row)) return;
+    const conceptName =
+      row.conceptName ??
+      (row.conceptCode ? conceptNameByCode.get(row.conceptCode) ?? null : null);
+    if (!conceptName) return;
+    const set = bySymbol.get(row.symbol) ?? new Set<string>();
+    set.add(conceptName);
+    bySymbol.set(row.symbol, set);
+  });
+
+  const result = new Map<string, string[]>();
+  bySymbol.forEach((set, symbol) => {
+    const concepts = Array.from(set.values()).sort((a, b) => a.localeCompare(b));
+    if (concepts.length > 0) {
+      result.set(symbol, concepts);
+    }
+  });
+  return result;
+}
+
+async function fetchThsConceptNamesBySymbol(
+  token: string
+): Promise<Map<string, string[]>> {
+  const indexNameByCode = await fetchThsIndexNameByCode(token);
+  if (indexNameByCode.size === 0) return new Map();
+
+  const memberRows = await fetchThsMemberRows(token, Array.from(indexNameByCode.keys()));
+  if (memberRows.length === 0) return new Map();
+
+  return buildConceptNamesBySymbol(memberRows, indexNameByCode);
+}
+
+async function fetchThsIndexNameByCode(token: string): Promise<Map<string, string>> {
+  try {
+    const res = await fetchTusharePaged("ths_index", token, {}, "ts_code,name,type");
+    const fields = res.fields ?? [];
+    const rows = res.items ?? [];
+    const idxCode = fields.indexOf("ts_code");
+    const idxName = fields.indexOf("name");
+    const idxType = fields.indexOf("type");
+    if (idxCode === -1 || idxName === -1) return new Map();
+
+    const parsed: Array<{ code: string; name: string; type: string | null }> = [];
+    rows.forEach((row) => {
+      const code = normalizeString(row[idxCode]);
+      const name = normalizeString(row[idxName]);
+      if (!code || !name) return;
+      const type = idxType === -1 ? null : normalizeString(row[idxType]);
+      parsed.push({ code, name, type });
+    });
+    if (parsed.length === 0) return new Map();
+
+    const conceptOnly = parsed.filter((row) => isThsConceptType(row.type));
+    const selected = conceptOnly.length > 0 ? conceptOnly : parsed;
+
+    const result = new Map<string, string>();
+    selected.forEach((row) => {
+      result.set(row.code, row.name);
+    });
+    return result;
+  } catch {
+    return new Map();
+  }
+}
+
+function isThsConceptType(type: string | null): boolean {
+  const normalized = type?.trim().toUpperCase();
+  if (!normalized) return false;
+  if (normalized === "N") return true;
+  if (normalized.includes("CONCEPT")) return true;
+  if (normalized.includes("概念")) return true;
+  return false;
+}
+
+async function fetchThsMemberRows(
+  token: string,
+  thsCodes: string[]
+): Promise<ConceptMemberRow[]> {
+  let fullRows: ConceptMemberRow[] = [];
+  try {
+    const res = await fetchTusharePaged(
+      "ths_member",
+      token,
+      {},
+      "ts_code,code,name,con_code,con_name,is_new,out_date"
+    );
+    fullRows = parseThsMemberRows(res);
+    if (fullRows.length > 0) return fullRows;
+  } catch {
+    // fallback to per-code fetch below
+  }
+
+  if (thsCodes.length === 0) return [];
+
+  let failedCount = 0;
+  const rowsByCode = await mapWithConcurrency(
+    thsCodes,
+    THS_MEMBER_FALLBACK_CONCURRENCY,
+    async (thsCode) => {
+      try {
+        const res = await fetchTusharePaged(
+          "ths_member",
+          token,
+          { ts_code: thsCode },
+          "ts_code,code,name,con_code,con_name,is_new,out_date"
+        );
+        return parseThsMemberRows(res);
+      } catch {
+        failedCount += 1;
+        return [];
+      }
+    }
+  );
+  if (failedCount > 0) {
+    console.warn(
+      `[mytrader] optional ths_member fallback partial failures: ${failedCount}/${thsCodes.length}.`
+    );
+  }
+
+  return rowsByCode.flat();
+}
+
+function parseThsMemberRows(response: TushareRawResponse): ConceptMemberRow[] {
+  const fields = response.fields ?? [];
+  const rows = response.items ?? [];
+  const idxThsCode = fields.indexOf("ts_code");
+  const idxCode = fields.indexOf("code");
+  const idxName = fields.indexOf("name");
+  const idxConCode = fields.indexOf("con_code");
+  const idxConName = fields.indexOf("con_name");
+  const idxIsNew = fields.indexOf("is_new");
+  const idxOutDate = fields.indexOf("out_date");
+
+  if (idxConCode === -1 && idxConName === -1) return [];
+
+  return rows
+    .map((row) => {
+      const symbol = normalizeSymbol(row[idxConCode]);
+      if (!symbol) return null;
+
+      let conceptCode = idxThsCode === -1 ? null : normalizeString(row[idxThsCode]);
+      if (!conceptCode && idxCode !== -1) {
+        conceptCode = normalizeString(row[idxCode]);
+      }
+      let conceptName = idxName === -1 ? null : normalizeString(row[idxName]);
+      if (!conceptName && idxConName !== -1) {
+        conceptName = normalizeString(row[idxConName]);
+      }
+      const isNew = idxIsNew === -1 ? null : normalizeString(row[idxIsNew]);
+      const outDate = idxOutDate === -1 ? null : normalizeDate(row[idxOutDate]);
+
+      return {
+        conceptCode,
+        conceptName,
+        symbol,
+        outDate,
+        isNew
+      } satisfies ConceptMemberRow;
+    })
+    .filter((row): row is ConceptMemberRow => Boolean(row));
 }
 
 function enrichStockProfilesWithClassification(

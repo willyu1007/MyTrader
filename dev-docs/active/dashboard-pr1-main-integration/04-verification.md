@@ -92,3 +92,10 @@
 - 2026-02-23 (Follow-up: SW L2 + concept chain + UI default collapse): `pnpm typecheck` -> ✅ pass
 - 2026-02-23 (Follow-up: bulk fetch timeout hardening): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
 - 2026-02-23 (Follow-up: bulk fetch timeout hardening): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #2: L1-L2 relation fallback + THS concept fallback): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #2: L1-L2 relation fallback + THS concept fallback): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #2: L1-L2 relation fallback + THS concept fallback): `pnpm typecheck` -> ✅ pass
+- 2026-02-23 (Runtime diagnosis snapshot before re-sync):
+  - `count(distinct ind:sw:l2:*) = 124`
+  - `count(distinct ind:sw:l1:*) = 0`
+  - `count(distinct concept:*) = 0`
