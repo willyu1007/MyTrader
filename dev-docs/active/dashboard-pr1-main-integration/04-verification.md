@@ -105,3 +105,18 @@
 - 2026-02-23 (Follow-up #4: target completeness UX convergence): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
 - 2026-02-23 (Follow-up #4: target completeness UX convergence): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
 - 2026-02-23 (Follow-up #4: target completeness UX convergence): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #5: status board V1 emphasis redesign): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #5: status board V1 emphasis redesign): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #5: status board V1 emphasis redesign): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #6: status board V1.1 style/layout convergence): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #6: status board V1.1 style/layout convergence): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #6: status board V1.1 style/layout convergence): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #7: status board V1.2 matrix + status-line refinement): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #7: status board V1.2 matrix + status-line refinement): `pnpm exec tsc --noEmit -p apps/backend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #7: status board V1.2 matrix + status-line refinement): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #8: remove duplicate KPI cards, keep matrix-only): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #8: remove duplicate KPI cards, keep matrix-only): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #9: top status strip single-line + borderless): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #9: top status strip single-line + borderless): `pnpm verify:pr1-guardrails` -> ✅ pass
+- 2026-02-23 (Follow-up #10: top status metrics right-aligned): `pnpm exec tsc --noEmit -p apps/frontend/tsconfig.json` -> ✅ pass
+- 2026-02-23 (Follow-up #10: top status metrics right-aligned): `pnpm verify:pr1-guardrails` -> ✅ pass

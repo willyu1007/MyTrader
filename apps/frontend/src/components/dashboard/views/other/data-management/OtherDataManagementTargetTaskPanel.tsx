@@ -29,13 +29,32 @@ const TARGET_TASK_MODULES: Array<{ id: TargetTaskModuleId; label: string }> = [
 
 const STATUS_FILTER_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "all", label: "全部状态" },
-  { value: "complete", label: "complete" },
-  { value: "partial", label: "partial" },
-  { value: "missing", label: "missing" },
-  { value: "not_applicable", label: "not_applicable" }
+  { value: "complete", label: "完整" },
+  { value: "partial", label: "部分缺失" },
+  { value: "missing", label: "缺失" },
+  { value: "not_applicable", label: "不适用" }
 ];
 const COMPLETENESS_DEFINITION_TOOLTIP =
   "用于评估/回补目标池数据完整度，不改变抓取范围。";
+
+type HealthLevel = "healthy" | "watch" | "risk";
+
+type CoverageAssetView = {
+  assetClass: string;
+  assetLabel: string;
+  complete: number;
+  partial: number;
+  missing: number;
+  notApplicable: number;
+  applicable: number;
+  total: number;
+  repair: number;
+  completeRate: number;
+  partialRate: number;
+  missingRate: number;
+  notApplicableRate: number;
+  repairRate: number;
+};
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message || "未知错误。";
@@ -48,6 +67,81 @@ function getStatusToneClass(status: TargetTaskStatus): string {
   if (status === "partial") return "border-amber-300 text-amber-700 dark:text-amber-300";
   if (status === "missing") return "border-rose-300 text-rose-700 dark:text-rose-300";
   return "border-slate-300 text-slate-600 dark:border-border-dark dark:text-slate-300";
+}
+
+function formatStatusLabel(status: TargetTaskStatus): string {
+  if (status === "complete") return "完整";
+  if (status === "partial") return "部分缺失";
+  if (status === "missing") return "缺失";
+  return "不适用";
+}
+
+function toAssetLabel(assetClass: string): string {
+  if (assetClass === "stock") return "股票";
+  if (assetClass === "etf") return "ETF";
+  if (assetClass === "futures") return "期货";
+  if (assetClass === "spot") return "现货";
+  if (assetClass === "cash") return "现金";
+  if (assetClass === "unknown") return "未知";
+  return assetClass;
+}
+
+function toRate(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return numerator / denominator;
+}
+
+function formatRate(rate: number): string {
+  return `${(rate * 100).toFixed(1)}%`;
+}
+
+function getDateLagDays(dateText: string | null): number | null {
+  if (!dateText) return null;
+  const target = new Date(`${dateText}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const diffMs = todayStart.getTime() - target.getTime();
+  return Math.max(0, Math.floor(diffMs / 86_400_000));
+}
+
+function resolveHealthLevel(input: {
+  missingRate: number;
+  partialRate: number;
+  lagDays: number | null;
+}): {
+  level: HealthLevel;
+  label: string;
+  textClass: string;
+  dotClass: string;
+  hint: string;
+} {
+  const lag = input.lagDays ?? 0;
+  if (input.missingRate >= 0.3 || lag >= 3) {
+    return {
+      level: "risk",
+      label: "高风险",
+      textClass: "text-rose-700 dark:text-rose-300",
+      dotClass: "bg-rose-500",
+      hint: "先执行物化，再展开状态明细定位缺失。"
+    };
+  }
+  if (input.missingRate >= 0.1 || input.partialRate >= 0.25 || lag >= 2) {
+    return {
+      level: "watch",
+      label: "需关注",
+      textClass: "text-amber-700 dark:text-amber-300",
+      dotClass: "bg-amber-500",
+      hint: "建议执行一次物化，并关注高缺失资产。"
+    };
+  }
+  return {
+    level: "healthy",
+    label: "健康",
+    textClass: "text-emerald-700 dark:text-emerald-300",
+    dotClass: "bg-emerald-500",
+    hint: "当前覆盖稳定，可按需抽查状态明细。"
+  };
 }
 
 export type OtherDataManagementTargetTaskPanelProps = Pick<
@@ -140,6 +234,125 @@ export function OtherDataManagementTargetTaskPanel(
     ],
     []
   );
+
+  const coverageSummary = useMemo(() => {
+    if (!coverage) return null;
+    const complete = coverage.totals.complete ?? 0;
+    const partial = coverage.totals.partial ?? 0;
+    const missing = coverage.totals.missing ?? 0;
+    const notApplicable = coverage.totals.notApplicable ?? 0;
+    const applicable = complete + partial + missing;
+    const total = applicable + notApplicable;
+    const repair = partial + missing;
+    const completeRate = toRate(complete, applicable);
+    const partialRate = toRate(partial, applicable);
+    const missingRate = toRate(missing, applicable);
+    const notApplicableRate = toRate(notApplicable, total);
+    const repairRate = toRate(repair, applicable);
+    const lagDays = getDateLagDays(coverage.asOfTradeDate);
+    const health = resolveHealthLevel({ missingRate, partialRate, lagDays });
+
+    return {
+      complete,
+      partial,
+      missing,
+      notApplicable,
+      applicable,
+      total,
+      completeRate,
+      partialRate,
+      missingRate,
+      notApplicableRate,
+      repair,
+      repairRate,
+      lagDays,
+      health
+    };
+  }, [coverage]);
+
+  const assetCoverageViews = useMemo<CoverageAssetView[]>(() => {
+    if (!coverage) return [];
+    return coverage.byAssetClass
+      .map((item) => {
+        const complete = item.complete ?? 0;
+        const partial = item.partial ?? 0;
+        const missing = item.missing ?? 0;
+        const notApplicable = item.notApplicable ?? 0;
+        const applicable = complete + partial + missing;
+        const total = applicable + notApplicable;
+        const repair = partial + missing;
+        return {
+          assetClass: item.assetClass,
+          assetLabel: toAssetLabel(item.assetClass),
+          complete,
+          partial,
+          missing,
+          notApplicable,
+          applicable,
+          total,
+          repair,
+          completeRate: toRate(complete, applicable),
+          partialRate: toRate(partial, applicable),
+          missingRate: toRate(missing, applicable),
+          notApplicableRate: toRate(notApplicable, total),
+          repairRate: toRate(repair, applicable)
+        } satisfies CoverageAssetView;
+      })
+      .sort((a, b) => {
+        if (a.missingRate !== b.missingRate) return b.missingRate - a.missingRate;
+        return b.missing - a.missing;
+      });
+  }, [coverage]);
+
+  const topRiskAsset = useMemo(() => {
+    return assetCoverageViews.find((item) => item.applicable > 0) ?? null;
+  }, [assetCoverageViews]);
+
+  const displayAssetCoverageViews = useMemo(() => {
+    return assetCoverageViews.filter((item) => item.total > 0);
+  }, [assetCoverageViews]);
+
+  const coverageMatrixRows = useMemo(() => {
+    if (!coverageSummary) return [];
+
+    const buildRow = (
+      label: string,
+      overallCount: number,
+      overallRate: number | null,
+      pick: (asset: CoverageAssetView) => { count: number; rate: number | null }
+    ) => ({
+      label,
+      overallCount,
+      overallRate,
+      assets: displayAssetCoverageViews.map((asset) => ({
+        assetClass: asset.assetClass,
+        ...pick(asset)
+      }))
+    });
+
+    return [
+      buildRow("完整", coverageSummary.complete, coverageSummary.completeRate, (asset) => ({
+        count: asset.complete,
+        rate: asset.completeRate
+      })),
+      buildRow("部分缺失", coverageSummary.partial, coverageSummary.partialRate, (asset) => ({
+        count: asset.partial,
+        rate: asset.partialRate
+      })),
+      buildRow("缺失", coverageSummary.missing, coverageSummary.missingRate, (asset) => ({
+        count: asset.missing,
+        rate: asset.missingRate
+      })),
+      buildRow("不适用", coverageSummary.notApplicable, coverageSummary.notApplicableRate, (asset) => ({
+        count: asset.notApplicable,
+        rate: asset.notApplicableRate
+      })),
+      buildRow("待回补", coverageSummary.repair, coverageSummary.repairRate, (asset) => ({
+        count: asset.repair,
+        rate: asset.repairRate
+      }))
+    ];
+  }, [coverageSummary, displayAssetCoverageViews]);
 
   const handleToggleModule = useCallback((moduleId: TargetTaskModuleId) => {
     setMatrixConfig((prev) => {
@@ -252,45 +465,108 @@ export function OtherDataManagementTargetTaskPanel(
       </div>
 
       <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark p-3 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <div className="rounded-md border border-slate-200/80 dark:border-border-dark/70 bg-slate-50/60 dark:bg-background-dark/40 px-3 py-2">
-            <div className="text-[10px] text-slate-500 dark:text-slate-400">
-              As Of
+        {coverageSummary ? (
+          <div className="space-y-3">
+            <div className="overflow-x-auto">
+              <div className="flex min-w-full w-max items-center gap-4 whitespace-nowrap px-1 py-1 text-xs">
+                <span className="inline-flex items-center gap-2">
+                  <span
+                    className={`inline-flex h-2.5 w-2.5 rounded-full ${coverageSummary.health.dotClass}`}
+                  />
+                  <span className={`font-semibold ${coverageSummary.health.textClass}`}>
+                    健康状态: {coverageSummary.health.label}
+                  </span>
+                </span>
+                <span className="text-slate-600 dark:text-slate-300">
+                  {coverageSummary.health.hint}
+                </span>
+                <span className="ml-auto text-right font-mono text-slate-500 dark:text-slate-400">
+                  统计日期 {coverage?.asOfTradeDate ? props.formatCnDate(coverage.asOfTradeDate) : "--"}
+                  {" · "}
+                  延迟 {coverageSummary.lagDays === null ? "--" : `${coverageSummary.lagDays} 天`}
+                  {" · "}
+                  规模 {coverage?.totals.symbols ?? 0} symbols / {coverage?.totals.modules ?? 0} modules
+                </span>
+              </div>
             </div>
-            <div className="mt-0.5 font-mono text-sm text-slate-800 dark:text-slate-100">
-              {coverage?.asOfTradeDate ? props.formatCnDate(coverage.asOfTradeDate) : "--"}
-            </div>
-          </div>
-          <div className="rounded-md border border-slate-200/80 dark:border-border-dark/70 bg-slate-50/60 dark:bg-background-dark/40 px-3 py-2">
-            <div className="text-[10px] text-slate-500 dark:text-slate-400">
-              覆盖规模
-            </div>
-            <div className="mt-0.5 font-mono text-sm text-slate-800 dark:text-slate-100">
-              {coverage?.totals.symbols ?? 0} symbols / {coverage?.totals.modules ?? 0} modules
-            </div>
-          </div>
-          <div className="rounded-md border border-slate-200/80 dark:border-border-dark/70 bg-slate-50/60 dark:bg-background-dark/40 px-3 py-2">
-            <div className="text-[10px] text-slate-500 dark:text-slate-400">
-              状态计数
-            </div>
-            <div className="mt-0.5 text-xs font-mono text-slate-700 dark:text-slate-200">
-              C:{coverage?.totals.complete ?? 0} / P:{coverage?.totals.partial ?? 0} / M:
-              {coverage?.totals.missing ?? 0} / NA:{coverage?.totals.notApplicable ?? 0}
-            </div>
-          </div>
-        </div>
 
-        {coverage && coverage.byAssetClass.length > 0 && (
-          <div className="rounded-md border border-slate-200/70 dark:border-border-dark/70 px-2.5 py-2 text-xs text-slate-600 dark:text-slate-300">
-            {coverage.byAssetClass.map((item) => (
-              <span
-                key={`asset-coverage-${item.assetClass}`}
-                className="inline-flex mr-2 mb-1 rounded-full border border-slate-300/70 dark:border-border-dark/70 px-2 py-0.5"
-              >
-                {item.assetClass}: C {item.complete} / P {item.partial} / M {item.missing} / NA{" "}
-                {item.notApplicable}
-              </span>
-            ))}
+            <div className="rounded-md border border-slate-200/70 p-2.5 dark:border-border-dark/70">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  资产覆盖状态矩阵
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {topRiskAsset
+                    ? `最高风险: ${topRiskAsset.assetLabel} · 缺失率 ${formatRate(
+                        topRiskAsset.missingRate
+                      )}`
+                    : "最高风险: --"}
+                  {" · "}
+                  当前显示 {displayAssetCoverageViews.length} 个资产类别
+                </div>
+              </div>
+              {displayAssetCoverageViews.length > 0 ? (
+                <div className="mt-2 overflow-x-auto rounded-md border border-slate-200/70 dark:border-border-dark/70">
+                  <table className="min-w-[860px] w-full text-xs">
+                    <thead className="bg-slate-50/60 dark:bg-background-dark/50">
+                      <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
+                        <th className="px-2.5 py-1.5 text-left font-semibold">统计维度</th>
+                        <th className="px-2.5 py-1.5 text-right font-semibold">整体</th>
+                        {displayAssetCoverageViews.map((asset) => (
+                          <th
+                            key={`coverage-matrix-header-${asset.assetClass}`}
+                            className="px-2.5 py-1.5 text-right font-semibold"
+                          >
+                            {asset.assetLabel}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {coverageMatrixRows.map((row) => (
+                        <tr
+                          key={`coverage-matrix-row-${row.label}`}
+                          className="border-b border-slate-200/70 dark:border-border-dark/70 last:border-b-0"
+                        >
+                          <td className="px-2.5 py-1.5 font-semibold text-slate-700 dark:text-slate-200">
+                            {row.label}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right">
+                            <div className="font-mono text-slate-700 dark:text-slate-200">
+                              {row.overallCount.toLocaleString()}
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                              {row.overallRate === null ? "--" : formatRate(row.overallRate)}
+                            </div>
+                          </td>
+                          {row.assets.map((cell) => (
+                            <td
+                              key={`coverage-matrix-cell-${row.label}-${cell.assetClass}`}
+                              className="px-2.5 py-1.5 text-right"
+                            >
+                              <div className="font-mono text-slate-700 dark:text-slate-200">
+                                {cell.count.toLocaleString()}
+                              </div>
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                                {cell.rate === null ? "--" : formatRate(cell.rate)}
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  暂无资产维度覆盖数据。
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-md border border-slate-200/70 px-3 py-2 text-xs text-slate-500 dark:border-border-dark/70 dark:text-slate-400">
+            暂无覆盖数据。
           </div>
         )}
 
@@ -443,7 +719,7 @@ export function OtherDataManagementTargetTaskPanel(
                                 item.status
                               )}`}
                             >
-                              {item.status}
+                              {formatStatusLabel(item.status)}
                             </span>
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono text-slate-700 dark:text-slate-200">

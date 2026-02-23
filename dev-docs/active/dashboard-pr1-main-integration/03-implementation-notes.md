@@ -246,3 +246,75 @@
 - 结果：
   - 交互主路径从“技术矩阵配置 + 全量状态表”收敛为“总览 + 物化 + 按需排障”；
   - 保持后端能力与配置结构不变，属于纯前端可用性收敛，无数据格式变更风险。
+
+## 2026-02-23 Follow-up #5: 状态版 V1（告警优先）重构
+- 触发背景：
+  - 用户反馈当前状态版“重点不显眼”，难以快速识别风险与优先动作。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 顶部总览从“平铺信息卡”改为“告警优先”结构：
+      - 新增健康状态横幅（健康/需关注/高风险）+ 数据滞后天数 + 操作提示；
+      - 新增关键指标卡：覆盖完成率、缺失占比、部分缺失占比、待回补任务数；
+      - 新增资产覆盖风险条（按缺失率排序，展示 Top Risk 资产与分段覆盖条）。
+    - 状态明细表状态文案由英文改为中文（完整/部分缺失/缺失/不适用）。
+  - 说明：该版本为前端 V1 视觉层级优化，不变更后端口径与任务执行语义。
+
+## 2026-02-23 Follow-up #6: 状态版 V1.1 收敛（风格统一 + 布局重排）
+- 触发背景：
+  - 用户反馈 V1 存在“配色过重、与整体风格割裂、资产风险区占行过大、缩写文案不直观”问题。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 将“健康状态 + 4 指标”整合为同一总览容器，统一为中性色底，仅保留小面积语义色（状态点/关键数字）；
+    - 将资产覆盖风险区从单列长条改为紧凑网格（`lg` 下 2 列），并仅展示 `applicable > 0` 的资产类别；
+    - 资产明细文案由 `C/P/M/NA` 改为中文全称“完整/部分缺失/缺失/不适用”；
+    - 在资产区补充“当前显示 N 个资产类别”，减少对“为什么只有四类”的认知歧义。
+- 结果：
+  - 面板与整体 Dashboard 视觉风格更一致；
+  - 信息密度更高且阅读路径更清晰，适合日常快速巡检。
+
+## 2026-02-23 Follow-up #7: 状态版 V1.2（健康状态行 + 覆盖状态矩阵）
+- 触发背景：
+  - 用户要求进一步收敛信息表达：
+    - 健康状态不使用外框；
+    - 风险提示与“健康状态”同一行展示；
+    - 将“完整/部分缺失/缺失/不适用/待回补”改为矩阵化展示（纵轴状态，横轴整体+资产类别）。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 健康状态区：
+      - 去除健康状态胶囊外框，仅保留状态点 + 文本；
+      - 将操作提示迁移至同一行右侧；统计日期/延迟/规模下移为次级信息行。
+    - 资产覆盖区：
+      - 从“资产风险卡片”改为“资产覆盖状态矩阵”；
+      - 行维度：完整、部分缺失、缺失、不适用、待回补；
+      - 列维度：整体 + 动态资产类别（股票/ETF/期货/现货等，以运行时数据为准）；
+      - 单元格展示 `数量 + 占比`，支持横向滚动，避免列多时挤压布局。
+    - 统计口径补齐：
+      - 新增 `notApplicableRate`（分母为 `applicable + notApplicable`）；
+      - 新增 `repairRate`（`待回补 = 部分缺失 + 缺失`，分母为 `applicable`）。
+
+## 2026-02-23 Follow-up #8: 去除重复 KPI 卡片（保留矩阵单一主视图）
+- 触发背景：
+  - 用户确认“有了覆盖状态矩阵后，上方四张 KPI 卡片不再必要”。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 移除“覆盖完成率/缺失占比/部分缺失占比/待回补任务”四张卡片区域；
+    - 保留“健康状态行 + 统计日期行 + 覆盖状态矩阵”作为单一主视图。
+- 结果：
+  - 降低信息重复与视觉噪音，页面焦点统一到矩阵视图。
+
+## 2026-02-23 Follow-up #9: 顶部状态条单行化（无外框）
+- 触发背景：
+  - 用户要求顶部状态信息“压缩成一行，并去掉外框”。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 将“健康状态 + 提示语 + 统计日期/延迟/规模”合并为单行展示；
+    - 移除该信息块的内层边框与背景；
+    - 为窄屏增加横向滚动容器，避免强制换行破坏单行布局。
+
+## 2026-02-23 Follow-up #10: 顶部统计文案右对齐
+- 触发背景：
+  - 用户要求“统计日期/延迟/规模”文案靠右。
+- 已落地改动：
+  - `apps/frontend/src/components/dashboard/views/other/data-management/OtherDataManagementTargetTaskPanel.tsx`
+    - 单行容器改为 `flex + min-w-full + w-max`；
+    - 统计文案块新增 `ml-auto text-right`，在可用宽度内右侧对齐，同时保留窄屏横向滚动能力。
