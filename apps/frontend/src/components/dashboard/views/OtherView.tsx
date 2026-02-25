@@ -68,11 +68,6 @@ type DashboardMarketResizeResult = ReturnType<
   typeof import("../hooks/use-dashboard-market-resize").useDashboardMarketResize
 >;
 
-interface OtherTabOption {
-  key: OtherTab;
-  label: string;
-}
-
 interface OtherViewExternalProps {
   Button: typeof import("../shared").Button;
   FormGroup: typeof import("../shared").FormGroup;
@@ -99,7 +94,6 @@ interface OtherViewExternalProps {
   getIngestControlStateDotClass: typeof import("../shared").getIngestControlStateDotClass;
   getUniversePoolBucketLabel: typeof import("../shared").getUniversePoolBucketLabel;
   otherTab: OtherTab;
-  otherTabs: ReadonlyArray<OtherTabOption>;
   setActiveView: Dispatch<SetStateAction<WorkspaceView>>;
   setOtherTab: Dispatch<SetStateAction<OtherTab>>;
   snapshot: PortfolioSnapshot | null;
@@ -120,7 +114,7 @@ export type OtherViewProps = DashboardMarketState &
   OtherViewExternalProps;
 
 export function OtherView(props: OtherViewProps) {
-  const { Panel, otherTab, otherTabs, setOtherTab } = props;
+  const { Panel, otherTab } = props;
   const dataManagementTabProps = {
     formatCnDate: props.formatCnDate,
     formatDateTime: props.formatDateTime,
@@ -272,31 +266,11 @@ export function OtherView(props: OtherViewProps) {
 
   return (
     <Panel>
-      <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
-        <div className="flex items-center gap-1 overflow-x-auto px-3">
-          {otherTabs.map((tab: OtherTabOption) => {
-            const isActive = otherTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                className={`flex-none min-w-[140px] flex items-center justify-center px-4 py-2 text-sm font-semibold text-center whitespace-nowrap transition-colors border-b-2 ${
-                  isActive
-                    ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-surface-dark"
-                    : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
-                }`}
-                onClick={() => setOtherTab(tab.key)}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="pt-6 space-y-6 w-full max-w-none">
+      <div
+        className={`space-y-6 w-full max-w-none ${
+          otherTab === "data-management" ? "pt-2" : "pt-6"
+        }`}
+      >
         {otherTab === "data-management" &&
           createElement(OtherDataManagementTab, dataManagementTabProps)}
 

@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useState
 } from "react";
 
@@ -66,7 +67,14 @@ import { useDashboardPortfolioState } from "./hooks/use-dashboard-portfolio-stat
 import { useDashboardUiEffects } from "./hooks/use-dashboard-ui-effects";
 import { useDashboardUi } from "./hooks/use-dashboard-ui";
 
-export function Dashboard({ account, onLock, onActivePortfolioChange }: DashboardProps) {
+export function Dashboard({
+  account,
+  onOpenSettings,
+  navCollapsed,
+  onNavCollapsedChange,
+  onActiveViewChange,
+  onActivePortfolioChange
+}: DashboardProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [activePortfolioId, setActivePortfolioId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
@@ -82,9 +90,15 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
     setOtherTab,
     analysisTab,
     setAnalysisTab,
-    isNavCollapsed,
-    setIsNavCollapsed
-  } = useDashboardUi();
+    isNavCollapsed
+  } = useDashboardUi({
+    navCollapsed,
+    onNavCollapsedChange
+  });
+
+  useEffect(() => {
+    onActiveViewChange?.(activeView);
+  }, [activeView, onActiveViewChange]);
   const analysisState = useDashboardAnalysis<MarketChartRangeKey>({
     defaultInstrumentRange: "6M"
   });
@@ -495,11 +509,10 @@ export function Dashboard({ account, onLock, onActivePortfolioChange }: Dashboar
   return (
     <DashboardContainerLayout
       account={account}
-      onLock={onLock}
+      onOpenSettings={onOpenSettings}
       activeView={activeView}
       setActiveView={setActiveView}
       isNavCollapsed={isNavCollapsed}
-      setIsNavCollapsed={setIsNavCollapsed}
       otherTab={otherTab}
       setOtherTab={setOtherTab}
       analysisTab={analysisTab}

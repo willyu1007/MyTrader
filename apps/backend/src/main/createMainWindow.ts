@@ -12,6 +12,7 @@ export function createMainWindow() {
   }
 
   const isDev = Boolean(config.devServerUrl);
+  const isMac = process.platform === "darwin";
   const preferredWidth = 1440;
   const preferredHeight = Math.round(760 * 1.2);
   const { workAreaSize } = screen.getPrimaryDisplay();
@@ -22,6 +23,12 @@ export function createMainWindow() {
     width,
     height,
     show: !isDev,
+    ...(isMac
+      ? {
+          titleBarStyle: "hidden",
+          trafficLightPosition: { x: 14, y: 9 }
+        }
+      : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

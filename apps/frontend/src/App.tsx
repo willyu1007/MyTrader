@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Dashboard } from "./components/Dashboard";
 import { GlobalHoverTooltipLayer } from "./components/GlobalHoverTooltipLayer";
+import type { WorkspaceView } from "./components/dashboard/types";
 import {
   getThemeMode,
   resolveTheme,
@@ -54,7 +55,9 @@ export function App() {
   );
   const hasDesktopApi = Boolean(window.mytrader);
   const isElectron = navigator.userAgent.toLowerCase().includes("electron");
+  const isMac = navigator.platform.toLowerCase().includes("mac");
   const isDev = import.meta.env.DEV;
+  const useMacTitlebarInset = isElectron && isMac;
 
   const [createLabel, setCreateLabel] = useState("");
   const [createPassword, setCreatePassword] = useState("");
@@ -64,6 +67,10 @@ export function App() {
 
   const [loginAccount, setLoginAccount] = useState<string>("");
   const [unlockPassword, setUnlockPassword] = useState("");
+  const [isNavCollapsed, setIsNavCollapsed] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [dashboardActiveView, setDashboardActiveView] =
+    useState<WorkspaceView>("portfolio");
 
   useEffect(() => {
     const resolved = setThemeMode(themeMode, { persist: true });
@@ -77,6 +84,12 @@ export function App() {
       setResolvedTheme(resolved);
     });
   }, [themeMode]);
+
+  useEffect(() => {
+    if (state.kind !== "unlocked") {
+      setIsSettingsOpen(false);
+    }
+  }, [state.kind]);
 
   const accounts = useMemo(() => {
     if (state.kind !== "locked") return [];
@@ -254,6 +267,7 @@ export function App() {
         state.kind === "unlocked" ? state.account.label : undefined;
       await window.mytrader.account.lock();
       await refreshAccounts(lastLoginAccount);
+      setIsSettingsOpen(false);
     } catch (e) {
       setError(toUserErrorMessage(e));
     }
@@ -273,44 +287,44 @@ export function App() {
     { value: "light", label: "浅色", icon: "light_mode" },
     { value: "dark", label: "深色", icon: "dark_mode" }
   ];
+  const isNavToggleDisabled = dashboardActiveView === "market";
 
   return (
     <div className="app h-screen flex flex-col overflow-hidden">
-      <header className="topbar h-10 flex items-center justify-between px-3 bg-white/90 dark:bg-background-dark/80 backdrop-blur-md border-b border-border-light dark:border-border-dark flex-shrink-0 z-30">
-        <div className="brandGroup flex items-center gap-2">
-          <div className="brandMark w-5 h-5 bg-primary rounded flex items-center justify-center text-white font-bold text-[10px] shadow-sm">M</div>
-          <h1 className="brand text-sm font-bold tracking-tight text-slate-900 dark:text-white">MyTrader</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="themeModeSwitch" role="group" aria-label="主题模式">
-            {themeOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`themeModeButton ${themeMode === option.value ? "isActive" : ""}`}
-                onClick={() => setThemeModeState(option.value)}
-                title={
-                  option.value === "system"
-                    ? `跟随系统（当前：${resolvedTheme === "dark" ? "深色" : "浅色"}）`
-                    : option.label
-                }
-                aria-pressed={themeMode === option.value}
+      <header
+        className={`topbar flex-shrink-0 z-30 ${useMacTitlebarInset ? "topbar--macInset" : ""}`}
+      >
+        <div className="topbarLeft">
+          {state.kind === "unlocked" && (
+            <button
+              type="button"
+              className="navToggle topbarControl topbarNavToggle"
+              onClick={() => setIsNavCollapsed((prev) => !prev)}
+              aria-label={isNavCollapsed ? "展开导航" : "收起导航"}
+              title={
+                isNavToggleDisabled
+                  ? "市场视图下导航固定为收起状态"
+                  : isNavCollapsed
+                    ? "展开导航"
+                    : "收起导航"
+              }
+              disabled={isNavToggleDisabled}
+            >
+              <span
+                className={`topbarNavIcon ${isNavCollapsed ? "isCollapsed" : ""}`}
+                aria-hidden="true"
               >
-                <span className="material-icons-outlined text-[14px]">{option.icon}</span>
-                <span className="themeModeButtonLabel">{option.label}</span>
-              </button>
-            ))}
-          </div>
-          {state.kind === "unlocked" && (
-            <div className="text-xs text-slate-600 dark:text-slate-300 font-medium">
-              组合：{activePortfolioName ?? "--"}
-            </div>
+                <span className="topbarNavIconMark" />
+              </span>
+            </button>
           )}
-          {state.kind === "unlocked" && (
-            <div className="text-xs text-slate-600 dark:text-slate-300 font-medium px-2 border-l border-slate-200 dark:border-border-dark">
-              {state.account.label}
-            </div>
-          )}
+        </div>
+        <div
+          id="app-topbar-workspace-slot"
+          className={`topbarCenter ${state.kind === "unlocked" ? "" : "isEmpty"}`}
+        />
+        <div className="topbarRight">
+          <h1 className="topbarBrand">MyTrader</h1>
         </div>
       </header>
 
@@ -319,7 +333,10 @@ export function App() {
           <div className="relative z-10 w-full h-full">
             <Dashboard
               account={state.account}
-              onLock={handleLock}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              navCollapsed={isNavCollapsed}
+              onNavCollapsedChange={setIsNavCollapsed}
+              onActiveViewChange={setDashboardActiveView}
               onActivePortfolioChange={handleActivePortfolioChange}
             />
           </div>
@@ -627,6 +644,77 @@ export function App() {
           </div>
         )}
       </main>
+      {state.kind === "unlocked" && isSettingsOpen && (
+        <div className="fixed inset-0 z-50" onClick={() => setIsSettingsOpen(false)}>
+          <div className="absolute inset-0 bg-black/20 dark:bg-black/35" />
+          <section
+            className="absolute left-3 bottom-3 w-[254px] max-w-[calc(100vw-24px)] rounded-lg border border-slate-200 dark:border-border-dark bg-white/95 dark:bg-surface-dark/95 backdrop-blur-xl shadow-xl p-3 space-y-3 topbarControl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="设置"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                className="topbarControl p-1 rounded-md text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-background-dark/80 transition-colors"
+                onClick={() => setIsSettingsOpen(false)}
+                aria-label="关闭设置"
+              >
+                <span className="material-icons-outlined text-base">close</span>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                主题
+              </div>
+              <div className="themeModeSwitch topbarControl" role="group" aria-label="主题模式">
+                {themeOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`themeModeButton topbarControl ${themeMode === option.value ? "isActive" : ""}`}
+                    onClick={() => setThemeModeState(option.value)}
+                    title={
+                      option.value === "system"
+                        ? `跟随系统（当前：${resolvedTheme === "dark" ? "深色" : "浅色"}）`
+                        : option.label
+                    }
+                    aria-pressed={themeMode === option.value}
+                  >
+                    <span className="material-icons-outlined text-[12px]">{option.icon}</span>
+                    <span className="themeModeButtonLabel">{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-[48px_1fr] items-center gap-x-2 gap-y-1.5 text-xs">
+              <span className="text-slate-500 dark:text-slate-400">组合</span>
+              <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                {activePortfolioName ?? "--"}
+              </span>
+              <span className="text-slate-500 dark:text-slate-400">账号</span>
+              <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                {state.account.label}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              className="topbarControl w-full inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 dark:border-border-dark bg-white dark:bg-background-dark/70 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-background-dark transition-colors"
+              onClick={() => {
+                void handleLock();
+                setIsSettingsOpen(false);
+              }}
+            >
+              <span className="material-icons-outlined text-sm">lock</span>
+              锁定并返回登录
+            </button>
+          </section>
+        </div>
+      )}
       {state.kind !== "unlocked" && (
         <footer className="footer py-2 text-center text-[10px] text-slate-400 dark:text-slate-600 bg-background-light dark:bg-background-dark">
           (c) 2026 MyTrader 专业交易工作台。

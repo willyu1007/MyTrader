@@ -118,7 +118,6 @@ export interface DataAnalysisViewProps {
   setAnalysisInstrumentQuery: Dispatch<SetStateAction<string>>;
   setAnalysisInstrumentRange: Dispatch<SetStateAction<MarketChartRangeKey>>;
   setAnalysisInstrumentSymbol: Dispatch<SetStateAction<string | null>>;
-  setAnalysisTab: Dispatch<SetStateAction<AnalysisTab>>;
   setPerformanceError: Dispatch<SetStateAction<string | null>>;
   setPerformanceRange: Dispatch<SetStateAction<PerformanceRangeKey>>;
   setRiskAnnualized: Dispatch<SetStateAction<boolean>>;
@@ -191,7 +190,6 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
     setAnalysisInstrumentQuery,
     setAnalysisInstrumentRange,
     setAnalysisInstrumentSymbol,
-    setAnalysisTab,
     setPerformanceError,
     setPerformanceRange,
     setRiskAnnualized,
@@ -203,34 +201,8 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
   } = props;
 
   return (
-            <div className="space-y-6">
-              <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
-                <div className="flex items-center gap-0 overflow-x-auto px-3">
-                  {analysisTabs.map((tab) => {
-                    const isActive = analysisTab === tab.key;
-                    return (
-                      <button
-                        key={tab.key}
-                        type="button"
-                        role="tab"
-                        aria-selected={isActive}
-                        className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                          isActive
-                            ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-surface-dark"
-                            : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
-                        }`}
-                        onClick={() => setAnalysisTab(tab.key)}
-                        title={tab.description}
-                      >
-                        <span className="material-icons-outlined text-base">{tab.icon}</span>
-                        {tab.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="px-3 py-4 space-y-6 max-w-6xl">
+    <div className="space-y-6">
+      <div className="px-3 py-4 space-y-6 max-w-6xl">
                 <Panel>
                   <div>
                     <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">数据分析</h3>
@@ -767,7 +739,7 @@ export function DataAnalysisView(props: DataAnalysisViewProps) {
                 )}
                   </>
                 )}
-              </div>
-            </div>
+      </div>
+    </div>
   );
 }

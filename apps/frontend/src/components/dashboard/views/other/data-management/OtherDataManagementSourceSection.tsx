@@ -641,113 +641,115 @@ export function OtherDataManagementSourceSection(
 
   return (
     <>
-      <div className="rounded-md border border-slate-200 dark:border-border-dark bg-white dark:bg-gradient-to-b dark:from-panel-dark dark:to-surface-dark overflow-hidden">
-        <div className="divide-y divide-slate-200/70 dark:divide-border-dark/70">
-          <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                行情日期
-              </div>
-              <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
-                {props.snapshot?.priceAsOf ?? "--"}
-              </div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                最近一次拉取
-              </div>
-              <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
-                {props.latestMarketIngestRun
-                  ? props.formatDateTime(props.latestMarketIngestRun.startedAt)
-                  : "--"}
-              </div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                拉取状态
-              </div>
-              {props.latestMarketIngestRun ? (
-                <div className="mt-0.5 flex items-center gap-2">
-                  <span
-                    className={`font-mono text-sm ${props.formatIngestRunTone(
-                      props.latestMarketIngestRun.status
-                    )}`}
-                  >
-                    {props.formatIngestRunStatusLabel(props.latestMarketIngestRun.status)}
-                  </span>
+      <section className="px-0 -mt-1">
+        <div className="border border-slate-200/70 dark:border-border-dark/70">
+          <div className="divide-y divide-slate-200/70 dark:divide-border-dark/70">
+            <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  行情日期
                 </div>
-              ) : (
                 <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
-                  --
+                  {props.snapshot?.priceAsOf ?? "--"}
                 </div>
-              )}
+              </div>
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  最近一次拉取
+                </div>
+                <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                  {props.latestMarketIngestRun
+                    ? props.formatDateTime(props.latestMarketIngestRun.startedAt)
+                    : "--"}
+                </div>
+              </div>
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  拉取状态
+                </div>
+                {props.latestMarketIngestRun ? (
+                  <div className="mt-0.5">
+                    <span
+                      className={`font-mono text-sm ${props.formatIngestRunTone(
+                        props.latestMarketIngestRun.status
+                      )}`}
+                    >
+                      {props.formatIngestRunStatusLabel(props.latestMarketIngestRun.status)}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                    --
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                同步域数量
+            <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  同步域数量
+                </div>
+                <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                  {readiness?.selectedDomains.length ?? 0}
+                </div>
               </div>
-              <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
-                {readiness?.selectedDomains.length ?? 0}
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  同步模块数量
+                </div>
+                <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                  {readiness?.selectedModules.length ?? 0}
+                </div>
+              </div>
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  临时标的
+                </div>
+                <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
+                  {props.marketTempTargets.length}
+                </div>
               </div>
             </div>
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                同步模块数量
-              </div>
-              <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
-                {readiness?.selectedModules.length ?? 0}
-              </div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                临时标的
-              </div>
-              <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
-                {props.marketTempTargets.length}
-              </div>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                供给完成率
+            <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  供给完成率
+                </div>
+                <div
+                  className={`mt-0.5 font-mono text-xs whitespace-nowrap truncate ${sourceSupplyDashboard.toneClass}`}
+                  title={`${sourceSupplyDashboard.completionLabel} · ${sourceSupplyDashboard.scaleLabel}`}
+                >
+                  {sourceSupplyDashboard.completionLabel} · {sourceSupplyDashboard.scaleLabel}
+                </div>
               </div>
-              <div
-                className={`mt-0.5 font-mono text-xs whitespace-nowrap truncate ${sourceSupplyDashboard.toneClass}`}
-                title={`${sourceSupplyDashboard.completionLabel} · ${sourceSupplyDashboard.scaleLabel}`}
-              >
-                {sourceSupplyDashboard.completionLabel} · {sourceSupplyDashboard.scaleLabel}
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  供给缺口
+                </div>
+                <div
+                  className={`mt-0.5 font-mono text-xs whitespace-nowrap truncate ${sourceSupplyDashboard.toneClass}`}
+                  title={sourceSupplyDashboard.gapLabel}
+                >
+                  {sourceSupplyDashboard.gapLabel}
+                </div>
               </div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                供给缺口
-              </div>
-              <div
-                className={`mt-0.5 font-mono text-xs whitespace-nowrap truncate ${sourceSupplyDashboard.toneClass}`}
-                title={sourceSupplyDashboard.gapLabel}
-              >
-                {sourceSupplyDashboard.gapLabel}
-              </div>
-            </div>
-            <div className="px-3 py-2">
-              <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                供给截至
-              </div>
-              <div
-                className="mt-0.5 font-mono text-xs text-slate-900 dark:text-white whitespace-nowrap truncate"
-                title={`${sourceSupplyDashboard.asOfLabel} · 延迟 ${sourceSupplyDashboard.delayLabel}`}
-              >
-                {sourceSupplyDashboard.asOfLabel} · 延迟 {sourceSupplyDashboard.delayLabel}
+              <div className="px-3 py-2">
+                <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                  供给截至
+                </div>
+                <div
+                  className="mt-0.5 font-mono text-xs text-slate-900 dark:text-white whitespace-nowrap truncate"
+                  title={`${sourceSupplyDashboard.asOfLabel} · 延迟 ${sourceSupplyDashboard.delayLabel}`}
+                >
+                  {sourceSupplyDashboard.asOfLabel} · 延迟 {sourceSupplyDashboard.delayLabel}
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-3">

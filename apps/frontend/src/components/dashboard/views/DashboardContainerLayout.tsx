@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   LedgerEntry,
@@ -104,7 +105,6 @@ import { OtherView } from "./OtherView";
 import { PortfolioView } from "./PortfolioView";
 import { RiskView } from "./RiskView";
 import { SidebarNav } from "./SidebarNav";
-import { TopToolbar } from "./TopToolbar";
 
 type DashboardMarketState = ReturnType<
   typeof import("../hooks/use-dashboard-market").useDashboardMarket<
@@ -145,11 +145,10 @@ type DashboardMarketResizeResult = ReturnType<
 
 interface DashboardContainerLayoutProps {
   account: DashboardProps["account"];
-  onLock: DashboardProps["onLock"];
+  onOpenSettings?: DashboardProps["onOpenSettings"];
   activeView: WorkspaceView;
   setActiveView: Dispatch<SetStateAction<WorkspaceView>>;
   isNavCollapsed: boolean;
-  setIsNavCollapsed: Dispatch<SetStateAction<boolean>>;
   otherTab: OtherTab;
   setOtherTab: Dispatch<SetStateAction<OtherTab>>;
   analysisTab: AnalysisTab;
@@ -210,11 +209,10 @@ interface DashboardContainerLayoutProps {
 
 export function DashboardContainerLayout({
   account,
-  onLock,
+  onOpenSettings,
   activeView,
   setActiveView,
   isNavCollapsed,
-  setIsNavCollapsed,
   otherTab,
   setOtherTab,
   analysisTab,
@@ -267,53 +265,122 @@ export function DashboardContainerLayout({
     activeView === "other" && otherTab === "data-management"
       ? "scroll-auto"
       : "scroll-smooth";
+  const topTabGroupLabel = navItems.find((item) => item.key === activeView)?.label ?? "";
+  const topbarPrimaryLabel =
+    activeView === "other" && otherTab === "data-status"
+      ? "数据状态"
+      : topTabGroupLabel;
+  const topTabs:
+    | {
+        key: string;
+        label: string;
+        active: boolean;
+        onSelect: () => void;
+        title?: string;
+        disabled?: boolean;
+      }[]
+    | null =
+    activeView === "portfolio"
+      ? portfolioTabs.map((tab) => ({
+          key: tab.key,
+          label: tab.label,
+          active: portfolioTab === tab.key,
+          onSelect: () => setPortfolioTab(tab.key),
+          title: tab.description
+        }))
+      : activeView === "data-analysis"
+        ? analysisTabs.map((tab) => ({
+            key: tab.key,
+            label: tab.label,
+            active: analysisTab === tab.key,
+            onSelect: () => setAnalysisTab(tab.key),
+            title: tab.description
+          }))
+        : activeView === "other"
+          ? otherTabs.map((tab) => ({
+              key: tab.key,
+              label: tab.label,
+              active: otherTab === tab.key,
+              onSelect: () => setOtherTab(tab.key)
+            }))
+          : null;
+  const resolvedTopTabs:
+    | {
+        key: string;
+        label: string;
+        active: boolean;
+        onSelect: () => void;
+        title?: string;
+        disabled?: boolean;
+      }[] =
+    topTabs ?? [
+      {
+        key: `${activeView}-overview`,
+        label: "概览",
+        active: true,
+        onSelect: () => undefined,
+        disabled: true,
+        title: `${topbarPrimaryLabel} · 概览`
+      }
+    ];
+  const topbarWorkspaceSlot =
+    typeof document === "undefined"
+      ? null
+      : document.getElementById("app-topbar-workspace-slot");
+
+  const topbarWorkspaceContent = (
+    <div className="flex items-center gap-2 overflow-x-auto min-w-0" role="tablist">
+      <span className="text-sm font-extrabold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+        {topbarPrimaryLabel}
+      </span>
+
+      <span
+        className="w-px h-3 bg-slate-300 dark:bg-border-dark flex-shrink-0"
+        aria-hidden="true"
+      />
+      {resolvedTopTabs.map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          role="tab"
+          aria-selected={tab.active}
+          aria-disabled={tab.disabled ? "true" : undefined}
+          className={`topbarControl flex-none px-3 py-1 text-[13px] font-semibold transition-colors ${
+            tab.active
+              ? "text-slate-900 dark:text-white bg-slate-100 dark:bg-surface-dark"
+              : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
+          } ${tab.disabled ? "cursor-default opacity-70" : ""}`}
+          onClick={() => {
+            if (tab.disabled) return;
+            tab.onSelect();
+          }}
+          title={tab.title}
+          disabled={tab.disabled}
+        >
+          {tab.label}
+        </button>
+      ))}
+
+      {activeView === "market" && (
+        <span className="text-xs font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
+          {snapshot?.priceAsOf ?? "--"}
+        </span>
+      )}
+    </div>
+  );
 
   return (
     <div className="flex h-full bg-white/90 dark:bg-background-dark/80 backdrop-blur-xl overflow-hidden">
+      {topbarWorkspaceSlot ? createPortal(topbarWorkspaceContent, topbarWorkspaceSlot) : null}
       <SidebarNav
         activeView={activeView}
         isNavCollapsed={isNavCollapsed}
         items={navItems}
         onSelectView={(view) => setActiveView(view as WorkspaceView)}
-        onToggleCollapse={() => setIsNavCollapsed((prev) => !prev)}
+        onOpenSettings={onOpenSettings}
       />
 
       <section className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white/85 dark:bg-background-dark/70 backdrop-blur-lg">
-        <TopToolbar
-          activeView={activeView}
-          otherTab={otherTab}
-          navItems={navItems}
-          marketPriceAsOf={snapshot?.priceAsOf ?? null}
-          onLock={onLock}
-        />
-
-        {activeView === "portfolio" && (
-          <div className="border-b border-border-light dark:border-border-dark bg-white/90 dark:bg-background-dark/75">
-            <div className="flex items-center gap-0 overflow-x-auto px-3">
-              {portfolioTabs.map((tab) => {
-                const isActive = portfolioTab === tab.key;
-                return (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                      isActive
-                        ? "text-slate-900 dark:text-white border-primary bg-slate-100 dark:bg-surface-dark"
-                        : "text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-background-dark/80"
-                    }`}
-                    onClick={() => setPortfolioTab(tab.key)}
-                  >
-                    <span className="material-icons-outlined text-base">{tab.icon}</span>
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         <div
           className={`flex-1 p-0 ${mainScrollBehaviorClass} ${
             activeView === "market" ? "overflow-hidden" : "overflow-y-auto"
@@ -478,7 +545,6 @@ export function DashboardContainerLayout({
                 riskAnnualized,
                 riskMetrics: portfolioDerived.riskMetrics,
                 selectedPerformance: portfolioDerived.selectedPerformance,
-                setAnalysisTab,
                 setPerformanceError,
                 setPerformanceRange,
                 setRiskAnnualized,
@@ -693,7 +759,6 @@ export function DashboardContainerLayout({
                   marketAdminDerived.marketUniverseEnabledBuckets,
                 marketUniversePoolDirty: marketAdminDerived.marketUniversePoolDirty,
                 otherTab,
-                otherTabs,
                 refreshMarketIngestRunDetail:
                   marketOrchestration.refreshMarketIngestRunDetail,
                 refreshMarketIngestRuns:

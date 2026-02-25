@@ -21,7 +21,10 @@ import type {
 
 export interface DashboardProps {
   account: AccountSummary;
-  onLock: () => Promise<void>;
+  onOpenSettings?: () => void;
+  navCollapsed?: boolean;
+  onNavCollapsedChange?: (collapsed: boolean) => void;
+  onActiveViewChange?: (view: WorkspaceView) => void;
   onActivePortfolioChange?: (portfolio: {
     id: string | null;
     name: string | null;
