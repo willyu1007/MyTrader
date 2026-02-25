@@ -581,8 +581,6 @@ export function OtherDataManagementTargetTaskPanel(
   const [savedConfig, setSavedConfig] = useState<MarketCompletenessConfig | null>(null);
   const [targetCoverage, setTargetCoverage] =
     useState<PreviewCompletenessCoverageResult | null>(null);
-  const [sourceCoverage, setSourceCoverage] =
-    useState<PreviewCompletenessCoverageResult | null>(null);
   const [coverageLoaded, setCoverageLoaded] = useState(false);
   const [statusRows, setStatusRows] = useState<ListCompletenessStatusResult | null>(null);
 
@@ -602,16 +600,10 @@ export function OtherDataManagementTargetTaskPanel(
 
   const refreshCoverage = useCallback(async () => {
     if (!window.mytrader) return;
-    const [target, source] = await Promise.all([
-      window.mytrader.market.previewCompletenessCoverage({
-        scopeId: "target_pool"
-      }),
-      window.mytrader.market.previewCompletenessCoverage({
-        scopeId: "source_pool"
-      })
-    ]);
+    const target = await window.mytrader.market.previewCompletenessCoverage({
+      scopeId: "target_pool"
+    });
     setTargetCoverage(target);
-    setSourceCoverage(source);
     setCoverageLoaded(true);
   }, []);
 
@@ -675,13 +667,6 @@ export function OtherDataManagementTargetTaskPanel(
     if (!config) return [];
     return config.checks
       .filter((check) => check.scopeId === "target_pool")
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-  }, [config]);
-
-  const sourceChecks = useMemo(() => {
-    if (!config) return [];
-    return config.checks
-      .filter((check) => check.scopeId === "source_pool")
       .sort((a, b) => a.sortOrder - b.sortOrder);
   }, [config]);
 
@@ -850,51 +835,6 @@ export function OtherDataManagementTargetTaskPanel(
       dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
     };
   }, [coverageLoaded, props, targetCoverage]);
-
-  const sourceSupplySummary = useMemo(() => {
-    if (!coverageLoaded || !sourceCoverage) {
-      return {
-        tone: "text-slate-500 dark:text-slate-400",
-        summary: "供给：待加载",
-        dateLabel: "截至 --（延迟 --）"
-      };
-    }
-
-    const totals = sourceCoverage.totals;
-    const missing = totals.missing;
-    const pending = totals.partial + totals.notStarted;
-    const applicable =
-      totals.complete + totals.partial + totals.missing + totals.notStarted;
-    const asOfLabel = sourceCoverage.asOfTradeDate
-      ? props.formatCnDate(sourceCoverage.asOfTradeDate)
-      : "--";
-    const delayDays = resolveDelayDays(sourceCoverage.asOfTradeDate ?? null);
-    const delayLabel = delayDays === null ? "--" : `${delayDays} 天`;
-
-    if (missing > 0) {
-      const ratio = applicable > 0 ? missing / applicable : 0;
-      return {
-        tone: "text-rose-700 dark:text-rose-300",
-        summary: `供给：缺失 ${missing.toLocaleString()} 项（${formatPercent(ratio)}）`,
-        dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
-      };
-    }
-
-    if (pending > 0) {
-      const ratio = applicable > 0 ? pending / applicable : 0;
-      return {
-        tone: "text-amber-700 dark:text-amber-300",
-        summary: `供给：待收敛 ${pending.toLocaleString()} 项（${formatPercent(ratio)}）`,
-        dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
-      };
-    }
-
-    return {
-      tone: "text-emerald-700 dark:text-emerald-300",
-      summary: "供给：正常（100.0%）",
-      dateLabel: `截至 ${asOfLabel}（延迟 ${delayLabel}）`
-    };
-  }, [coverageLoaded, props, sourceCoverage]);
 
   const handleToggleTargetCheck = useCallback((checkId: string) => {
     setConfig((prev) => {
@@ -1065,16 +1005,6 @@ export function OtherDataManagementTargetTaskPanel(
     [config?.checks, props, targetEnabledCheckIdSet]
   );
 
-  const sourceModuleRows = useMemo(() => {
-    return sourceChecks.map((check) => ({
-      id: check.id,
-      label: check.label,
-      bucket: formatBucketLabel(check.bucketId),
-      domain: check.domainId ?? "--",
-      module: check.moduleId ?? "--"
-    }));
-  }, [sourceChecks]);
-
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -1137,11 +1067,8 @@ export function OtherDataManagementTargetTaskPanel(
               </span>
             </div>
             <div className="ml-auto inline-flex items-center gap-2">
-              <span className={`tabular-nums ${sourceSupplySummary.tone}`}>
-                {sourceSupplySummary.summary}
-              </span>
               <span className="tabular-nums text-slate-500 dark:text-slate-400">
-                {sourceSupplySummary.dateLabel}
+                供给详情
               </span>
               <props.Button
                 variant="secondary"
@@ -1174,8 +1101,11 @@ export function OtherDataManagementTargetTaskPanel(
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-200/80 dark:border-border-dark/70 overflow-hidden">
-            <div className="min-h-[180px] max-h-[330px] overflow-y-auto overflow-x-hidden overscroll-contain">
+          <div className="overflow-hidden">
+            <div
+              className="min-h-[180px] max-h-[330px] overflow-y-hidden hover:overflow-y-auto focus-within:overflow-y-auto overflow-x-hidden overscroll-contain"
+              style={{ scrollbarGutter: "stable both-edges" }}
+            >
               <table className="w-full table-fixed text-xs">
                 <thead className="sticky top-0 bg-white dark:bg-background-dark z-10">
                   <tr className="border-b border-slate-200/70 dark:border-border-dark/70 text-slate-500 dark:text-slate-400">
@@ -1212,10 +1142,10 @@ export function OtherDataManagementTargetTaskPanel(
                         />
                       </div>
                     </th>
-                    <th className="w-[24%] px-2 py-1.5 text-left font-semibold">
+                    <th className="w-[23%] px-2 py-1.5 text-left font-semibold">
                       功能
                     </th>
-                    <th className="w-[8%] px-2 py-1.5 text-left font-semibold">
+                    <th className="w-[9%] pl-2 pr-4 py-1.5 text-left font-semibold">
                       开关
                     </th>
                   </tr>
@@ -1303,7 +1233,7 @@ export function OtherDataManagementTargetTaskPanel(
                             ) : null}
                           </div>
                         </td>
-                        <td className="px-2 py-1.5">
+                        <td className="pl-2 pr-4 py-1.5">
                           <div className="flex items-center justify-start gap-2">
                             <label className="relative inline-flex items-center cursor-pointer">
                               <input
@@ -1344,31 +1274,6 @@ export function OtherDataManagementTargetTaskPanel(
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-
-        <div className="mt-3 border-t border-slate-200/70 dark:border-border-dark/70 pt-3 space-y-2">
-          <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-            Source checks（只读，来源于 Source Center 配置）
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {sourceModuleRows.map((row) => (
-              <div
-                key={`source-check-${row.id}`}
-                className="rounded-md border border-slate-200/80 dark:border-border-dark/70 px-2.5 py-2 text-xs"
-              >
-                <div className="font-semibold text-slate-700 dark:text-slate-200">{row.label}</div>
-                <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  {row.bucket} · {row.domain} · {row.module}
-                </div>
-                <div className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                  {row.id}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400">
-            Source checks 在本面板只读，配置入口在 Source Center。
           </div>
         </div>
 

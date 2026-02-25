@@ -12,6 +12,7 @@ import type {
   DataSourceDomainCatalogItem,
   DataSourceModuleCatalogItem,
   DataSourceReadinessResult,
+  PreviewCompletenessCoverageResult,
   MarketDataSourceCatalog,
   MarketDataSourceConfigV2,
   MarketTokenMatrixStatus
@@ -49,6 +50,8 @@ export function OtherDataManagementSourceSection(
   const [tokenMatrix, setTokenMatrix] = useState<MarketTokenMatrixStatus | null>(null);
   const [tests, setTests] = useState<ConnectivityTestRecord[]>([]);
   const [readiness, setReadiness] = useState<DataSourceReadinessResult | null>(null);
+  const [sourceCoverage, setSourceCoverage] =
+    useState<PreviewCompletenessCoverageResult | null>(null);
 
   const [selectedDomainId, setSelectedDomainId] = useState<DataDomainId | null>(null);
   const [expandedDomains, setExpandedDomains] = useState<Record<string, boolean>>({});
@@ -80,18 +83,25 @@ export function OtherDataManagementSourceSection(
         setSavedConfig(null);
         setTokenMatrix(null);
         setTests([]);
+        setSourceCoverage(null);
         setSelectedDomainId(null);
         setReadiness(buildRuntimeBlockedReadiness(message));
         return;
       }
 
-      const [nextCatalog, nextConfig, nextMatrix, nextTests, nextReadiness] =
+      const [nextCatalog, nextConfig, nextMatrix, nextTests, nextReadiness, nextSourceCoverage] =
         await Promise.all([
           window.mytrader.market.getDataSourceCatalog(),
           window.mytrader.market.getDataSourceConfig(),
           window.mytrader.market.getTokenMatrixStatus(),
           window.mytrader.market.listConnectivityTests(),
-          window.mytrader.market.validateDataSourceReadiness({ scope: "both" })
+          window.mytrader.market.validateDataSourceReadiness({ scope: "both" }),
+          typeof (window.mytrader.market as { previewCompletenessCoverage?: unknown })
+            .previewCompletenessCoverage === "function"
+            ? window.mytrader.market.previewCompletenessCoverage({
+                scopeId: "source_pool"
+              })
+            : Promise.resolve(null)
         ]);
       setCatalog(nextCatalog);
       setConfig(nextConfig);
@@ -99,6 +109,7 @@ export function OtherDataManagementSourceSection(
       setTokenMatrix(nextMatrix);
       setTests(nextTests);
       setReadiness(nextReadiness);
+      setSourceCoverage(nextSourceCoverage ?? null);
       setRuntimeIncompatible(false);
 
       setExpandedDomains((prev) => {
@@ -123,6 +134,7 @@ export function OtherDataManagementSourceSection(
       setError(message);
       setRuntimeIncompatible(isRuntimeApiMissingError(err));
       setReadiness(buildRuntimeBlockedReadiness(message));
+      setSourceCoverage(null);
     } finally {
       setLoading(false);
     }
@@ -207,6 +219,40 @@ export function OtherDataManagementSourceSection(
   const readinessIssues = readiness?.issues ?? [];
   const readinessErrors = readinessIssues.filter((issue) => issue.level === "error");
   const hasReadiness = Boolean(readiness);
+  const sourceSupplyDashboard = useMemo(() => {
+    if (!sourceCoverage) {
+      return {
+        toneClass: "text-slate-900 dark:text-white",
+        completionLabel: "--",
+        gapLabel: "缺失 -- · 待收敛 --",
+        asOfLabel: "--",
+        delayLabel: "--",
+        scaleLabel: "--"
+      };
+    }
+
+    const totals = sourceCoverage.totals;
+    const applicable =
+      totals.complete + totals.partial + totals.missing + totals.notStarted;
+    const pending = totals.partial + totals.notStarted;
+    const completionRate = applicable > 0 ? totals.complete / applicable : null;
+
+    let toneClass = "text-emerald-700 dark:text-emerald-300";
+    if (totals.missing > 0) {
+      toneClass = "text-rose-700 dark:text-rose-300";
+    } else if (pending > 0) {
+      toneClass = "text-amber-700 dark:text-amber-300";
+    }
+
+    return {
+      toneClass,
+      completionLabel: completionRate === null ? "--" : formatPercent(completionRate),
+      gapLabel: `缺失 ${totals.missing.toLocaleString()} · 待收敛 ${pending.toLocaleString()}`,
+      asOfLabel: sourceCoverage.asOfTradeDate ?? "--",
+      delayLabel: formatDelayDays(sourceCoverage.asOfTradeDate),
+      scaleLabel: `${totals.entities.toLocaleString()} 实体 × ${totals.checks.toLocaleString()} 检查`
+    };
+  }, [sourceCoverage]);
 
   const setMainProvider = useCallback(
     (value: string) => {
@@ -661,6 +707,42 @@ export function OtherDataManagementSourceSection(
               </div>
               <div className="mt-0.5 font-mono text-sm text-slate-900 dark:text-white">
                 {props.marketTempTargets.length}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 divide-x divide-slate-200/70 dark:divide-border-dark/70">
+            <div className="px-3 py-2">
+              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                供给完成率
+              </div>
+              <div
+                className={`mt-0.5 font-mono text-xs whitespace-nowrap truncate ${sourceSupplyDashboard.toneClass}`}
+                title={`${sourceSupplyDashboard.completionLabel} · ${sourceSupplyDashboard.scaleLabel}`}
+              >
+                {sourceSupplyDashboard.completionLabel} · {sourceSupplyDashboard.scaleLabel}
+              </div>
+            </div>
+            <div className="px-3 py-2">
+              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                供给缺口
+              </div>
+              <div
+                className={`mt-0.5 font-mono text-xs whitespace-nowrap truncate ${sourceSupplyDashboard.toneClass}`}
+                title={sourceSupplyDashboard.gapLabel}
+              >
+                {sourceSupplyDashboard.gapLabel}
+              </div>
+            </div>
+            <div className="px-3 py-2">
+              <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                供给截至
+              </div>
+              <div
+                className="mt-0.5 font-mono text-xs text-slate-900 dark:text-white whitespace-nowrap truncate"
+                title={`${sourceSupplyDashboard.asOfLabel} · 延迟 ${sourceSupplyDashboard.delayLabel}`}
+              >
+                {sourceSupplyDashboard.asOfLabel} · 延迟 {sourceSupplyDashboard.delayLabel}
               </div>
             </div>
           </div>
@@ -1399,6 +1481,18 @@ function countDomainOverrides(matrix: MarketTokenMatrixStatus | null): number {
 function formatProviderLabel(providerId: string): string {
   if (!providerId.trim()) return "unknown";
   return providerId;
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatDelayDays(asOfTradeDate: string | null): string {
+  if (!asOfTradeDate) return "--";
+  const asOfEpoch = Date.parse(`${asOfTradeDate}T00:00:00Z`);
+  if (!Number.isFinite(asOfEpoch)) return "--";
+  const diffDays = Math.floor((Date.now() - asOfEpoch) / (24 * 60 * 60 * 1000));
+  return `${Math.max(0, diffDays)} 天`;
 }
 
 function hasDataSourceCenterApi(marketApi: unknown): boolean {
