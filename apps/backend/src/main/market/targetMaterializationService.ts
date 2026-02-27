@@ -131,6 +131,11 @@ export async function materializeTargetsFromSsot(
     tradeDate: string;
     circMv: number | null;
     totalMv: number | null;
+    peTtm: number | null;
+    pb: number | null;
+    psTtm: number | null;
+    dvTtm: number | null;
+    turnoverRate: number | null;
     source: "tushare";
   }> = [];
   const moneyflowInserts: Array<{
@@ -269,6 +274,11 @@ export async function materializeTargetsFromSsot(
             tradeDate: basics.trade_date,
             circMv: basics.circ_mv,
             totalMv: basics.total_mv,
+            peTtm: null,
+            pb: null,
+            psTtm: null,
+            dvTtm: null,
+            turnoverRate: null,
             source: "tushare"
           });
         }

@@ -1385,6 +1385,9 @@ export interface InsightTargetUnexcludeInput {
 }
 
 export type ValuationMethodStatus = "active" | "archived";
+export type ValuationInputKind = "objective" | "subjective" | "derived";
+export type ValuationMetricQuality = "fresh" | "stale" | "fallback" | "missing";
+export type ValuationConfidence = "high" | "medium" | "low" | "not_applicable";
 
 export interface ValuationMethodAssetScope {
   kinds: string[];
@@ -1401,6 +1404,19 @@ export interface ValuationMetricNode {
   dependsOn: string[];
   formulaId: string;
   editable: boolean;
+}
+
+export interface ValuationMethodInputField {
+  key: string;
+  label: string;
+  kind: ValuationInputKind;
+  unit: ValuationMetricNode["unit"];
+  editable: boolean;
+  objectiveSource: string | null;
+  defaultPolicy: "none" | "industry_median" | "market_median" | "global_median" | "constant";
+  defaultValue: number | null;
+  displayOrder: number;
+  description: string | null;
 }
 
 export interface ValuationMethod {
@@ -1426,6 +1442,7 @@ export interface ValuationMethodVersion {
   paramSchema: Record<string, unknown>;
   metricSchema: Record<string, unknown>;
   formulaManifest: Record<string, unknown>;
+  inputSchema: ValuationMethodInputField[];
   createdAt: number;
   updatedAt: number;
 }
@@ -1485,6 +1502,7 @@ export interface PublishValuationMethodVersionInput {
   graph: ValuationMetricNode[];
   paramSchema: Record<string, unknown>;
   metricSchema: Record<string, unknown>;
+  inputSchema?: ValuationMethodInputField[] | null;
 }
 
 export interface SetActiveValuationMethodVersionInput {
@@ -1493,6 +1511,131 @@ export interface SetActiveValuationMethodVersionInput {
 }
 
 export interface ValuationPreviewBySymbolInput {
+  symbol: string;
+  asOfDate?: string | null;
+  methodKey?: string | null;
+}
+
+export interface UpsertValuationMethodInputSchemaInput {
+  methodKey: string;
+  versionId?: string | null;
+  inputSchema: ValuationMethodInputField[];
+}
+
+export interface ValuationObjectiveMetricSnapshot {
+  id: string;
+  symbol: string;
+  methodKey: string;
+  metricKey: string;
+  asOfDate: string;
+  value: number | null;
+  quality: ValuationMetricQuality;
+  source: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListValuationObjectiveMetricSnapshotsInput {
+  symbol: string;
+  methodKey?: string | null;
+  asOfDate?: string | null;
+}
+
+export interface ValuationSubjectiveDefault {
+  id: string;
+  methodKey: string;
+  inputKey: string;
+  market: string | null;
+  industryTag: string | null;
+  value: number;
+  source: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListValuationSubjectiveDefaultsInput {
+  methodKey?: string | null;
+  market?: string | null;
+  industryTag?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface UpsertValuationSubjectiveDefaultInput {
+  methodKey: string;
+  inputKey: string;
+  market?: string | null;
+  industryTag?: string | null;
+  value: number;
+  source?: string | null;
+}
+
+export interface ValuationSubjectiveOverride {
+  id: string;
+  symbol: string;
+  methodKey: string;
+  inputKey: string;
+  value: number;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListValuationSubjectiveOverridesInput {
+  symbol: string;
+  methodKey?: string | null;
+}
+
+export interface UpsertValuationSubjectiveOverrideInput {
+  symbol: string;
+  methodKey: string;
+  inputKey: string;
+  value: number;
+  note?: string | null;
+}
+
+export interface DeleteValuationSubjectiveOverrideInput {
+  symbol: string;
+  methodKey: string;
+  inputKey: string;
+}
+
+export interface ValuationMetricSchedulerConfig {
+  enabled: boolean;
+  intervalMinutes: number;
+  staleAfterMinutes: number;
+}
+
+export interface TriggerValuationObjectiveRefreshInput {
+  symbols?: string[] | null;
+  asOfDate?: string | null;
+  reason?: string | null;
+}
+
+export interface ValuationRefreshRunStatus {
+  runId: string;
+  status: "running" | "success" | "partial" | "failed";
+  startedAt: number;
+  finishedAt: number | null;
+  totalSymbols: number;
+  refreshed: number;
+  failed: number;
+  message: string | null;
+}
+
+export interface GetValuationObjectiveRefreshStatusInput {
+  runId?: string | null;
+}
+
+export interface ValuationInputBreakdownItem {
+  key: string;
+  kind: ValuationInputKind;
+  value: number | null;
+  quality: ValuationMetricQuality;
+  source: string | null;
+}
+
+export interface ComputeValuationBySymbolInput {
   symbol: string;
   asOfDate?: string | null;
   methodKey?: string | null;
@@ -1522,10 +1665,15 @@ export interface ValuationAdjustmentPreview {
   baseValue: number | null;
   adjustedValue: number | null;
   appliedEffects: ValuationAppliedEffect[];
+  confidence?: ValuationConfidence;
+  degradationReasons?: string[];
+  inputBreakdown?: ValuationInputBreakdownItem[];
   notApplicable: boolean;
   reason: string | null;
   computedAt: number;
 }
+
+export type ComputeValuationBySymbolResult = ValuationAdjustmentPreview;
 
 export interface CreateLedgerEntryInput {
   portfolioId: PortfolioId;
@@ -1745,6 +1893,40 @@ export interface MyTraderApi {
     previewValuationBySymbol(
       input: ValuationPreviewBySymbolInput
     ): Promise<ValuationAdjustmentPreview>;
+    upsertValuationMethodInputSchema(
+      input: UpsertValuationMethodInputSchemaInput
+    ): Promise<ValuationMethodDetail>;
+    listValuationSubjectiveDefaults(
+      input?: ListValuationSubjectiveDefaultsInput
+    ): Promise<ValuationSubjectiveDefault[]>;
+    upsertValuationSubjectiveDefault(
+      input: UpsertValuationSubjectiveDefaultInput
+    ): Promise<ValuationSubjectiveDefault>;
+    listValuationSubjectiveOverrides(
+      input: ListValuationSubjectiveOverridesInput
+    ): Promise<ValuationSubjectiveOverride[]>;
+    upsertValuationSubjectiveOverride(
+      input: UpsertValuationSubjectiveOverrideInput
+    ): Promise<ValuationSubjectiveOverride>;
+    deleteValuationSubjectiveOverride(
+      input: DeleteValuationSubjectiveOverrideInput
+    ): Promise<void>;
+    listValuationObjectiveMetricSnapshots(
+      input: ListValuationObjectiveMetricSnapshotsInput
+    ): Promise<ValuationObjectiveMetricSnapshot[]>;
+    triggerValuationObjectiveRefresh(
+      input?: TriggerValuationObjectiveRefreshInput
+    ): Promise<ValuationRefreshRunStatus>;
+    getValuationObjectiveRefreshStatus(
+      input?: GetValuationObjectiveRefreshStatusInput
+    ): Promise<ValuationRefreshRunStatus | null>;
+    getValuationMetricSchedulerConfig(): Promise<ValuationMetricSchedulerConfig>;
+    setValuationMetricSchedulerConfig(
+      input: ValuationMetricSchedulerConfig
+    ): Promise<ValuationMetricSchedulerConfig>;
+    computeValuationBySymbol(
+      input: ComputeValuationBySymbolInput
+    ): Promise<ComputeValuationBySymbolResult>;
   };
 }
 
@@ -1875,5 +2057,17 @@ export const IPC_CHANNELS = {
   VALUATION_METHOD_CLONE_BUILTIN: "valuationMethod:cloneBuiltin",
   VALUATION_METHOD_PUBLISH_VERSION: "valuationMethod:publishVersion",
   VALUATION_METHOD_SET_ACTIVE_VERSION: "valuationMethod:setActiveVersion",
-  VALUATION_PREVIEW_BY_SYMBOL: "valuation:previewBySymbol"
+  VALUATION_PREVIEW_BY_SYMBOL: "valuation:previewBySymbol",
+  VALUATION_METHOD_UPSERT_INPUT_SCHEMA: "valuationMethod:upsertInputSchema",
+  VALUATION_SUBJECTIVE_DEFAULT_LIST: "valuation:subjectiveDefault:list",
+  VALUATION_SUBJECTIVE_DEFAULT_UPSERT: "valuation:subjectiveDefault:upsert",
+  VALUATION_SUBJECTIVE_OVERRIDE_LIST: "valuation:subjectiveOverride:list",
+  VALUATION_SUBJECTIVE_OVERRIDE_UPSERT: "valuation:subjectiveOverride:upsert",
+  VALUATION_SUBJECTIVE_OVERRIDE_DELETE: "valuation:subjectiveOverride:delete",
+  VALUATION_OBJECTIVE_SNAPSHOT_LIST: "valuation:objectiveSnapshot:list",
+  VALUATION_OBJECTIVE_REFRESH_TRIGGER: "valuation:objectiveRefresh:trigger",
+  VALUATION_OBJECTIVE_REFRESH_STATUS_GET: "valuation:objectiveRefresh:status",
+  VALUATION_METRIC_SCHEDULER_GET: "valuation:scheduler:get",
+  VALUATION_METRIC_SCHEDULER_SET: "valuation:scheduler:set",
+  VALUATION_COMPUTE_BY_SYMBOL: "valuation:computeBySymbol"
 } as const;

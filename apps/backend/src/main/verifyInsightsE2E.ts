@@ -3,18 +3,25 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  computeValuationBySymbol,
   createInsight,
+  deleteValuationSubjectiveOverride,
   excludeInsightTarget,
+  getValuationObjectiveRefreshStatus,
   listValuationMethods,
+  listValuationObjectiveMetricSnapshots,
   previewMaterializeInsightTargets,
   previewValuationBySymbol,
   removeInsight,
   searchInsights,
+  triggerValuationObjectiveRefresh,
   unexcludeInsightTarget,
   updateInsight,
   upsertInsightEffectChannel,
   upsertInsightEffectPoint,
-  upsertInsightScopeRule
+  upsertInsightScopeRule,
+  upsertValuationSubjectiveDefault,
+  upsertValuationSubjectiveOverride
 } from "./services/insightService";
 import { ensureMarketCacheSchema } from "./market/marketCache";
 import { ensureBusinessSchema } from "./storage/businessSchema";
@@ -61,6 +68,33 @@ async function seedMarketData(marketDbPath: string, businessDbPath: string): Pro
         market: "CN",
         currency: "CNY",
         tags: ["kind:spot", "commodity:gold", "domain:spot"]
+      },
+      {
+        symbol: "510300.SH",
+        provider: "tushare",
+        kind: "fund",
+        assetClass: "etf",
+        market: "CN",
+        currency: "CNY",
+        tags: ["kind:fund", "domain:etf", "market:CN"]
+      },
+      {
+        symbol: "IF8888.CFE",
+        provider: "tushare",
+        kind: "futures",
+        assetClass: "futures",
+        market: "CN",
+        currency: "CNY",
+        tags: ["kind:futures", "domain:futures", "market:CN"]
+      },
+      {
+        symbol: "USDCNY.FX",
+        provider: "tushare",
+        kind: "forex",
+        assetClass: null,
+        market: "FX",
+        currency: "CNY",
+        tags: ["kind:forex", "domain:fx", "market:FX"]
       },
       {
         symbol: "CGB10Y.CN",
@@ -115,6 +149,12 @@ async function seedMarketData(marketDbPath: string, businessDbPath: string): Pro
       ["600519.SH", "2026-01-11", 120],
       ["AU9999.SGE", "2026-01-01", 450],
       ["AU9999.SGE", "2026-01-06", 460],
+      ["510300.SH", "2026-01-01", 4.2],
+      ["510300.SH", "2026-01-06", 4.4],
+      ["IF8888.CFE", "2026-01-01", 3500],
+      ["IF8888.CFE", "2026-01-06", 3600],
+      ["USDCNY.FX", "2026-01-01", 7.1],
+      ["USDCNY.FX", "2026-01-06", 7.2],
       ["CGB10Y.CN", "2026-01-01", 100],
       ["CGB10Y.CN", "2026-01-06", 100]
     ] as const;
@@ -135,9 +175,19 @@ async function seedMarketData(marketDbPath: string, businessDbPath: string): Pro
       marketDb,
       `
         insert into daily_basics (
-          symbol, trade_date, circ_mv, total_mv, source, ingested_at
+          symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
         )
-        values ('600519.SH', '2026-01-06', 2000000, 3000000, 'verify', ?)
+        values ('600519.SH', '2026-01-06', 2000000, 3000000, 22, 4.4, 6.6, 0.03, 1.5, 'verify', ?)
+      `,
+      [now]
+    );
+    await run(
+      marketDb,
+      `
+        insert into daily_basics (
+          symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
+        )
+        values ('510300.SH', '2026-01-06', 5000000, 5200000, 16, 1.8, 2.4, 0.018, 2.2, 'verify', ?)
       `,
       [now]
     );
@@ -181,8 +231,228 @@ async function runSmokeE2E(): Promise<void> {
       limit: 100
     });
     assert(
-      valuationMethods.items.length >= 6,
-      "expected builtin valuation methods to be seeded"
+      valuationMethods.items.length >= 25,
+      "expected expanded builtin valuation methods to be seeded"
+    );
+    assert(
+      valuationMethods.items.some((item) => item.methodKey === "builtin.stock.pe.relative.v1"),
+      "expected stock PE builtin method"
+    );
+    assert(
+      valuationMethods.items.some((item) => item.methodKey === "builtin.etf.pe.relative.v1"),
+      "expected etf PE builtin method"
+    );
+    assert(
+      valuationMethods.items.some((item) => item.methodKey === "builtin.futures.term.structure.v1"),
+      "expected futures method expansion"
+    );
+    assert(
+      valuationMethods.items.some((item) => item.methodKey === "builtin.forex.rate.differential.v1"),
+      "expected forex method expansion"
+    );
+    assert(
+      valuationMethods.items.some((item) => item.methodKey === "builtin.bond.spread.duration.v1"),
+      "expected bond method expansion"
+    );
+
+    const refreshRun = await triggerValuationObjectiveRefresh(businessDb, marketDb, {
+      symbols: ["600519.SH"],
+      asOfDate: "2026-01-06",
+      reason: "verify-v2"
+    });
+    assert(
+      refreshRun.status === "success" || refreshRun.status === "partial",
+      `unexpected refresh status: ${refreshRun.status}`
+    );
+    const refreshStatus = await getValuationObjectiveRefreshStatus(businessDb, {
+      runId: refreshRun.runId
+    });
+    assert(
+      refreshStatus?.runId === refreshRun.runId,
+      "refresh status should be queryable by run id"
+    );
+
+    const objectiveSnapshots = await listValuationObjectiveMetricSnapshots(businessDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-06"
+    });
+    assert(
+      objectiveSnapshots.some((item) => item.metricKey === "valuation.pe_ttm"),
+      "objective snapshots should include pe_ttm"
+    );
+
+    await upsertValuationSubjectiveDefault(businessDb, {
+      methodKey: "builtin.stock.pe.relative.v1",
+      inputKey: "targetPe",
+      market: "CN",
+      value: 24,
+      source: "verify-default"
+    });
+    const stockAutoPreview = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-06"
+    });
+    assert(
+      stockAutoPreview.methodKey === "builtin.stock.pe.relative.v1",
+      `stock default method should route to builtin.stock.pe.relative.v1, got ${stockAutoPreview.methodKey}`
+    );
+    const stockPeWithDefault = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.stock.pe.relative.v1"
+    });
+    assert(!stockPeWithDefault.notApplicable, "stock PE compute should be applicable");
+    assert(
+      approxEqual(stockPeWithDefault.baseValue ?? 0, 120, 1e-6),
+      `stock PE with default should be 120, got ${stockPeWithDefault.baseValue}`
+    );
+    assert(
+      stockPeWithDefault.confidence === "high",
+      `stock PE with fresh inputs should be high confidence, got ${stockPeWithDefault.confidence}`
+    );
+
+    await upsertValuationSubjectiveOverride(businessDb, {
+      symbol: "600519.SH",
+      methodKey: "builtin.stock.pe.relative.v1",
+      inputKey: "targetPe",
+      value: 30,
+      note: "verify override"
+    });
+    const stockPeWithOverride = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.stock.pe.relative.v1"
+    });
+    assert(
+      approxEqual(stockPeWithOverride.baseValue ?? 0, 150, 1e-6),
+      `stock PE with override should be 150, got ${stockPeWithOverride.baseValue}`
+    );
+    assert(
+      stockPeWithOverride.inputBreakdown?.some(
+        (item) => item.key === "targetPe" && item.source === "subjective.override"
+      ),
+      "input breakdown should indicate subjective override source"
+    );
+
+    await deleteValuationSubjectiveOverride(businessDb, {
+      symbol: "600519.SH",
+      methodKey: "builtin.stock.pe.relative.v1",
+      inputKey: "targetPe"
+    });
+    const stockPeAfterOverrideDelete = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.stock.pe.relative.v1"
+    });
+    assert(
+      approxEqual(stockPeAfterOverrideDelete.baseValue ?? 0, 120, 1e-6),
+      `stock PE after override deletion should fallback to default 120, got ${stockPeAfterOverrideDelete.baseValue}`
+    );
+
+    const stockPeStale = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-11",
+      methodKey: "builtin.stock.pe.relative.v1"
+    });
+    assert(
+      stockPeStale.confidence === "medium",
+      `stale objective input should lower confidence to medium, got ${stockPeStale.confidence}`
+    );
+    assert(
+      stockPeStale.degradationReasons?.some((reason) => reason.includes("stale")),
+      "stale valuation should carry degradation reason"
+    );
+
+    const legacyStockPePreview = await previewValuationBySymbol(businessDb, marketDb, {
+      symbol: "600519.SH",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.stock.pe.relative.v1"
+    });
+    assert(
+      approxEqual(
+        legacyStockPePreview.baseValue ?? 0,
+        stockPeAfterOverrideDelete.baseValue ?? 0,
+        1e-6
+      ),
+      "legacy preview API should remain compatible with compute API"
+    );
+
+    const etfPreview = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "510300.SH",
+      asOfDate: "2026-01-06"
+    });
+    assert(
+      etfPreview.methodKey === "builtin.etf.pe.relative.v1",
+      `ETF default method should route to builtin.etf.pe.relative.v1, got ${etfPreview.methodKey}`
+    );
+    assert(etfPreview.notApplicable === false, "ETF preview should be applicable");
+    assert(
+      etfPreview.baseValue !== null,
+      "ETF preview should produce base value"
+    );
+    const etfTargetPe =
+      etfPreview.inputBreakdown?.find((item) => item.key === "targetPe")?.value ?? null;
+    assert(etfTargetPe !== null, "ETF preview should include targetPe input");
+    const etfExpectedBase = 4.4 * (etfTargetPe / 16);
+    assert(
+      approxEqual(etfPreview.baseValue ?? 0, etfExpectedBase, 1e-6),
+      `ETF PE base value should follow targetPe/pe_ttm ratio, got ${etfPreview.baseValue}`
+    );
+
+    const futuresPreview = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "IF8888.CFE",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.futures.term.structure.v1"
+    });
+    assert(
+      futuresPreview.methodKey === "builtin.futures.term.structure.v1",
+      "futures term structure method should be runnable"
+    );
+    assert(
+      futuresPreview.baseValue !== null && futuresPreview.notApplicable === false,
+      "futures term structure should produce applicable valuation"
+    );
+
+    const spotMeanReversionPreview = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "AU9999.SGE",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.spot.mean.reversion.v1"
+    });
+    assert(
+      spotMeanReversionPreview.methodKey === "builtin.spot.mean.reversion.v1",
+      "spot mean reversion method should be runnable"
+    );
+    assert(
+      spotMeanReversionPreview.baseValue !== null && spotMeanReversionPreview.notApplicable === false,
+      "spot mean reversion should produce applicable valuation"
+    );
+
+    const forexRateDiffPreview = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "USDCNY.FX",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.forex.rate.differential.v1"
+    });
+    assert(
+      forexRateDiffPreview.methodKey === "builtin.forex.rate.differential.v1",
+      "forex rate differential method should be runnable"
+    );
+    assert(
+      forexRateDiffPreview.baseValue !== null && forexRateDiffPreview.notApplicable === false,
+      "forex rate differential should produce applicable valuation"
+    );
+
+    const bondSpreadPreview = await computeValuationBySymbol(businessDb, marketDb, {
+      symbol: "CGB10Y.CN",
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.bond.spread.duration.v1"
+    });
+    assert(
+      bondSpreadPreview.methodKey === "builtin.bond.spread.duration.v1",
+      "bond spread-duration method should be runnable"
+    );
+    assert(
+      bondSpreadPreview.baseValue !== null && bondSpreadPreview.notApplicable === false,
+      "bond spread-duration should produce applicable valuation"
     );
 
     const scopeInsight = await createInsight(businessDb, {
@@ -305,7 +575,8 @@ async function runSmokeE2E(): Promise<void> {
     });
     const stockPreview = await previewValuationBySymbol(businessDb, marketDb, {
       symbol: "600519.SH",
-      asOfDate: "2026-01-06"
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.equity.factor"
     });
     assert(
       stockPreview.notApplicable === false,
@@ -335,7 +606,8 @@ async function runSmokeE2E(): Promise<void> {
     });
     const excludedPreview = await previewValuationBySymbol(businessDb, marketDb, {
       symbol: "600519.SH",
-      asOfDate: "2026-01-06"
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.equity.factor"
     });
     assert(
       !excludedPreview.appliedEffects.some((item) => item.insightId === stockInsight.id),
@@ -347,7 +619,8 @@ async function runSmokeE2E(): Promise<void> {
     });
     const unexcludedPreview = await previewValuationBySymbol(businessDb, marketDb, {
       symbol: "600519.SH",
-      asOfDate: "2026-01-06"
+      asOfDate: "2026-01-06",
+      methodKey: "builtin.equity.factor"
     });
     assert(
       unexcludedPreview.appliedEffects.some((item) => item.insightId === stockInsight.id),
@@ -485,6 +758,19 @@ async function runSmokeE2E(): Promise<void> {
       "[verify-insights-e2e] coverage:",
       JSON.stringify(
         {
+          refreshStatus: refreshRun.status,
+          objectiveSnapshots: objectiveSnapshots.length,
+          stockMethod: stockAutoPreview.methodKey,
+          stockPeDefault: stockPeWithDefault.baseValue,
+          stockPeOverride: stockPeWithOverride.baseValue,
+          stockPeStaleConfidence: stockPeStale.confidence,
+          etfMethod: etfPreview.methodKey,
+          etfBaseValue: etfPreview.baseValue,
+          futuresMethod: futuresPreview.methodKey,
+          futuresBaseValue: futuresPreview.baseValue,
+          spotMeanReversionMethod: spotMeanReversionPreview.methodKey,
+          forexMethod: forexRateDiffPreview.methodKey,
+          bondSpreadMethod: bondSpreadPreview.methodKey,
           scopeSymbols: scopeMaterialize.symbols.length,
           stockEffects: stockPreview.appliedEffects.length,
           spotEffects: spotPreview.appliedEffects.length,

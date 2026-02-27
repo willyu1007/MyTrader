@@ -9,6 +9,11 @@ export interface DailyBasicInput {
   tradeDate: string; // YYYY-MM-DD
   circMv: number | null;
   totalMv: number | null;
+  peTtm: number | null;
+  pb: number | null;
+  psTtm: number | null;
+  dvTtm: number | null;
+  turnoverRate: number | null;
   source: MarketDataSource;
 }
 
@@ -17,6 +22,11 @@ export interface DailyBasicRow {
   trade_date: string;
   circ_mv: number | null;
   total_mv: number | null;
+  pe_ttm: number | null;
+  pb: number | null;
+  ps_ttm: number | null;
+  dv_ttm: number | null;
+  turnover_rate: number | null;
   source: MarketDataSource;
   ingested_at: number;
 }
@@ -39,12 +49,17 @@ export async function upsertDailyBasics(
         db,
         `
           insert into daily_basics (
-            symbol, trade_date, circ_mv, total_mv, source, ingested_at
+            symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
           )
-          values (?, ?, ?, ?, ?, ?)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict(symbol, trade_date) do update set
             circ_mv = excluded.circ_mv,
             total_mv = excluded.total_mv,
+            pe_ttm = excluded.pe_ttm,
+            pb = excluded.pb,
+            ps_ttm = excluded.ps_ttm,
+            dv_ttm = excluded.dv_ttm,
+            turnover_rate = excluded.turnover_rate,
             source = excluded.source,
             ingested_at = excluded.ingested_at
         `,
@@ -53,6 +68,11 @@ export async function upsertDailyBasics(
           input.tradeDate,
           input.circMv,
           input.totalMv,
+          input.peTtm,
+          input.pb,
+          input.psTtm,
+          input.dvTtm,
+          input.turnoverRate,
           input.source,
           now
         ]
@@ -65,13 +85,26 @@ export async function getDailyBasicsByDate(
   db: SqliteDatabase,
   tradeDate: string,
   symbols: string[]
-): Promise<Map<string, { circMv: number | null; totalMv: number | null }>> {
+): Promise<
+  Map<
+    string,
+    {
+      circMv: number | null;
+      totalMv: number | null;
+      peTtm: number | null;
+      pb: number | null;
+      psTtm: number | null;
+      dvTtm: number | null;
+      turnoverRate: number | null;
+    }
+  >
+> {
   if (symbols.length === 0) return new Map();
   const placeholders = symbols.map(() => "?").join(", ");
   const rows = await all<DailyBasicRow>(
     db,
     `
-      select symbol, trade_date, circ_mv, total_mv, source, ingested_at
+      select symbol, trade_date, circ_mv, total_mv, pe_ttm, pb, ps_ttm, dv_ttm, turnover_rate, source, ingested_at
       from daily_basics
       where trade_date = ?
         and symbol in (${placeholders})
@@ -80,11 +113,27 @@ export async function getDailyBasicsByDate(
     [tradeDate, ...symbols]
   );
 
-  const result = new Map<string, { circMv: number | null; totalMv: number | null }>();
+  const result = new Map<
+    string,
+    {
+      circMv: number | null;
+      totalMv: number | null;
+      peTtm: number | null;
+      pb: number | null;
+      psTtm: number | null;
+      dvTtm: number | null;
+      turnoverRate: number | null;
+    }
+  >();
   rows.forEach((row) => {
     result.set(row.symbol, {
       circMv: row.circ_mv ?? null,
-      totalMv: row.total_mv ?? null
+      totalMv: row.total_mv ?? null,
+      peTtm: row.pe_ttm ?? null,
+      pb: row.pb ?? null,
+      psTtm: row.ps_ttm ?? null,
+      dvTtm: row.dv_ttm ?? null,
+      turnoverRate: row.turnover_rate ?? null
     });
   });
   return result;

@@ -2,7 +2,7 @@ import { all, exec, execVolatile, get, run, transaction } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 import { backfillBaselineLedgerFromPositions } from "./ledgerBaseline";
 
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 11;
 
 export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   await execVolatile(db, "pragma foreign_keys = on;");
@@ -628,6 +628,7 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
             param_schema_json text not null,
             metric_schema_json text not null,
             formula_manifest_json text not null,
+            input_schema_json text not null default '[]',
             created_at integer not null,
             updated_at integer not null,
             foreign key (method_id) references valuation_methods(id) on delete cascade
@@ -660,6 +661,9 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
             base_metrics_json text not null,
             adjusted_metrics_json text not null,
             applied_effects_json text not null,
+            confidence text,
+            degradation_reasons_json text not null default '[]',
+            input_breakdown_json text not null default '[]',
             created_at integer not null,
             updated_at integer not null
           );
@@ -763,6 +767,216 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
       );
     }
 
+    if (currentVersion < 9) {
+      currentVersion = 9;
+
+      await exec(
+        db,
+        `
+          create table if not exists valuation_objective_metric_snapshots (
+            id text primary key not null,
+            symbol text not null,
+            method_key text not null,
+            metric_key text not null,
+            as_of_date text not null,
+            value real,
+            quality text not null,
+            source text,
+            created_at integer not null,
+            updated_at integer not null
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create unique index if not exists valuation_objective_metric_unique
+          on valuation_objective_metric_snapshots (symbol, method_key, metric_key, as_of_date);
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists valuation_objective_metric_updated
+          on valuation_objective_metric_snapshots (updated_at desc);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists valuation_subjective_defaults (
+            id text primary key not null,
+            method_key text not null,
+            input_key text not null,
+            market text,
+            industry_tag text,
+            value real not null,
+            source text,
+            created_at integer not null,
+            updated_at integer not null
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create unique index if not exists valuation_subjective_defaults_unique
+          on valuation_subjective_defaults (
+            method_key,
+            input_key,
+            ifnull(market, ''),
+            ifnull(industry_tag, '')
+          );
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists valuation_subjective_symbol_overrides (
+            id text primary key not null,
+            symbol text not null,
+            method_key text not null,
+            input_key text not null,
+            value real not null,
+            note text,
+            created_at integer not null,
+            updated_at integer not null
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create unique index if not exists valuation_subjective_overrides_unique
+          on valuation_subjective_symbol_overrides (symbol, method_key, input_key);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists valuation_refresh_runs (
+            id text primary key not null,
+            status text not null,
+            reason text,
+            total_symbols integer not null,
+            refreshed integer not null,
+            failed integer not null,
+            message text,
+            started_at integer not null,
+            finished_at integer,
+            created_at integer not null,
+            updated_at integer not null
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists valuation_refresh_runs_started_at
+          on valuation_refresh_runs (started_at desc);
+        `
+      );
+
+      const versionColumns = await getTableColumns(db, "valuation_method_versions");
+      if (!versionColumns.has("input_schema_json")) {
+        await exec(
+          db,
+          `
+            alter table valuation_method_versions
+            add column input_schema_json text not null default '[]';
+          `
+        );
+      }
+
+      const snapshotColumns = await getTableColumns(
+        db,
+        "valuation_adjustment_snapshots"
+      );
+      if (!snapshotColumns.has("confidence")) {
+        await exec(
+          db,
+          `
+            alter table valuation_adjustment_snapshots
+            add column confidence text;
+          `
+        );
+      }
+      if (!snapshotColumns.has("degradation_reasons_json")) {
+        await exec(
+          db,
+          `
+            alter table valuation_adjustment_snapshots
+            add column degradation_reasons_json text not null default '[]';
+          `
+        );
+      }
+      if (!snapshotColumns.has("input_breakdown_json")) {
+        await exec(
+          db,
+          `
+            alter table valuation_adjustment_snapshots
+            add column input_breakdown_json text not null default '[]';
+          `
+        );
+      }
+
+      await run(
+        db,
+        `
+          update valuation_method_versions
+          set input_schema_json = '[]'
+          where input_schema_json is null or trim(input_schema_json) = '';
+        `
+      );
+      await run(
+        db,
+        `
+          update valuation_adjustment_snapshots
+          set degradation_reasons_json = '[]'
+          where degradation_reasons_json is null or trim(degradation_reasons_json) = '';
+        `
+      );
+      await run(
+        db,
+        `
+          update valuation_adjustment_snapshots
+          set input_breakdown_json = '[]'
+          where input_breakdown_json is null or trim(input_breakdown_json) = '';
+        `
+      );
+
+      await seedBuiltinValuationMethods(db);
+
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
+    if (currentVersion < 10) {
+      currentVersion = 10;
+      await seedBuiltinValuationMethods(db);
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
+    if (currentVersion < 11) {
+      currentVersion = 11;
+      await seedBuiltinValuationMethods(db);
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
     if (currentVersion >= 3) {
       const baselineRow = await get<{ value: string }>(
         db,
@@ -812,9 +1026,237 @@ interface BuiltinValuationMethodSeed {
   formulaId: string;
   metricSchema: Record<string, unknown>;
   paramSchema: Record<string, unknown>;
+  inputSchema?: Array<Record<string, unknown>>;
 }
 
 const BUILTIN_VALUATION_METHOD_SEEDS: BuiltinValuationMethodSeed[] = [
+  {
+    id: "builtin.stock.pe.relative",
+    methodKey: "builtin.stock.pe.relative.v1",
+    name: "股票 PE 相对估值",
+    description: "基于个股 PE 与行业中位数偏离估算公允价值。",
+    assetScope: {
+      kinds: ["stock", "fund"],
+      assetClasses: ["stock", "etf"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "etf", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_pe_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.pe_ttm"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetPe: 18
+    }
+  },
+  {
+    id: "builtin.stock.pb.relative",
+    methodKey: "builtin.stock.pb.relative.v1",
+    name: "股票 PB 相对估值",
+    description: "基于 PB 与行业中位数偏离估算公允价值。",
+    assetScope: {
+      kinds: ["stock", "fund"],
+      assetClasses: ["stock", "etf"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "etf", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_pb_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.pb"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetPb: 2.5
+    }
+  },
+  {
+    id: "builtin.stock.ps.relative",
+    methodKey: "builtin.stock.ps.relative.v1",
+    name: "股票 PS 相对估值",
+    description: "基于 PS 与行业中位数偏离估算公允价值。",
+    assetScope: {
+      kinds: ["stock", "fund"],
+      assetClasses: ["stock", "etf"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "etf", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_ps_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.ps_ttm"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetPs: 3
+    }
+  },
+  {
+    id: "builtin.stock.peg.relative",
+    methodKey: "builtin.stock.peg.relative.v1",
+    name: "股票 PEG 估值",
+    description: "基于 PE 与成长假设计算 PEG 目标估值。",
+    assetScope: {
+      kinds: ["stock"],
+      assetClasses: ["stock"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_peg_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.pe_ttm"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      growthRate: 0.12,
+      targetPeg: 1
+    }
+  },
+  {
+    id: "builtin.stock.ev_ebitda.relative",
+    methodKey: "builtin.stock.ev_ebitda.relative.v1",
+    name: "股票 EV/EBITDA 估值",
+    description: "基于 EV/EBITDA 偏离估值。",
+    assetScope: {
+      kinds: ["stock"],
+      assetClasses: ["stock"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_ev_ebitda_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.pe_ttm"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetEvEbitda: 12
+    }
+  },
+  {
+    id: "builtin.stock.ev_sales.relative",
+    methodKey: "builtin.stock.ev_sales.relative.v1",
+    name: "股票 EV/Sales 估值",
+    description: "基于 EV/Sales 偏离估值。",
+    assetScope: {
+      kinds: ["stock"],
+      assetClasses: ["stock"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_ev_sales_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.ps_ttm"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetEvSales: 4
+    }
+  },
+  {
+    id: "builtin.stock.ddm.gordon",
+    methodKey: "builtin.stock.ddm.gordon.v1",
+    name: "股票 DDM Gordon 估值",
+    description: "股利折现（Gordon）估值。",
+    assetScope: {
+      kinds: ["stock"],
+      assetClasses: ["stock"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_ddm_gordon_v1",
+    metricSchema: {
+      required: ["market.price"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      dividendYield: 0.03,
+      growthRate: 0.05,
+      discountRate: 0.1
+    }
+  },
+  {
+    id: "builtin.stock.fcff.twostage",
+    methodKey: "builtin.stock.fcff.twostage.v1",
+    name: "股票 FCFF 两阶段估值",
+    description: "自由现金流两阶段折现估值。",
+    assetScope: {
+      kinds: ["stock"],
+      assetClasses: ["stock"],
+      markets: ["CN", "HK", "US"],
+      domains: ["stock", "hk_stock", "us_stock"]
+    },
+    formulaId: "stock_fcff_twostage_v1",
+    metricSchema: {
+      required: ["market.price"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      fcffYield: 0.05,
+      highGrowthYears: 5,
+      highGrowthRate: 0.1,
+      terminalGrowthRate: 0.03,
+      wacc: 0.1
+    }
+  },
+  {
+    id: "builtin.etf.pe.relative",
+    methodKey: "builtin.etf.pe.relative.v1",
+    name: "ETF PE 相对估值",
+    description: "基于 ETF 口径（或持仓穿透）PE 估算公允价值。",
+    assetScope: {
+      kinds: ["fund"],
+      assetClasses: ["etf"],
+      markets: ["CN", "HK", "US"],
+      domains: ["etf"]
+    },
+    formulaId: "stock_pe_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.pe_ttm"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetPe: 18
+    }
+  },
+  {
+    id: "builtin.etf.pb.relative",
+    methodKey: "builtin.etf.pb.relative.v1",
+    name: "ETF PB 相对估值",
+    description: "基于 ETF 口径（或持仓穿透）PB 估算公允价值。",
+    assetScope: {
+      kinds: ["fund"],
+      assetClasses: ["etf"],
+      markets: ["CN", "HK", "US"],
+      domains: ["etf"]
+    },
+    formulaId: "stock_pb_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.pb"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetPb: 2.5
+    }
+  },
+  {
+    id: "builtin.etf.ps.relative",
+    methodKey: "builtin.etf.ps.relative.v1",
+    name: "ETF PS 相对估值",
+    description: "基于 ETF 口径（或持仓穿透）PS 估算公允价值。",
+    assetScope: {
+      kinds: ["fund"],
+      assetClasses: ["etf"],
+      markets: ["CN", "HK", "US"],
+      domains: ["etf"]
+    },
+    formulaId: "stock_ps_relative_v1",
+    metricSchema: {
+      required: ["market.price", "valuation.ps_ttm"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      targetPs: 3
+    }
+  },
   {
     id: "builtin.equity.factor",
     methodKey: "builtin.equity.factor",
@@ -859,6 +1301,48 @@ const BUILTIN_VALUATION_METHOD_SEEDS: BuiltinValuationMethodSeed[] = [
     }
   },
   {
+    id: "builtin.futures.trend.vol",
+    methodKey: "builtin.futures.trend.vol.v1",
+    name: "期货趋势-波动估值",
+    description: "基于动量趋势与波动率惩罚估算期货公允值。",
+    assetScope: {
+      kinds: ["futures"],
+      assetClasses: ["futures"],
+      markets: ["CN", "US"],
+      domains: ["futures"]
+    },
+    formulaId: "futures_trend_vol_v1",
+    metricSchema: {
+      required: ["market.price", "factor.momentum.20d", "risk.volatility.20d"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      momentumWeight: 0.65,
+      volatilityPenalty: 0.3
+    }
+  },
+  {
+    id: "builtin.futures.term.structure",
+    methodKey: "builtin.futures.term.structure.v1",
+    name: "期货期限结构估值",
+    description: "基于预期基差与展期收益修正现价。",
+    assetScope: {
+      kinds: ["futures"],
+      assetClasses: ["futures"],
+      markets: ["CN", "US"],
+      domains: ["futures"]
+    },
+    formulaId: "futures_term_structure_v1",
+    metricSchema: {
+      required: ["market.price"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      expectedBasisPct: 0.01,
+      rollYieldPct: 0.005
+    }
+  },
+  {
     id: "builtin.spot.carry",
     methodKey: "builtin.spot.carry",
     name: "现货 Carry 估值",
@@ -876,6 +1360,47 @@ const BUILTIN_VALUATION_METHOD_SEEDS: BuiltinValuationMethodSeed[] = [
     },
     paramSchema: {
       carryWeight: 1.0
+    }
+  },
+  {
+    id: "builtin.spot.mean.reversion",
+    methodKey: "builtin.spot.mean.reversion.v1",
+    name: "现货均值回归估值",
+    description: "基于短期动量偏离做均值回归修正。",
+    assetScope: {
+      kinds: ["spot"],
+      assetClasses: ["spot"],
+      markets: ["CN"],
+      domains: ["spot"]
+    },
+    formulaId: "spot_mean_reversion_v1",
+    metricSchema: {
+      required: ["market.price", "factor.momentum.20d"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      reversionStrength: 0.35
+    }
+  },
+  {
+    id: "builtin.spot.inventory.risk",
+    methodKey: "builtin.spot.inventory.risk.v1",
+    name: "现货库存风险估值",
+    description: "库存溢价与波动风险联合修正现货估值。",
+    assetScope: {
+      kinds: ["spot"],
+      assetClasses: ["spot"],
+      markets: ["CN"],
+      domains: ["spot"]
+    },
+    formulaId: "spot_inventory_risk_v1",
+    metricSchema: {
+      required: ["market.price", "risk.volatility.20d"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      inventoryPremium: 0.04,
+      volatilityPenalty: 0.35
     }
   },
   {
@@ -900,6 +1425,48 @@ const BUILTIN_VALUATION_METHOD_SEEDS: BuiltinValuationMethodSeed[] = [
     }
   },
   {
+    id: "builtin.forex.rate.differential",
+    methodKey: "builtin.forex.rate.differential.v1",
+    name: "外汇利差估值",
+    description: "基于利差与持有期估计汇率公允值。",
+    assetScope: {
+      kinds: ["forex"],
+      assetClasses: [],
+      markets: ["FX"],
+      domains: ["fx"]
+    },
+    formulaId: "forex_rate_differential_v1",
+    metricSchema: {
+      required: ["market.price"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      carryDifferential: 0.01,
+      horizonYears: 1
+    }
+  },
+  {
+    id: "builtin.forex.reer.reversion",
+    methodKey: "builtin.forex.reer.reversion.v1",
+    name: "外汇 REER 回归估值",
+    description: "基于 REER 偏离与短期动量做回归估值。",
+    assetScope: {
+      kinds: ["forex"],
+      assetClasses: [],
+      markets: ["FX"],
+      domains: ["fx"]
+    },
+    formulaId: "forex_reer_reversion_v1",
+    metricSchema: {
+      required: ["market.price", "factor.momentum.20d"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      reerGap: 0.03,
+      reversionSpeed: 0.45
+    }
+  },
+  {
     id: "builtin.bond.yield",
     methodKey: "builtin.bond.yield",
     name: "债券收益率曲线估值",
@@ -917,6 +1484,49 @@ const BUILTIN_VALUATION_METHOD_SEEDS: BuiltinValuationMethodSeed[] = [
     },
     paramSchema: {
       durationWeight: 1.0
+    }
+  },
+  {
+    id: "builtin.bond.spread.duration",
+    methodKey: "builtin.bond.spread.duration.v1",
+    name: "债券利差-久期估值",
+    description: "基于信用利差变化、久期与凸性修正债券价格。",
+    assetScope: {
+      kinds: ["bond", "rate"],
+      assetClasses: [],
+      markets: ["CN", "US"],
+      domains: ["bond", "macro"]
+    },
+    formulaId: "bond_spread_duration_v1",
+    metricSchema: {
+      required: ["market.price"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      duration: 6,
+      spreadChange: 0.002,
+      convexity: 0.5
+    }
+  },
+  {
+    id: "builtin.bond.real.rate",
+    methodKey: "builtin.bond.real.rate.v1",
+    name: "债券实际利率估值",
+    description: "基于实际利率偏离与敏感度估值债券/利率资产。",
+    assetScope: {
+      kinds: ["bond", "rate"],
+      assetClasses: [],
+      markets: ["CN", "US"],
+      domains: ["bond", "macro"]
+    },
+    formulaId: "bond_real_rate_v1",
+    metricSchema: {
+      required: ["market.price"],
+      outputs: ["output.fair_value", "output.return_gap"]
+    },
+    paramSchema: {
+      realRateGap: -0.005,
+      sensitivity: 4
     }
   },
   {
@@ -946,6 +1556,7 @@ async function seedBuiltinValuationMethods(db: SqliteDatabase): Promise<void> {
   const now = Date.now();
   for (const seed of BUILTIN_VALUATION_METHOD_SEEDS) {
     const graph = buildDefaultMetricGraph(seed.formulaId);
+    const inputSchema = seed.inputSchema ?? buildDefaultInputSchema(seed.formulaId);
     const versionId = `${seed.id}.v1`;
     await run(
       db,
@@ -980,15 +1591,16 @@ async function seedBuiltinValuationMethods(db: SqliteDatabase): Promise<void> {
       `
         insert into valuation_method_versions (
           id, method_id, version, effective_from, effective_to,
-          graph_json, param_schema_json, metric_schema_json, formula_manifest_json,
+          graph_json, param_schema_json, metric_schema_json, formula_manifest_json, input_schema_json,
           created_at, updated_at
         )
-        values (?, ?, 1, null, null, ?, ?, ?, ?, ?, ?)
+        values (?, ?, 1, null, null, ?, ?, ?, ?, ?, ?, ?)
         on conflict(method_id, version) do update set
           graph_json = excluded.graph_json,
           param_schema_json = excluded.param_schema_json,
           metric_schema_json = excluded.metric_schema_json,
           formula_manifest_json = excluded.formula_manifest_json,
+          input_schema_json = excluded.input_schema_json,
           updated_at = excluded.updated_at
       `,
       [
@@ -998,6 +1610,7 @@ async function seedBuiltinValuationMethods(db: SqliteDatabase): Promise<void> {
         JSON.stringify(seed.paramSchema),
         JSON.stringify(seed.metricSchema),
         JSON.stringify({ formulaId: seed.formulaId, locked: true }),
+        JSON.stringify(inputSchema),
         now,
         now
       ]
@@ -1072,4 +1685,724 @@ function buildDefaultMetricGraph(formulaId: string): Array<Record<string, unknow
       editable: false
     }
   ];
+}
+
+function buildDefaultInputSchema(
+  formulaId: string
+): Array<Record<string, unknown>> {
+  const common: Array<Record<string, unknown>> = [
+    {
+      key: "market.price",
+      label: "市场价格",
+      kind: "objective",
+      unit: "currency",
+      editable: false,
+      objectiveSource: "market.daily_prices.close",
+      defaultPolicy: "none",
+      defaultValue: null,
+      displayOrder: 1,
+      description: "标的最新收盘价。"
+    },
+    {
+      key: "output.fair_value",
+      label: "公允价值",
+      kind: "derived",
+      unit: "currency",
+      editable: false,
+      objectiveSource: null,
+      defaultPolicy: "none",
+      defaultValue: null,
+      displayOrder: 999,
+      description: "模型输出。"
+    },
+    {
+      key: "output.return_gap",
+      label: "收益偏离",
+      kind: "derived",
+      unit: "pct",
+      editable: false,
+      objectiveSource: null,
+      defaultPolicy: "none",
+      defaultValue: null,
+      displayOrder: 1000,
+      description: "模型输出。"
+    }
+  ];
+
+  const objectivePe = {
+    key: "valuation.pe_ttm",
+    label: "PE(TTM)",
+    kind: "objective",
+    unit: "number",
+    editable: false,
+    objectiveSource: "market.daily_basics.pe_ttm",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "来自基础面表。"
+  };
+  const objectivePb = {
+    key: "valuation.pb",
+    label: "PB",
+    kind: "objective",
+    unit: "number",
+    editable: false,
+    objectiveSource: "market.daily_basics.pb",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "来自基础面表。"
+  };
+  const objectivePs = {
+    key: "valuation.ps_ttm",
+    label: "PS(TTM)",
+    kind: "objective",
+    unit: "number",
+    editable: false,
+    objectiveSource: "market.daily_basics.ps_ttm",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "来自基础面表。"
+  };
+  const objectiveDv = {
+    key: "valuation.dv_ttm",
+    label: "股息率(TTM)",
+    kind: "objective",
+    unit: "pct",
+    editable: false,
+    objectiveSource: "market.daily_basics.dv_ttm",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "来自基础面表。"
+  };
+  const objectiveMomentum = {
+    key: "factor.momentum.20d",
+    label: "20日动量",
+    kind: "objective",
+    unit: "pct",
+    editable: false,
+    objectiveSource: "market.daily_prices.derived.momentum_20d",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "由日线价格序列计算。"
+  };
+  const objectiveVolatility = {
+    key: "risk.volatility.20d",
+    label: "20日波动率",
+    kind: "objective",
+    unit: "pct",
+    editable: false,
+    objectiveSource: "market.daily_prices.derived.volatility_20d",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "由日线价格序列计算。"
+  };
+  const objectiveBasis = {
+    key: "factor.basis",
+    label: "基差",
+    kind: "objective",
+    unit: "number",
+    editable: false,
+    objectiveSource: "market.derived.basis",
+    defaultPolicy: "none",
+    defaultValue: null,
+    description: "现货-期货价差或近远月价差。"
+  };
+
+  switch (formulaId) {
+    case "stock_pe_relative_v1":
+      return [
+        ...common,
+        { ...objectivePe, displayOrder: 10 },
+        {
+          key: "targetPe",
+          label: "目标PE",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "industry_median",
+          defaultValue: 18,
+          displayOrder: 20,
+          description: "行业/市场/全局基准回退。"
+        }
+      ];
+    case "stock_pb_relative_v1":
+      return [
+        ...common,
+        { ...objectivePb, displayOrder: 10 },
+        {
+          key: "targetPb",
+          label: "目标PB",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "industry_median",
+          defaultValue: 2.5,
+          displayOrder: 20,
+          description: "行业/市场/全局基准回退。"
+        }
+      ];
+    case "stock_ps_relative_v1":
+      return [
+        ...common,
+        { ...objectivePs, displayOrder: 10 },
+        {
+          key: "targetPs",
+          label: "目标PS",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "industry_median",
+          defaultValue: 3,
+          displayOrder: 20,
+          description: "行业/市场/全局基准回退。"
+        }
+      ];
+    case "stock_peg_relative_v1":
+      return [
+        ...common,
+        { ...objectivePe, displayOrder: 10 },
+        {
+          key: "growthRate",
+          label: "增长率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.12,
+          displayOrder: 20,
+          description: "主观增长假设。"
+        },
+        {
+          key: "targetPeg",
+          label: "目标PEG",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 1,
+          displayOrder: 21,
+          description: "用于将增长率转换为目标PE。"
+        }
+      ];
+    case "stock_ev_ebitda_relative_v1":
+      return [
+        ...common,
+        { ...objectivePe, displayOrder: 10 },
+        {
+          key: "targetEvEbitda",
+          label: "目标EV/EBITDA",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "industry_median",
+          defaultValue: 12,
+          displayOrder: 20,
+          description: "行业/市场/全局基准回退。"
+        }
+      ];
+    case "stock_ev_sales_relative_v1":
+      return [
+        ...common,
+        { ...objectivePs, displayOrder: 10 },
+        {
+          key: "targetEvSales",
+          label: "目标EV/Sales",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "industry_median",
+          defaultValue: 4,
+          displayOrder: 20,
+          description: "行业/市场/全局基准回退。"
+        }
+      ];
+    case "stock_ddm_gordon_v1":
+      return [
+        ...common,
+        { ...objectiveDv, displayOrder: 10 },
+        {
+          key: "dividendYield",
+          label: "股息率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.03,
+          displayOrder: 20,
+          description: "可参考历史分红率。"
+        },
+        {
+          key: "growthRate",
+          label: "长期增长率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.05,
+          displayOrder: 21,
+          description: "长期股利增长假设。"
+        },
+        {
+          key: "discountRate",
+          label: "折现率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.1,
+          displayOrder: 22,
+          description: "估值贴现率。"
+        }
+      ];
+    case "stock_fcff_twostage_v1":
+      return [
+        ...common,
+        {
+          key: "fcffYield",
+          label: "FCFF收益率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.05,
+          displayOrder: 20,
+          description: "初始自由现金流收益率。"
+        },
+        {
+          key: "highGrowthYears",
+          label: "高增阶段年数",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 5,
+          displayOrder: 21,
+          description: "两阶段模型第一阶段长度。"
+        },
+        {
+          key: "highGrowthRate",
+          label: "高增阶段增速",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "industry_median",
+          defaultValue: 0.1,
+          displayOrder: 22,
+          description: "第一阶段增长假设。"
+        },
+        {
+          key: "terminalGrowthRate",
+          label: "永续增长率",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.03,
+          displayOrder: 23,
+          description: "第二阶段长期增长假设。"
+        },
+        {
+          key: "wacc",
+          label: "WACC",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.1,
+          displayOrder: 24,
+          description: "加权资本成本。"
+        }
+      ];
+    case "futures_basis_v1":
+      return [
+        ...common,
+        { ...objectiveBasis, displayOrder: 10 },
+        { ...objectiveVolatility, displayOrder: 11 },
+        {
+          key: "basisWeight",
+          label: "基差权重",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.7,
+          displayOrder: 20,
+          description: "基差对估值影响的权重。"
+        },
+        {
+          key: "volPenalty",
+          label: "波动惩罚",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.3,
+          displayOrder: 21,
+          description: "波动率惩罚系数。"
+        }
+      ];
+    case "futures_trend_vol_v1":
+      return [
+        ...common,
+        { ...objectiveMomentum, displayOrder: 10 },
+        { ...objectiveVolatility, displayOrder: 11 },
+        {
+          key: "momentumWeight",
+          label: "动量权重",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.65,
+          displayOrder: 20,
+          description: "动量因子权重。"
+        },
+        {
+          key: "volatilityPenalty",
+          label: "波动惩罚",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.3,
+          displayOrder: 21,
+          description: "波动率惩罚系数。"
+        }
+      ];
+    case "futures_term_structure_v1":
+      return [
+        ...common,
+        {
+          key: "expectedBasisPct",
+          label: "预期基差(%)",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.01,
+          displayOrder: 20,
+          description: "近月合约相对现货的预期基差。"
+        },
+        {
+          key: "rollYieldPct",
+          label: "展期收益(%)",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.005,
+          displayOrder: 21,
+          description: "期限结构带来的展期收益。"
+        }
+      ];
+    case "spot_carry_v1":
+      return [
+        ...common,
+        {
+          key: "factor.carry.annualized",
+          label: "Carry 年化",
+          kind: "objective",
+          unit: "pct",
+          editable: false,
+          objectiveSource: "market.daily_prices.derived.carry_annualized",
+          defaultPolicy: "none",
+          defaultValue: null,
+          displayOrder: 10,
+          description: "基于历史价格近似计算的 carry。"
+        },
+        {
+          key: "carryWeight",
+          label: "Carry 权重",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 1,
+          displayOrder: 20,
+          description: "carry 对估值影响权重。"
+        }
+      ];
+    case "spot_mean_reversion_v1":
+      return [
+        ...common,
+        { ...objectiveMomentum, displayOrder: 10 },
+        {
+          key: "reversionStrength",
+          label: "回归强度",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.35,
+          displayOrder: 20,
+          description: "动量向均值回归的强度。"
+        }
+      ];
+    case "spot_inventory_risk_v1":
+      return [
+        ...common,
+        { ...objectiveVolatility, displayOrder: 10 },
+        {
+          key: "inventoryPremium",
+          label: "库存溢价",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "industry_median",
+          defaultValue: 0.04,
+          displayOrder: 20,
+          description: "库存紧张带来的价格溢价。"
+        },
+        {
+          key: "volatilityPenalty",
+          label: "波动惩罚",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.35,
+          displayOrder: 21,
+          description: "波动率惩罚系数。"
+        }
+      ];
+    case "forex_ppp_v1":
+      return [
+        ...common,
+        {
+          key: "factor.ppp_gap",
+          label: "PPP 偏离",
+          kind: "objective",
+          unit: "pct",
+          editable: false,
+          objectiveSource: "macro.ppp_gap",
+          defaultPolicy: "none",
+          defaultValue: null,
+          displayOrder: 10,
+          description: "购买力平价偏离估计。"
+        },
+        {
+          key: "pppWeight",
+          label: "PPP 权重",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.8,
+          displayOrder: 20,
+          description: "PPP 对估值贡献权重。"
+        },
+        {
+          key: "momentumWeight",
+          label: "动量权重",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.2,
+          displayOrder: 21,
+          description: "动量项补充权重。"
+        }
+      ];
+    case "forex_rate_differential_v1":
+      return [
+        ...common,
+        {
+          key: "carryDifferential",
+          label: "利差(年化)",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.01,
+          displayOrder: 20,
+          description: "两币种政策利率或掉期点差。"
+        },
+        {
+          key: "horizonYears",
+          label: "持有期(年)",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "constant",
+          defaultValue: 1,
+          displayOrder: 21,
+          description: "估值持有期。"
+        }
+      ];
+    case "forex_reer_reversion_v1":
+      return [
+        ...common,
+        { ...objectiveMomentum, displayOrder: 10 },
+        {
+          key: "reerGap",
+          label: "REER 偏离",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.03,
+          displayOrder: 20,
+          description: "有效汇率偏离幅度。"
+        },
+        {
+          key: "reversionSpeed",
+          label: "回归速度",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.45,
+          displayOrder: 21,
+          description: "REER 回归的速度系数。"
+        }
+      ];
+    case "bond_yield_v1":
+      return [
+        ...common,
+        {
+          key: "risk.duration",
+          label: "久期",
+          kind: "objective",
+          unit: "number",
+          editable: false,
+          objectiveSource: "bond.curve.duration",
+          defaultPolicy: "none",
+          defaultValue: null,
+          displayOrder: 10,
+          description: "组合或券种久期。"
+        },
+        {
+          key: "risk.yield_shift",
+          label: "收益率冲击",
+          kind: "objective",
+          unit: "pct",
+          editable: false,
+          objectiveSource: "bond.curve.yield_shift",
+          defaultPolicy: "none",
+          defaultValue: null,
+          displayOrder: 11,
+          description: "期限结构变动冲击。"
+        },
+        {
+          key: "durationWeight",
+          label: "久期权重",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "constant",
+          defaultValue: 1,
+          displayOrder: 20,
+          description: "久期冲击传导权重。"
+        }
+      ];
+    case "bond_spread_duration_v1":
+      return [
+        ...common,
+        {
+          key: "duration",
+          label: "久期",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 6,
+          displayOrder: 20,
+          description: "利差冲击对应久期。"
+        },
+        {
+          key: "spreadChange",
+          label: "利差变动",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: 0.002,
+          displayOrder: 21,
+          description: "信用/期限利差变化。"
+        },
+        {
+          key: "convexity",
+          label: "凸性",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 0.5,
+          displayOrder: 22,
+          description: "二阶修正项。"
+        }
+      ];
+    case "bond_real_rate_v1":
+      return [
+        ...common,
+        {
+          key: "realRateGap",
+          label: "实际利率偏离",
+          kind: "subjective",
+          unit: "pct",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "market_median",
+          defaultValue: -0.005,
+          displayOrder: 20,
+          description: "当前实际利率相对中枢偏离。"
+        },
+        {
+          key: "sensitivity",
+          label: "敏感度",
+          kind: "subjective",
+          unit: "number",
+          editable: true,
+          objectiveSource: null,
+          defaultPolicy: "global_median",
+          defaultValue: 4,
+          displayOrder: 21,
+          description: "价格对实际利率偏离敏感度。"
+        }
+      ];
+    default:
+      if (formulaId.startsWith("stock_")) {
+        return [
+          ...common,
+          { ...objectivePe, displayOrder: 10 },
+          { ...objectivePb, displayOrder: 11 },
+          { ...objectivePs, displayOrder: 12 }
+        ];
+      }
+      return common;
+  }
 }

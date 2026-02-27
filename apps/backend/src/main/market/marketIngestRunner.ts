@@ -804,6 +804,11 @@ async function ingestTargetsRange(
             tradeDate: row.tradeDate,
             circMv: row.circMv,
             totalMv: row.totalMv,
+            peTtm: row.peTtm,
+            pb: row.pb,
+            psTtm: row.psTtm,
+            dvTtm: row.dvTtm,
+            turnoverRate: row.turnoverRate,
             source: "tushare"
           }))
         );
@@ -2264,7 +2269,7 @@ async function ingestDailyBasicWave2(input: {
   const symbolBatch = sortedSymbols.slice(symbolOffset, symbolOffset + chunkSize);
   const tradeDateRaw = toTushareDate(targetDate);
   const now = Date.now();
-  const basicRows: Array<[string, string, number | null, number | null, string, number]> = [];
+  const basicRows: ReturnType<typeof mapDailyBasicRows> = [];
 
   let fetchErrors = 0;
   let nextOffset = symbolOffset;
@@ -2276,7 +2281,7 @@ async function ingestDailyBasicWave2(input: {
         "daily_basic",
         input.token,
         { ts_code: symbol, trade_date: tradeDateRaw },
-        "ts_code,trade_date,circ_mv,total_mv"
+        "ts_code,trade_date,circ_mv,total_mv,pe_ttm,pb,ps_ttm,dv_ttm,turnover_rate"
       );
       const rows = mapDailyBasicRows(res, new Set([symbol]), "tushare", now);
       basicRows.push(...rows);
@@ -2298,6 +2303,11 @@ async function ingestDailyBasicWave2(input: {
         "trade_date",
         "circ_mv",
         "total_mv",
+        "pe_ttm",
+        "pb",
+        "ps_ttm",
+        "dv_ttm",
+        "turnover_rate",
         "source",
         "ingested_at"
       ], basicRows);
@@ -2853,6 +2863,11 @@ async function ingestUniverseTradeDate(
       "trade_date",
       "circ_mv",
       "total_mv",
+      "pe_ttm",
+      "pb",
+      "ps_ttm",
+      "dv_ttm",
+      "turnover_rate",
       "source",
       "ingested_at"
     ], basicRows);
@@ -3151,16 +3166,49 @@ function mapDailyBasicRows(
   allowed: Set<string>,
   source: MarketDataSource,
   ingestedAt: number
-): Array<[string, string, number | null, number | null, string, number]> {
+): Array<
+  [
+    string,
+    string,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    number | null,
+    string,
+    number
+  ]
+> {
   const fields = res.fields ?? [];
   const rows = res.items ?? [];
   const idxSymbol = fields.indexOf("ts_code");
   const idxDate = fields.indexOf("trade_date");
   const idxCirc = fields.indexOf("circ_mv");
   const idxTotal = fields.indexOf("total_mv");
+  const idxPeTtm = fields.indexOf("pe_ttm");
+  const idxPb = fields.indexOf("pb");
+  const idxPsTtm = fields.indexOf("ps_ttm");
+  const idxDvTtm = fields.indexOf("dv_ttm");
+  const idxTurnoverRate = fields.indexOf("turnover_rate");
   if (idxSymbol === -1 || idxDate === -1) return [];
 
-  const result: Array<[string, string, number | null, number | null, string, number]> = [];
+  const result: Array<
+    [
+      string,
+      string,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      number | null,
+      string,
+      number
+    ]
+  > = [];
   for (const row of rows) {
     const symbol = String(row[idxSymbol]);
     if (!allowed.has(symbol)) continue;
@@ -3171,6 +3219,11 @@ function mapDailyBasicRows(
       tradeDate,
       idxCirc === -1 ? null : normalizeNumber(row[idxCirc]),
       idxTotal === -1 ? null : normalizeNumber(row[idxTotal]),
+      idxPeTtm === -1 ? null : normalizeNumber(row[idxPeTtm]),
+      idxPb === -1 ? null : normalizeNumber(row[idxPb]),
+      idxPsTtm === -1 ? null : normalizeNumber(row[idxPsTtm]),
+      idxDvTtm === -1 ? null : normalizeNumber(row[idxDvTtm]),
+      idxTurnoverRate === -1 ? null : normalizeNumber(row[idxTurnoverRate]),
       source,
       ingestedAt
     ]);

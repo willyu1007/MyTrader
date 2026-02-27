@@ -254,7 +254,31 @@ const api: MyTraderApi = {
     setActiveValuationMethodVersion: (input) =>
       ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_SET_ACTIVE_VERSION, input),
     previewValuationBySymbol: (input) =>
-      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_PREVIEW_BY_SYMBOL, input)
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_PREVIEW_BY_SYMBOL, input),
+    upsertValuationMethodInputSchema: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METHOD_UPSERT_INPUT_SCHEMA, input),
+    listValuationSubjectiveDefaults: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_SUBJECTIVE_DEFAULT_LIST, input ?? null),
+    upsertValuationSubjectiveDefault: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_SUBJECTIVE_DEFAULT_UPSERT, input),
+    listValuationSubjectiveOverrides: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_SUBJECTIVE_OVERRIDE_LIST, input),
+    upsertValuationSubjectiveOverride: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_SUBJECTIVE_OVERRIDE_UPSERT, input),
+    deleteValuationSubjectiveOverride: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_SUBJECTIVE_OVERRIDE_DELETE, input),
+    listValuationObjectiveMetricSnapshots: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_OBJECTIVE_SNAPSHOT_LIST, input),
+    triggerValuationObjectiveRefresh: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_OBJECTIVE_REFRESH_TRIGGER, input ?? null),
+    getValuationObjectiveRefreshStatus: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_OBJECTIVE_REFRESH_STATUS_GET, input ?? null),
+    getValuationMetricSchedulerConfig: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METRIC_SCHEDULER_GET),
+    setValuationMetricSchedulerConfig: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_METRIC_SCHEDULER_SET, input),
+    computeValuationBySymbol: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.VALUATION_COMPUTE_BY_SYMBOL, input)
   }
 };
 

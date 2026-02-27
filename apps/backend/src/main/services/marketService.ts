@@ -569,6 +569,11 @@ export async function getMarketQuotes(
           tradeDate: row.tradeDate,
           circMv: row.circMv,
           totalMv: row.totalMv,
+          peTtm: row.peTtm,
+          pb: row.pb,
+          psTtm: row.psTtm,
+          dvTtm: row.dvTtm,
+          turnoverRate: row.turnoverRate,
           source: "tushare"
         }))
       );
@@ -1276,7 +1281,18 @@ function buildDemoPrices(
 function buildDemoDailyBasics(
   tradeDates: string[],
   profiles: readonly DemoProfile[]
-): { symbol: string; tradeDate: string; circMv: number; totalMv: number; source: "csv" }[] {
+): {
+  symbol: string;
+  tradeDate: string;
+  circMv: number;
+  totalMv: number;
+  peTtm: number;
+  pb: number;
+  psTtm: number;
+  dvTtm: number;
+  turnoverRate: number;
+  source: "csv";
+}[] {
   const baseCaps = new Map<string, number>();
   profiles.forEach((profile, idx) => {
     const base = profile.assetClass === "etf" ? 60_000_000_000 : 120_000_000_000 + idx * 35_000_000_000;
@@ -1306,6 +1322,11 @@ function buildDemoDailyBasics(
         tradeDate: date,
         circMv,
         totalMv,
+        peTtm: profile.assetClass === "etf" ? 20 : 12 + (close % 18),
+        pb: profile.assetClass === "etf" ? 2.1 : 1.4 + ((close % 10) / 10),
+        psTtm: profile.assetClass === "etf" ? 2.8 : 1.8 + ((close % 15) / 10),
+        dvTtm: profile.assetClass === "etf" ? 1.8 : 1 + ((close % 6) / 10),
+        turnoverRate: profile.assetClass === "etf" ? 1.2 : 2.5 + ((close % 12) / 10),
         source: "csv"
       };
     })

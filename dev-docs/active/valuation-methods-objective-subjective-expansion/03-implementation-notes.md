@@ -1,0 +1,43 @@
+# 03-implementation-notes
+
+## 2026-02-27
+- 创建任务包 `valuation-methods-objective-subjective-expansion`。
+- 锁定实现决策：股票优先、独立刷新调度、主观按标的覆盖、观点仅算子层。
+- 完成 shared IPC 扩展：
+  - 新增主客观输入、质量、置信度、调度与刷新 DTO。
+  - 新增 `VALUATION_COMPUTE_BY_SYMBOL` 及默认/覆盖/刷新相关 channels。
+- 完成 backend schema + seed：
+  - schema 升级到 v9，新建 objective/default/override/refresh 四张表。
+  - `valuation_method_versions` 增加 `input_schema_json`，快照增加置信度与降级明细字段。
+  - 股票 8 个 builtin 方法落地并写入 input schema。
+- 完成 market 数据链路扩展：
+  - `daily_basics` 增列 `pe_ttm/pb/ps_ttm/dv_ttm/turnover_rate`。
+  - provider / ingest / repository / duckdb 全链路写入新字段。
+- 完成估值引擎 V2：
+  - `computeValuationBySymbol` 接口（兼容复用 preview 计算链路）。
+  - 计算顺序：objective -> subjective defaults -> symbol override -> formula -> insight effects。
+  - 输出 `confidence/degradationReasons/inputBreakdown` 并持久化。
+- 完成股票/ETF 方法拆分：
+  - 新增 `builtin.etf.pe.relative.v1 / pb.relative.v1 / ps.relative.v1`。
+  - 默认方法路由调整为：`stock -> builtin.stock.pe.relative.v1`，`etf/fund -> builtin.etf.pe.relative.v1`。
+  - 标的详情方法下拉按 `kind/assetClass` 自动过滤，避免 stock/ETF 混用。
+  - 方法管理 Tab 资产筛选从 `股票/ETF` 拆分为 `股票/指数` 与 `ETF/基金` 两组。
+  - 共享方法支持双归类展示（同一方法可同时显示在 `股票/指数` 与 `ETF/基金`）。
+- 完成其他域方法扩充（期货/现货/外汇/债券）：
+  - 期货：`builtin.futures.trend.vol.v1`、`builtin.futures.term.structure.v1`
+  - 现货：`builtin.spot.mean.reversion.v1`、`builtin.spot.inventory.risk.v1`
+  - 外汇：`builtin.forex.rate.differential.v1`、`builtin.forex.reer.reversion.v1`
+  - 债券/利率：`builtin.bond.spread.duration.v1`、`builtin.bond.real.rate.v1`
+  - 同步补齐对应公式计算与输入 schema 展示。
+- 估值方法管理页交互调整：
+  - 新增“版本详情”按钮，以弹窗承载“版本时间轴 / 参数差异 / 版本维护”。
+  - 主页面移除上述三块区域，保留方法信息与输入定义主内容区。
+- 完成刷新与调度：
+  - 新增 `valuationMetricScheduler.ts` 并在 IPC 生命周期挂载启动/停止。
+  - 刷新任务除 objective 外，新增主观基准刷新（industry/market/global 中位数聚合）。
+- 完成前端改造：
+  - `OtherValuationMethodsTab` 增加输入定义分组管理。
+  - `MarketDetailWorkspace` 成为主估值入口（方法选择、主观覆盖编辑、置信度与降级展示）。
+  - `InsightsView` 预览切换到新计算接口。
+- 增强验证：
+  - `verify-insights-e2e` 增加估值 V2 场景（刷新状态、objective 快照、主观默认/覆盖优先级、旧 API 兼容）。

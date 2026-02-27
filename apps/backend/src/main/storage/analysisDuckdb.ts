@@ -251,11 +251,30 @@ export async function ensureAnalysisDuckdbSchema(
         trade_date varchar not null,
         circ_mv double,
         total_mv double,
+        pe_ttm double,
+        pb double,
+        ps_ttm double,
+        dv_ttm double,
+        turnover_rate double,
         source varchar not null,
         ingested_at bigint not null,
         primary key (symbol, trade_date)
       );
     `);
+    const dailyBasicAlterSql = [
+      "alter table daily_basics add column if not exists pe_ttm double;",
+      "alter table daily_basics add column if not exists pb double;",
+      "alter table daily_basics add column if not exists ps_ttm double;",
+      "alter table daily_basics add column if not exists dv_ttm double;",
+      "alter table daily_basics add column if not exists turnover_rate double;"
+    ];
+    for (const sql of dailyBasicAlterSql) {
+      try {
+        await conn.query(sql);
+      } catch {
+        // ignore alter incompatibilities on old runtimes
+      }
+    }
 
     await conn.query(`
       create table if not exists daily_moneyflows (

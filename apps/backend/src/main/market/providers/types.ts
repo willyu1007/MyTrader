@@ -36,6 +36,11 @@ export type ProviderDailyBasic = {
   tradeDate: string; // YYYY-MM-DD
   circMv: number | null;
   totalMv: number | null;
+  peTtm: number | null;
+  pb: number | null;
+  psTtm: number | null;
+  dvTtm: number | null;
+  turnoverRate: number | null;
   provider: MarketProviderId;
 };
 

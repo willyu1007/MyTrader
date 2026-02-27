@@ -202,12 +202,23 @@ async function ensureMarketCacheSchemaInTransaction(
         trade_date text not null,
         circ_mv real,
         total_mv real,
+        pe_ttm real,
+        pb real,
+        ps_ttm real,
+        dv_ttm real,
+        turnover_rate real,
         source text not null,
         ingested_at integer not null,
         primary key (symbol, trade_date)
       );
     `
   );
+
+  await ensureColumn(db, "daily_basics", "pe_ttm", "real");
+  await ensureColumn(db, "daily_basics", "pb", "real");
+  await ensureColumn(db, "daily_basics", "ps_ttm", "real");
+  await ensureColumn(db, "daily_basics", "dv_ttm", "real");
+  await ensureColumn(db, "daily_basics", "turnover_rate", "real");
 
   await exec(
     db,

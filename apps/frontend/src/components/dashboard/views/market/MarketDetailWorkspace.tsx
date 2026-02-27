@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { ValuationAdjustmentPreview } from "@mytrader/shared";
+import type {
+  ValuationAdjustmentPreview,
+  ValuationMethod,
+  ValuationMethodDetail,
+  ValuationMethodInputField,
+  ValuationSubjectiveOverride
+} from "@mytrader/shared";
 
 import type {
   MarketChartHoverDatum,
@@ -71,12 +77,54 @@ export type MarketDetailWorkspaceProps = Pick<
   | "sortTagMembersByChangePct"
 >;
 
+function normalizeProfileMethodTokens(kind: string | null, assetClass: string | null): Set<string> {
+  const tokens = new Set<string>();
+  const kindToken = (kind ?? "").trim().toLowerCase();
+  const assetClassToken = (assetClass ?? "").trim().toLowerCase();
+  if (kindToken) tokens.add(kindToken);
+  if (assetClassToken) tokens.add(assetClassToken);
+  if (kindToken === "fund" || assetClassToken === "etf") {
+    tokens.add("fund");
+    tokens.add("etf");
+  }
+  return tokens;
+}
+
+function methodMatchesProfile(
+  method: ValuationMethod,
+  profileKind: string | null,
+  profileAssetClass: string | null
+): boolean {
+  const profileTokens = normalizeProfileMethodTokens(profileKind, profileAssetClass);
+  if (profileTokens.size === 0) return true;
+
+  const methodTokens = new Set<string>();
+  method.assetScope.kinds.forEach((item) => methodTokens.add(item.toLowerCase()));
+  method.assetScope.assetClasses.forEach((item) => methodTokens.add(item.toLowerCase()));
+  method.assetScope.domains.forEach((item) => methodTokens.add(String(item).toLowerCase()));
+  if (method.methodKey.includes(".etf.")) methodTokens.add("etf");
+  if (method.methodKey.includes(".stock.")) methodTokens.add("stock");
+
+  if (methodTokens.size === 0) return true;
+  for (const token of profileTokens) {
+    if (methodTokens.has(token)) return true;
+  }
+  return false;
+}
+
 export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
   const [valuationPreview, setValuationPreview] =
     useState<ValuationAdjustmentPreview | null>(null);
+  const [valuationMethodKey, setValuationMethodKey] = useState<string | null>(null);
+  const [valuationMethods, setValuationMethods] = useState<ValuationMethod[]>([]);
+  const [valuationMethodDetail, setValuationMethodDetail] =
+    useState<ValuationMethodDetail | null>(null);
+  const [subjectiveOverrides, setSubjectiveOverrides] = useState<ValuationSubjectiveOverride[]>([]);
+  const [subjectiveDraftValues, setSubjectiveDraftValues] = useState<Record<string, string>>({});
   const [valuationLoading, setValuationLoading] = useState(false);
   const [valuationError, setValuationError] = useState<string | null>(null);
   const [excludingInsightId, setExcludingInsightId] = useState<string | null>(null);
+  const [savingSubjectiveKey, setSavingSubjectiveKey] = useState<string | null>(null);
 
   const valuationAsOfDate = useMemo(
     () =>
@@ -96,22 +144,148 @@ export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
     setValuationLoading(true);
     setValuationError(null);
     try {
-      const preview = await window.mytrader.insights.previewValuationBySymbol({
+      const preview = await window.mytrader.insights.computeValuationBySymbol({
         symbol,
-        asOfDate: valuationAsOfDate
+        asOfDate: valuationAsOfDate,
+        methodKey: valuationMethodKey
       });
       setValuationPreview(preview);
+      if (!valuationMethodKey && preview.methodKey) {
+        setValuationMethodKey(preview.methodKey);
+      }
     } catch (err) {
       setValuationPreview(null);
       setValuationError(err instanceof Error ? err.message : String(err));
     } finally {
       setValuationLoading(false);
     }
-  }, [props.marketSelectedSymbol, valuationAsOfDate]);
+  }, [props.marketSelectedSymbol, valuationAsOfDate, valuationMethodKey]);
 
   useEffect(() => {
     void loadValuationPreview();
   }, [loadValuationPreview]);
+
+  useEffect(() => {
+    setValuationMethodKey(null);
+    setValuationMethodDetail(null);
+    setSubjectiveOverrides([]);
+    setSubjectiveDraftValues({});
+  }, [props.marketSelectedSymbol]);
+
+  useEffect(() => {
+    const api = window.mytrader?.insights;
+    if (!api) return;
+    let disposed = false;
+    const loadMethods = async () => {
+      try {
+        const result = await api.listValuationMethods({
+          includeArchived: false,
+          includeBuiltin: true,
+          limit: 500,
+          offset: 0
+        });
+        if (disposed) return;
+        setValuationMethods(result.items);
+      } catch {
+        if (disposed) return;
+        setValuationMethods([]);
+      }
+    };
+    void loadMethods();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const api = window.mytrader?.insights;
+    const symbol = props.marketSelectedSymbol;
+    if (!api || !symbol || !valuationMethodKey) {
+      setValuationMethodDetail(null);
+      setSubjectiveOverrides([]);
+      return;
+    }
+    let disposed = false;
+    const loadMethodAndOverrides = async () => {
+      try {
+        const [detail, overrides] = await Promise.all([
+          api.getValuationMethod({ methodKey: valuationMethodKey }),
+          api.listValuationSubjectiveOverrides({
+            symbol,
+            methodKey: valuationMethodKey
+          })
+        ]);
+        if (disposed) return;
+        setValuationMethodDetail(detail);
+        setSubjectiveOverrides(overrides);
+      } catch (err) {
+        if (disposed) return;
+        setValuationError(err instanceof Error ? err.message : String(err));
+      }
+    };
+    void loadMethodAndOverrides();
+    return () => {
+      disposed = true;
+    };
+  }, [props.marketSelectedSymbol, valuationMethodKey]);
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const item of subjectiveOverrides) {
+      next[item.inputKey] = String(item.value);
+    }
+    setSubjectiveDraftValues(next);
+  }, [subjectiveOverrides]);
+
+  const activeValuationVersion = useMemo(() => {
+    if (!valuationMethodDetail) return null;
+    if (valuationMethodDetail.method.activeVersionId) {
+      return (
+        valuationMethodDetail.versions.find(
+          (item) => item.id === valuationMethodDetail.method.activeVersionId
+        ) ?? valuationMethodDetail.versions[0] ?? null
+      );
+    }
+    return valuationMethodDetail.versions[0] ?? null;
+  }, [valuationMethodDetail]);
+
+  const subjectiveFields = useMemo<ValuationMethodInputField[]>(() => {
+    if (!activeValuationVersion) return [];
+    return activeValuationVersion.inputSchema
+      .filter((field) => field.kind === "subjective")
+      .sort((a, b) => a.displayOrder - b.displayOrder);
+  }, [activeValuationVersion]);
+
+  const objectiveQualitySummary = useMemo(() => {
+    const summary = { fresh: 0, stale: 0, fallback: 0, missing: 0 };
+    for (const item of valuationPreview?.inputBreakdown ?? []) {
+      if (item.kind !== "objective") continue;
+      summary[item.quality] += 1;
+    }
+    return summary;
+  }, [valuationPreview]);
+
+  const filteredValuationMethods = useMemo(() => {
+    const profileKind = props.marketSelectedProfile?.kind ?? null;
+    const profileAssetClass = props.marketSelectedProfile?.assetClass ?? null;
+    return valuationMethods.filter((method) =>
+      methodMatchesProfile(method, profileKind, profileAssetClass)
+    );
+  }, [
+    props.marketSelectedProfile?.assetClass,
+    props.marketSelectedProfile?.kind,
+    valuationMethods
+  ]);
+
+  const selectableValuationMethods = useMemo(() => {
+    if (!valuationMethodKey) return filteredValuationMethods;
+    if (filteredValuationMethods.some((item) => item.methodKey === valuationMethodKey)) {
+      return filteredValuationMethods;
+    }
+    const selected =
+      valuationMethods.find((item) => item.methodKey === valuationMethodKey) ?? null;
+    return selected ? [selected, ...filteredValuationMethods] : filteredValuationMethods;
+  }, [filteredValuationMethods, valuationMethodKey, valuationMethods]);
 
   const appliedInsightRows = useMemo(() => {
     if (!valuationPreview) return [];
@@ -158,6 +332,78 @@ export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
       }
     },
     [loadValuationPreview, props.marketSelectedSymbol]
+  );
+
+  const handleSaveSubjectiveOverride = useCallback(
+    async (inputKey: string) => {
+      const api = window.mytrader?.insights;
+      const symbol = props.marketSelectedSymbol;
+      if (!api || !symbol || !valuationMethodKey) return;
+      const raw = subjectiveDraftValues[inputKey]?.trim() ?? "";
+      if (!raw) {
+        setValuationError(`请输入 ${inputKey} 的数值。`);
+        return;
+      }
+      const value = Number(raw);
+      if (!Number.isFinite(value)) {
+        setValuationError(`${inputKey} 必须是数值。`);
+        return;
+      }
+      setSavingSubjectiveKey(inputKey);
+      setValuationError(null);
+      try {
+        await api.upsertValuationSubjectiveOverride({
+          symbol,
+          methodKey: valuationMethodKey,
+          inputKey,
+          value
+        });
+        const overrides = await api.listValuationSubjectiveOverrides({
+          symbol,
+          methodKey: valuationMethodKey
+        });
+        setSubjectiveOverrides(overrides);
+        await loadValuationPreview();
+      } catch (err) {
+        setValuationError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSavingSubjectiveKey(null);
+      }
+    },
+    [loadValuationPreview, props.marketSelectedSymbol, subjectiveDraftValues, valuationMethodKey]
+  );
+
+  const handleClearSubjectiveOverride = useCallback(
+    async (inputKey: string) => {
+      const api = window.mytrader?.insights;
+      const symbol = props.marketSelectedSymbol;
+      if (!api || !symbol || !valuationMethodKey) return;
+      setSavingSubjectiveKey(inputKey);
+      setValuationError(null);
+      try {
+        await api.deleteValuationSubjectiveOverride({
+          symbol,
+          methodKey: valuationMethodKey,
+          inputKey
+        });
+        const overrides = await api.listValuationSubjectiveOverrides({
+          symbol,
+          methodKey: valuationMethodKey
+        });
+        setSubjectiveOverrides(overrides);
+        setSubjectiveDraftValues((previous) => {
+          const next = { ...previous };
+          delete next[inputKey];
+          return next;
+        });
+        await loadValuationPreview();
+      } catch (err) {
+        setValuationError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSavingSubjectiveKey(null);
+      }
+    },
+    [loadValuationPreview, props.marketSelectedSymbol, valuationMethodKey]
   );
 
   return (
@@ -472,15 +718,31 @@ export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
                     <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                       价值判断（当前值 vs 调整后值）
                     </div>
-                    <props.Button
-                      variant="secondary"
-                      size="sm"
-                      icon="refresh"
-                      onClick={() => void loadValuationPreview()}
-                      disabled={valuationLoading}
-                    >
-                      刷新
-                    </props.Button>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="ui-input rounded-md px-2 py-1.5 text-xs max-w-[260px]"
+                        value={valuationMethodKey ?? ""}
+                        onChange={(event) =>
+                          setValuationMethodKey(event.target.value || null)
+                        }
+                      >
+                        <option value="">自动选择方法</option>
+                        {selectableValuationMethods.map((item) => (
+                          <option key={item.methodKey} value={item.methodKey}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                      <props.Button
+                        variant="secondary"
+                        size="sm"
+                        icon="refresh"
+                        onClick={() => void loadValuationPreview()}
+                        disabled={valuationLoading}
+                      >
+                        刷新
+                      </props.Button>
+                    </div>
                   </div>
 
                   {valuationError && (
@@ -497,7 +759,7 @@ export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
 
                   {!valuationLoading && valuationPreview && (
                     <>
-                      <div className="grid grid-cols-4 gap-3 text-xs">
+                      <div className="grid grid-cols-5 gap-3 text-xs">
                         <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5">
                           <div className="text-slate-500 dark:text-slate-400">当前值</div>
                           <div className="font-mono text-sm text-slate-900 dark:text-slate-100">
@@ -517,6 +779,12 @@ export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
                           </div>
                         </div>
                         <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5">
+                          <div className="text-slate-500 dark:text-slate-400">置信度</div>
+                          <div className="font-mono text-sm text-slate-900 dark:text-slate-100">
+                            {valuationPreview.confidence ?? "--"}
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-slate-200 dark:border-border-dark px-2 py-1.5">
                           <div className="text-slate-500 dark:text-slate-400">作用链路数</div>
                           <div className="font-mono text-sm text-slate-900 dark:text-slate-100">
                             {valuationPreview.appliedEffects.length}
@@ -524,11 +792,99 @@ export function MarketDetailWorkspace(props: MarketDetailWorkspaceProps) {
                         </div>
                       </div>
 
+                      <div className="grid grid-cols-4 gap-2 text-[11px]">
+                        <div className="rounded border border-slate-200 dark:border-border-dark px-2 py-1">
+                          客观 fresh: {objectiveQualitySummary.fresh}
+                        </div>
+                        <div className="rounded border border-slate-200 dark:border-border-dark px-2 py-1">
+                          客观 stale: {objectiveQualitySummary.stale}
+                        </div>
+                        <div className="rounded border border-slate-200 dark:border-border-dark px-2 py-1">
+                          客观 fallback: {objectiveQualitySummary.fallback}
+                        </div>
+                        <div className="rounded border border-slate-200 dark:border-border-dark px-2 py-1">
+                          客观 missing: {objectiveQualitySummary.missing}
+                        </div>
+                      </div>
+
+                      {subjectiveFields.length > 0 && (
+                        <div className="rounded border border-slate-200 dark:border-border-dark">
+                          <div className="px-2 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-border-dark bg-slate-50/70 dark:bg-background-dark/40">
+                            主观参数覆盖（按标的）
+                          </div>
+                          <div className="max-h-40 overflow-auto">
+                            {subjectiveFields.map((field) => {
+                              const breakdown = valuationPreview.inputBreakdown?.find(
+                                (item) => item.key === field.key
+                              );
+                              const defaultText =
+                                breakdown && breakdown.source === "subjective.default"
+                                  ? String(breakdown.value ?? "--")
+                                  : "--";
+                              return (
+                                <div
+                                  key={field.key}
+                                  className="px-2 py-2 border-b border-slate-100 dark:border-border-dark/60 last:border-b-0"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                                        {field.label}
+                                      </div>
+                                      <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                        {field.key} · 默认 {defaultText}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        className="ui-input w-28 rounded-md px-2 py-1 text-xs"
+                                        value={subjectiveDraftValues[field.key] ?? ""}
+                                        onChange={(event) =>
+                                          setSubjectiveDraftValues((previous) => ({
+                                            ...previous,
+                                            [field.key]: event.target.value
+                                          }))
+                                        }
+                                      />
+                                      <props.Button
+                                        variant="secondary"
+                                        size="sm"
+                                        icon="save"
+                                        onClick={() => void handleSaveSubjectiveOverride(field.key)}
+                                        disabled={savingSubjectiveKey === field.key}
+                                      >
+                                        保存
+                                      </props.Button>
+                                      <props.Button
+                                        variant="secondary"
+                                        size="sm"
+                                        icon="delete"
+                                        onClick={() => void handleClearSubjectiveOverride(field.key)}
+                                        disabled={savingSubjectiveKey === field.key}
+                                      >
+                                        清除
+                                      </props.Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {valuationPreview.notApplicable && (
                         <div className="text-xs text-amber-700 dark:text-amber-400">
                           not_applicable: {valuationPreview.reason ?? "无可用估值方法"}
                         </div>
                       )}
+
+                      {valuationPreview.degradationReasons &&
+                        valuationPreview.degradationReasons.length > 0 && (
+                          <div className="text-[11px] text-amber-700 dark:text-amber-400">
+                            降级原因：{valuationPreview.degradationReasons.join("；")}
+                          </div>
+                        )}
 
                       {!valuationPreview.notApplicable &&
                         valuationPreview.appliedEffects.length > 0 && (

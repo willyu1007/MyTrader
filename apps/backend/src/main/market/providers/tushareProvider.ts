@@ -214,7 +214,7 @@ export const tushareProvider: MarketProvider = {
             start_date: startDate,
             end_date: endDate
           },
-          "ts_code,trade_date,circ_mv,total_mv"
+          "ts_code,trade_date,circ_mv,total_mv,pe_ttm,pb,ps_ttm,dv_ttm,turnover_rate"
         );
 
         const fields = res.fields ?? [];
@@ -223,6 +223,11 @@ export const tushareProvider: MarketProvider = {
         const idxTradeDate = fields.indexOf("trade_date");
         const idxCircMv = fields.indexOf("circ_mv");
         const idxTotalMv = fields.indexOf("total_mv");
+        const idxPeTtm = fields.indexOf("pe_ttm");
+        const idxPb = fields.indexOf("pb");
+        const idxPsTtm = fields.indexOf("ps_ttm");
+        const idxDvTtm = fields.indexOf("dv_ttm");
+        const idxTurnoverRate = fields.indexOf("turnover_rate");
         if (idxTsCode === -1 || idxTradeDate === -1) {
           throw new Error("Tushare daily_basic 响应缺少必要字段。");
         }
@@ -233,12 +238,23 @@ export const tushareProvider: MarketProvider = {
           if (!tsCode || !tradeDate) return;
           const circMv = idxCircMv === -1 ? null : normalizeNumber(row[idxCircMv]);
           const totalMv = idxTotalMv === -1 ? null : normalizeNumber(row[idxTotalMv]);
+          const peTtm = idxPeTtm === -1 ? null : normalizeNumber(row[idxPeTtm]);
+          const pb = idxPb === -1 ? null : normalizeNumber(row[idxPb]);
+          const psTtm = idxPsTtm === -1 ? null : normalizeNumber(row[idxPsTtm]);
+          const dvTtm = idxDvTtm === -1 ? null : normalizeNumber(row[idxDvTtm]);
+          const turnoverRate =
+            idxTurnoverRate === -1 ? null : normalizeNumber(row[idxTurnoverRate]);
           results.push({
             provider: "tushare",
             symbol: tsCode,
             tradeDate,
             circMv,
-            totalMv
+            totalMv,
+            peTtm,
+            pb,
+            psTtm,
+            dvTtm,
+            turnoverRate
           } satisfies ProviderDailyBasic);
         });
       } catch (err) {

@@ -106,6 +106,10 @@ import {
   stopMarketIngestScheduler
 } from "../market/marketIngestScheduler";
 import {
+  startValuationMetricScheduler,
+  stopValuationMetricScheduler
+} from "../market/valuationMetricScheduler";
+import {
   createPortfolio,
   deletePortfolio,
   getPortfolio,
@@ -183,8 +187,14 @@ import {
   listInsightFacts,
   listInsights,
   listValuationMethods,
+  listValuationObjectiveMetricSnapshots,
+  listValuationSubjectiveDefaults,
+  listValuationSubjectiveOverrides,
+  getValuationObjectiveRefreshStatus,
+  getValuationMetricSchedulerConfig,
   previewMaterializeInsightTargets,
   previewValuationBySymbol,
+  computeValuationBySymbol,
   publishValuationMethodVersion,
   refreshAllInsightMaterializations,
   removeInsight,
@@ -194,12 +204,18 @@ import {
   removeInsightScopeRule,
   searchInsights,
   setActiveValuationMethodVersion,
+  setValuationMetricSchedulerConfig,
+  triggerValuationObjectiveRefresh,
   unexcludeInsightTarget,
   updateCustomValuationMethod,
   updateInsight,
   upsertInsightEffectChannel,
   upsertInsightEffectPoint,
-  upsertInsightScopeRule
+  upsertInsightScopeRule,
+  upsertValuationMethodInputSchema,
+  upsertValuationSubjectiveDefault,
+  upsertValuationSubjectiveOverride,
+  deleteValuationSubjectiveOverride
 } from "../services/insightService";
 import { config } from "../config";
 import {
@@ -295,6 +311,7 @@ async function stopAndCloseActiveBusinessDb(): Promise<void> {
   stopIngestOrchestrator();
   stopAutoIngest();
   stopMarketIngestScheduler();
+  stopValuationMetricScheduler();
 
   if (!activeBusinessDb) return;
   const db = activeBusinessDb;
@@ -574,6 +591,7 @@ export async function registerIpcHandlers() {
       });
       startAutoIngest(activeBusinessDb, marketDb);
       startMarketIngestScheduler(activeBusinessDb, marketDb, layout.analysisDbPath);
+      startValuationMetricScheduler(activeBusinessDb, marketDb);
       return unlocked;
     }
   );
@@ -1878,6 +1896,104 @@ export async function registerIpcHandlers() {
       const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       return await previewValuationBySymbol(businessDb, marketDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METHOD_UPSERT_INPUT_SCHEMA,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await upsertValuationMethodInputSchema(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_SUBJECTIVE_DEFAULT_LIST,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listValuationSubjectiveDefaults(businessDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_SUBJECTIVE_DEFAULT_UPSERT,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await upsertValuationSubjectiveDefault(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_SUBJECTIVE_OVERRIDE_LIST,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listValuationSubjectiveOverrides(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_SUBJECTIVE_OVERRIDE_UPSERT,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await upsertValuationSubjectiveOverride(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_SUBJECTIVE_OVERRIDE_DELETE,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      await deleteValuationSubjectiveOverride(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_OBJECTIVE_SNAPSHOT_LIST,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listValuationObjectiveMetricSnapshots(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_OBJECTIVE_REFRESH_TRIGGER,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await triggerValuationObjectiveRefresh(businessDb, marketDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_OBJECTIVE_REFRESH_STATUS_GET,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await getValuationObjectiveRefreshStatus(businessDb, input ?? undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METRIC_SCHEDULER_GET,
+    async () => {
+      const businessDb = requireActiveBusinessDb();
+      return await getValuationMetricSchedulerConfig(businessDb);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_METRIC_SCHEDULER_SET,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      return await setValuationMetricSchedulerConfig(businessDb, input);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.VALUATION_COMPUTE_BY_SYMBOL,
+    async (_event, input) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await computeValuationBySymbol(businessDb, marketDb, input);
     }
   );
 }

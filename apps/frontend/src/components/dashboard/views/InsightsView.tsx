@@ -982,7 +982,7 @@ export function InsightsView(props: InsightsViewProps) {
     setValuationPreviewLoading(true);
     setError(null);
     try {
-      const preview = await api.previewValuationBySymbol({
+      const preview = await api.computeValuationBySymbol({
         symbol,
         asOfDate: valuationPreviewAsOfDate || null,
         methodKey: valuationPreviewMethodKey.trim() || null
@@ -2050,7 +2050,7 @@ export function InsightsView(props: InsightsViewProps) {
                             )}
                             {valuationPreviewResult && (
                               <>
-                                <div className="grid grid-cols-1 md:grid-cols-5 gap-2 text-xs">
+                                <div className="grid grid-cols-1 md:grid-cols-6 gap-2 text-xs">
                                   <div className="border border-slate-200 dark:border-border-dark px-2 py-1.5">
                                     <div className="text-slate-500 dark:text-slate-400">symbol</div>
                                     <div className="font-mono text-slate-900 dark:text-slate-100">
@@ -2076,6 +2076,12 @@ export function InsightsView(props: InsightsViewProps) {
                                     </div>
                                   </div>
                                   <div className="border border-slate-200 dark:border-border-dark px-2 py-1.5">
+                                    <div className="text-slate-500 dark:text-slate-400">置信度</div>
+                                    <div className="font-mono text-slate-900 dark:text-slate-100">
+                                      {valuationPreviewResult.confidence ?? "--"}
+                                    </div>
+                                  </div>
+                                  <div className="border border-slate-200 dark:border-border-dark px-2 py-1.5">
                                     <div className="text-slate-500 dark:text-slate-400">
                                       应用 effect 数
                                     </div>
@@ -2090,6 +2096,12 @@ export function InsightsView(props: InsightsViewProps) {
                                     {valuationPreviewResult.reason ?? "无可用估值方法"}
                                   </div>
                                 )}
+                                {valuationPreviewResult.degradationReasons &&
+                                  valuationPreviewResult.degradationReasons.length > 0 && (
+                                    <div className="text-xs text-amber-700 dark:text-amber-400">
+                                      降级原因：{valuationPreviewResult.degradationReasons.join("；")}
+                                    </div>
+                                  )}
                                 <div className="text-xs text-slate-500 dark:text-slate-400">
                                   当前观点命中 effect 数：{currentInsightEffects.length}
                                 </div>
