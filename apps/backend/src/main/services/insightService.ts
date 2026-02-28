@@ -64,6 +64,7 @@ import type {
   ValuationMethodAssetScope,
   ValuationMethodDetail,
   ValuationMethodInputField,
+  ValuationMethodSpecV2,
   ValuationMethodVersion,
   ValuationMetricQuality,
   ValuationMetricSchedulerConfig,
@@ -138,6 +139,7 @@ const VALUATION_QUALITY_SET = new Set<ValuationMetricQuality>([
   "fallback",
   "missing"
 ]);
+const PRIMARY_VALUE_KEYS = ["output.fair_value", "valuation.fair_value", "market.price"];
 const SUBJECTIVE_BASELINE_MAPPINGS: Array<{
   metricKey: "pe_ttm" | "pb" | "ps_ttm" | "dv_ttm";
   methodKey: string;
@@ -357,6 +359,15 @@ interface ChannelPointValueRow {
   channel_id: string;
   effect_date: string;
   effect_value: number;
+}
+
+interface CompiledValuationRuntimeSource {
+  formulaId: string;
+  formulaManifest: Record<string, unknown>;
+  inputSchema: ValuationMethodInputField[];
+  paramSchema: Record<string, unknown>;
+  metricSchema: Record<string, unknown>;
+  spec: ValuationMethodSpecV2;
 }
 
 interface ProfileLookupRow {
@@ -1291,9 +1302,10 @@ export async function getValuationMethodDetail(
     `,
     [methodRow.id]
   );
+  const method = toValuationMethod(methodRow);
   return {
-    method: toValuationMethod(methodRow),
-    versions: versions.map(toValuationMethodVersion)
+    method,
+    versions: versions.map((version) => toValuationMethodVersion(version, method))
   };
 }
 
@@ -1345,6 +1357,37 @@ export async function createCustomValuationMethod(
       inputSchema = active.inputSchema;
     }
   }
+
+  const normalizedSpec = normalizeValuationMethodSpecV2(
+    normalizeRecord(formulaManifest).specV2,
+    {
+      methodKey,
+      version: 1,
+      assetScope,
+      formulaManifest,
+      inputSchema,
+      paramSchema,
+      metricSchema
+    }
+  );
+  formulaManifest = {
+    ...stripSpecFromFormulaManifest(formulaManifest),
+    formulaId: normalizedSpec.formula.formulaId,
+    locked: normalizedSpec.formula.locked,
+    specV2: normalizedSpec
+  };
+  if (normalizedSpec.formula.executorRef) {
+    formulaManifest.executorRef = normalizedSpec.formula.executorRef;
+  }
+  paramSchema = normalizedSpec.parameters;
+  metricSchema = {
+    ...metricSchema,
+    required: normalizedSpec.outputs.required,
+    outputs: normalizedSpec.outputs.outputs,
+    primaryValueKeys: normalizedSpec.outputs.primaryValueKeys
+  };
+  inputSchema = normalizedSpec.inputs.fields;
+  graph = buildMetricGraphFromSpec(normalizedSpec);
 
   const versionId = `${methodKey}.v1.${now}`;
   await transaction(businessDb, async () => {
@@ -1483,23 +1526,55 @@ export async function publishValuationMethodVersion(
 
   const nextVersion =
     detail.versions.reduce((max, item) => Math.max(max, item.version), 0) + 1;
-  const graph = normalizeMetricGraph(input.graph);
-  const paramSchema = normalizeRecord(input.paramSchema);
-  const metricSchema = normalizeRecord(input.metricSchema);
+  const providedGraph = normalizeMetricGraph(input.graph);
+  let graph: ValuationMetricNode[] = [];
+  let paramSchema = normalizeRecord(input.paramSchema);
+  let metricSchema = normalizeRecord(input.metricSchema);
   const templateVersion =
     pickPreferredVersion(detail.method, detail.versions, null) ?? detail.versions[0] ?? null;
-  const formulaManifest =
+  let formulaManifest: Record<string, unknown> =
     templateVersion?.formulaManifest ?? { formulaId: "generic_factor_v1", locked: true };
   const normalizedInputSchema =
     input.inputSchema === undefined || input.inputSchema === null
       ? null
       : normalizeInputSchema(input.inputSchema);
-  const inputSchema =
+  let inputSchema =
     normalizedInputSchema && normalizedInputSchema.length > 0
       ? normalizedInputSchema
       : templateVersion?.inputSchema && templateVersion.inputSchema.length > 0
         ? templateVersion.inputSchema
         : buildDefaultInputSchemaForFormula(resolveFormulaId(formulaManifest));
+  const spec = normalizeValuationMethodSpecV2(
+    input.spec ?? normalizeRecord(formulaManifest).specV2,
+    {
+      methodKey,
+      version: nextVersion,
+      assetScope: detail.method.assetScope,
+      formulaManifest,
+      inputSchema,
+      paramSchema,
+      metricSchema
+    }
+  );
+  formulaManifest = {
+    ...stripSpecFromFormulaManifest(formulaManifest),
+    formulaId: spec.formula.formulaId,
+    locked: spec.formula.locked,
+    specV2: spec
+  };
+  if (spec.formula.executorRef) {
+    formulaManifest.executorRef = spec.formula.executorRef;
+  }
+  paramSchema = spec.parameters;
+  metricSchema = {
+    ...metricSchema,
+    required: spec.outputs.required,
+    outputs: spec.outputs.outputs,
+    primaryValueKeys: spec.outputs.primaryValueKeys
+  };
+  inputSchema = spec.inputs.fields;
+  graph = buildMetricGraphFromSpec(spec);
+  assertGraphConsistentWithSpec(providedGraph, graph);
   const effectiveFrom = normalizeOptionalDate(input.effectiveFrom, "effectiveFrom");
   const effectiveTo = normalizeOptionalDate(input.effectiveTo, "effectiveTo");
   const versionId = `${methodKey}.v${nextVersion}.${now}`;
@@ -1585,14 +1660,43 @@ export async function upsertValuationMethodInputSchema(
   if (!targetVersion) throw new Error("目标版本不存在。");
 
   const normalized = normalizeInputSchema(input.inputSchema);
+  const nextSpec = normalizeValuationMethodSpecV2(
+    targetVersion.spec,
+    {
+      methodKey: detail.method.methodKey,
+      version: targetVersion.version,
+      assetScope: detail.method.assetScope,
+      formulaManifest: targetVersion.formulaManifest,
+      inputSchema: normalized,
+      paramSchema: targetVersion.paramSchema,
+      metricSchema: targetVersion.metricSchema
+    }
+  );
+  nextSpec.inputs.fields = normalized;
+  const derivedGraph = buildMetricGraphFromSpec(nextSpec);
+  const formulaManifest: Record<string, unknown> = {
+    ...stripSpecFromFormulaManifest(targetVersion.formulaManifest),
+    formulaId: nextSpec.formula.formulaId,
+    locked: nextSpec.formula.locked,
+    specV2: nextSpec
+  };
+  if (nextSpec.formula.executorRef) {
+    formulaManifest.executorRef = nextSpec.formula.executorRef;
+  }
   await run(
     businessDb,
     `
       update valuation_method_versions
-      set input_schema_json = ?, updated_at = ?
+      set input_schema_json = ?, formula_manifest_json = ?, graph_json = ?, updated_at = ?
       where id = ?
     `,
-    [JSON.stringify(normalized), now, targetVersion.id]
+    [
+      JSON.stringify(normalized),
+      JSON.stringify(formulaManifest),
+      JSON.stringify(derivedGraph),
+      now,
+      targetVersion.id
+    ]
   );
 
   const refreshed = await getValuationMethodDetail(businessDb, { methodKey });
@@ -2317,6 +2421,7 @@ export async function previewValuationBySymbol(
 
   const objective = await collectObjectiveMetricsForSymbol(marketDb, symbol, asOfDate);
   if (objective.metrics["market.price"] === null) {
+    const runtimeSource = compileValuationRuntimeSource(method, version);
     return {
       symbol,
       asOfDate,
@@ -2328,16 +2433,14 @@ export async function previewValuationBySymbol(
       adjustedValue: null,
       appliedEffects: [],
       notApplicable: true,
-      reason: "缺少可用价格数据",
+      reason: runtimeSource.spec.degradation.missingPriceReason,
       computedAt: Date.now()
     };
   }
 
-  const formulaId = resolveFormulaId(version.formulaManifest);
-  const inputSchema =
-    version.inputSchema.length > 0
-      ? version.inputSchema
-      : buildDefaultInputSchemaForFormula(formulaId);
+  const runtimeSource = compileValuationRuntimeSource(method, version);
+  const formulaId = runtimeSource.formulaId;
+  const inputSchema = runtimeSource.inputSchema;
   const subjectiveKeys = Array.from(
     new Set(
       inputSchema
@@ -2379,7 +2482,7 @@ export async function previewValuationBySymbol(
 
   const baseMetrics: Record<string, number | null> = { ...objective.metrics };
   const qualityByMetric: Record<string, ValuationMetricQuality> = { ...objective.qualities };
-  const runtimeParamSchema: Record<string, unknown> = { ...version.paramSchema };
+  const runtimeParamSchema: Record<string, unknown> = { ...runtimeSource.paramSchema };
   for (const key of subjectiveKeys) {
     const override = overrideMap.get(key) ?? null;
     if (override) {
@@ -2410,6 +2513,12 @@ export async function previewValuationBySymbol(
       baseMetrics[key] = Number.isFinite(value) ? value : null;
       qualityByMetric[key] = Number.isFinite(value) ? "fresh" : "missing";
       if (Number.isFinite(value)) runtimeParamSchema[key] = value;
+      continue;
+    }
+
+    if (!runtimeSource.spec.quality.allowSubjectiveFallback) {
+      baseMetrics[key] = null;
+      qualityByMetric[key] = "missing";
       continue;
     }
 
@@ -2550,16 +2659,19 @@ export async function previewValuationBySymbol(
     }
   }
 
-  const requiredMetrics = normalizeStringArray(version.metricSchema.required);
+  const requiredMetrics = normalizeStringArray(runtimeSource.metricSchema.required);
   const confidenceResult = computeConfidence(requiredMetrics, qualityByMetric, baseMetrics);
-  const baseValue = pickPrimaryValue(baseMetrics);
-  const adjustedValue = pickPrimaryValue(adjustedMetrics);
+  const baseValue = pickPrimaryValue(baseMetrics, runtimeSource.spec.outputs.primaryValueKeys);
+  const adjustedValue = pickPrimaryValue(
+    adjustedMetrics,
+    runtimeSource.spec.outputs.primaryValueKeys
+  );
   const notApplicable = baseValue === null || adjustedValue === null;
   const reason =
     notApplicable && confidenceResult.reasons.length > 0
       ? confidenceResult.reasons[0]
       : notApplicable
-        ? "估值结果不可用"
+        ? runtimeSource.spec.degradation.missingInputReason
         : null;
   const inputBreakdown: ValuationInputBreakdownItem[] = Object.keys(baseMetrics)
     .sort()
@@ -3205,8 +3317,14 @@ function interpolateEffect(
   return null;
 }
 
-function pickPrimaryValue(metrics: Record<string, number | null>): number | null {
-  const keys = ["output.fair_value", "valuation.fair_value", "market.price"];
+function pickPrimaryValue(
+  metrics: Record<string, number | null>,
+  primaryValueKeys?: string[]
+): number | null {
+  const keys =
+    primaryValueKeys && primaryValueKeys.length > 0
+      ? primaryValueKeys
+      : PRIMARY_VALUE_KEYS;
   for (const key of keys) {
     const value = toFiniteNumber(metrics[key] ?? null);
     if (value !== null) return value;
@@ -3316,18 +3434,61 @@ function toValuationMethod(row: ValuationMethodRow): ValuationMethod {
   };
 }
 
-function toValuationMethodVersion(row: ValuationMethodVersionRow): ValuationMethodVersion {
+function toValuationMethodVersion(
+  row: ValuationMethodVersionRow,
+  method?: ValuationMethod
+): ValuationMethodVersion {
+  const formulaManifest = normalizeRecord(parseJsonObject(row.formula_manifest_json));
+  const formulaId = resolveFormulaId(formulaManifest);
+  const inputSchema = normalizeInputSchema(parseJsonArrayOfObjects(row.input_schema_json ?? "[]"));
+  const fallbackInputSchema =
+    inputSchema.length > 0 ? inputSchema : buildDefaultInputSchemaForFormula(formulaId);
+  const paramSchema = normalizeRecord(parseJsonObject(row.param_schema_json));
+  const metricSchema = normalizeRecord(parseJsonObject(row.metric_schema_json));
+  const fallbackScope: ValuationMethodAssetScope = {
+    kinds: [],
+    assetClasses: [],
+    markets: [],
+    domains: []
+  };
+  const spec = normalizeValuationMethodSpecV2(
+    formulaManifest.specV2,
+    {
+      methodKey: method?.methodKey ?? row.method_id,
+      version: Number(row.version ?? 0),
+      assetScope: method?.assetScope ?? fallbackScope,
+      formulaManifest,
+      inputSchema: fallbackInputSchema,
+      paramSchema,
+      metricSchema
+    }
+  );
+  const normalizedFormulaManifest: Record<string, unknown> = {
+    ...stripSpecFromFormulaManifest(formulaManifest),
+    formulaId: spec.formula.formulaId,
+    locked: spec.formula.locked,
+    specV2: spec
+  };
+  if (spec.formula.executorRef) {
+    normalizedFormulaManifest.executorRef = spec.formula.executorRef;
+  }
   return {
     id: row.id,
     methodId: row.method_id,
     version: Number(row.version ?? 0),
     effectiveFrom: row.effective_from ?? null,
     effectiveTo: row.effective_to ?? null,
-    graph: normalizeMetricGraph(parseJsonArrayOfObjects(row.graph_json)),
-    paramSchema: normalizeRecord(parseJsonObject(row.param_schema_json)),
-    metricSchema: normalizeRecord(parseJsonObject(row.metric_schema_json)),
-    formulaManifest: normalizeRecord(parseJsonObject(row.formula_manifest_json)),
-    inputSchema: normalizeInputSchema(parseJsonArrayOfObjects(row.input_schema_json ?? "[]")),
+    graph: buildMetricGraphFromSpec(spec),
+    paramSchema: spec.parameters,
+    metricSchema: {
+      ...metricSchema,
+      required: spec.outputs.required,
+      outputs: spec.outputs.outputs,
+      primaryValueKeys: spec.outputs.primaryValueKeys
+    },
+    formulaManifest: normalizedFormulaManifest,
+    inputSchema: spec.inputs.fields,
+    spec,
     createdAt: Number(row.created_at ?? 0),
     updatedAt: Number(row.updated_at ?? 0)
   };
@@ -3601,6 +3762,377 @@ function normalizeInputSchema(value: unknown): ValuationMethodInputField[] {
       description: description ?? null
     };
   });
+}
+
+function stripSpecFromFormulaManifest(
+  formulaManifest: Record<string, unknown>
+): Record<string, unknown> {
+  const next = { ...normalizeRecord(formulaManifest) };
+  delete next.specV2;
+  return next;
+}
+
+function buildValuationMethodSpecFromLegacy(input: {
+  methodKey: string;
+  version: number;
+  assetScope: ValuationMethodAssetScope;
+  formulaManifest: Record<string, unknown>;
+  inputSchema: ValuationMethodInputField[];
+  paramSchema: Record<string, unknown>;
+  metricSchema: Record<string, unknown>;
+}): ValuationMethodSpecV2 {
+  const formulaManifest = stripSpecFromFormulaManifest(input.formulaManifest);
+  const formulaId = resolveFormulaId(formulaManifest);
+  const locked = Boolean(formulaManifest.locked ?? true);
+  const executorRef = normalizeOptionalString(formulaManifest.executorRef);
+  const required = normalizeStringArray(input.metricSchema.required);
+  const outputs = normalizeStringArray(input.metricSchema.outputs);
+  const primaryValueKeys =
+    normalizeStringArray(input.metricSchema.primaryValueKeys).length > 0
+      ? normalizeStringArray(input.metricSchema.primaryValueKeys)
+      : [...PRIMARY_VALUE_KEYS];
+  return {
+    schemaVersion: 2,
+    meta: {
+      methodKey: input.methodKey,
+      version: Number.isFinite(Number(input.version)) ? Number(input.version) : 1,
+      assetScope: input.assetScope
+    },
+    formula: {
+      formulaId,
+      executorRef: executorRef ?? null,
+      locked
+    },
+    inputs: {
+      fields: normalizeInputSchema(input.inputSchema)
+    },
+    parameters: normalizeRecord(input.paramSchema),
+    outputs: {
+      required,
+      outputs: outputs.length > 0 ? outputs : ["output.fair_value", "output.return_gap"],
+      primaryValueKeys
+    },
+    quality: {
+      allowSubjectiveFallback: true
+    },
+    confidence: {
+      minFreshRatio: 0.6
+    },
+    degradation: {
+      missingInputReason: "关键输入缺失",
+      missingPriceReason: "缺少可用价格数据"
+    }
+  };
+}
+
+function normalizeValuationMethodSpecV2(
+  value: unknown,
+  fallback: {
+    methodKey: string;
+    version: number;
+    assetScope: ValuationMethodAssetScope;
+    formulaManifest: Record<string, unknown>;
+    inputSchema: ValuationMethodInputField[];
+    paramSchema: Record<string, unknown>;
+    metricSchema: Record<string, unknown>;
+  }
+): ValuationMethodSpecV2 {
+  const fallbackSpec = buildValuationMethodSpecFromLegacy(fallback);
+  const record = normalizeRecord(value);
+  if (Object.keys(record).length === 0) return fallbackSpec;
+
+  const formula = normalizeRecord(record.formula);
+  const inputs = normalizeRecord(record.inputs);
+  const outputs = normalizeRecord(record.outputs);
+  const quality = normalizeRecord(record.quality);
+  const confidence = normalizeRecord(record.confidence);
+  const degradation = normalizeRecord(record.degradation);
+
+  const metaMethodKey = fallbackSpec.meta.methodKey;
+  const metaVersion = fallbackSpec.meta.version;
+  const metaAssetScope = fallbackSpec.meta.assetScope;
+
+  const formulaId =
+    normalizeOptionalString(formula.formulaId) ?? fallbackSpec.formula.formulaId;
+  const executorRef =
+    normalizeOptionalString(formula.executorRef) ?? fallbackSpec.formula.executorRef;
+  const locked = Boolean(formula.locked ?? fallbackSpec.formula.locked);
+
+  const rawInputFields = Array.isArray(inputs.fields) ? inputs.fields : fallbackSpec.inputs.fields;
+  const normalizedInputFields = normalizeInputSchema(rawInputFields);
+  const fields =
+    normalizedInputFields.length > 0
+      ? normalizedInputFields
+      : fallbackSpec.inputs.fields;
+
+  const parameters = normalizeRecord(record.parameters);
+  const finalParameters =
+    Object.keys(parameters).length > 0 ? parameters : fallbackSpec.parameters;
+
+  const required = normalizeStringArray(outputs.required);
+  const outputKeys = normalizeStringArray(outputs.outputs);
+  const primaryValueKeys = normalizeStringArray(outputs.primaryValueKeys);
+
+  const minFreshRatioRaw = Number(confidence.minFreshRatio);
+  const minFreshRatio = Number.isFinite(minFreshRatioRaw)
+    ? Math.min(1, Math.max(0, minFreshRatioRaw))
+    : fallbackSpec.confidence.minFreshRatio;
+
+  return {
+    schemaVersion: 2,
+    meta: {
+      methodKey: metaMethodKey,
+      version: metaVersion,
+      assetScope: metaAssetScope
+    },
+    formula: {
+      formulaId,
+      executorRef,
+      locked
+    },
+    inputs: {
+      fields
+    },
+    parameters: finalParameters,
+    outputs: {
+      required: required.length > 0 ? required : fallbackSpec.outputs.required,
+      outputs: outputKeys.length > 0 ? outputKeys : fallbackSpec.outputs.outputs,
+      primaryValueKeys:
+        primaryValueKeys.length > 0
+          ? primaryValueKeys
+          : fallbackSpec.outputs.primaryValueKeys
+    },
+    quality: {
+      allowSubjectiveFallback: Boolean(
+        quality.allowSubjectiveFallback ?? fallbackSpec.quality.allowSubjectiveFallback
+      )
+    },
+    confidence: {
+      minFreshRatio
+    },
+    degradation: {
+      missingInputReason:
+        normalizeOptionalString(degradation.missingInputReason) ??
+        fallbackSpec.degradation.missingInputReason,
+      missingPriceReason:
+        normalizeOptionalString(degradation.missingPriceReason) ??
+        fallbackSpec.degradation.missingPriceReason
+    }
+  };
+}
+
+function compileValuationRuntimeSource(
+  method: ValuationMethod,
+  version: ValuationMethodVersion
+): CompiledValuationRuntimeSource {
+  const formulaManifest = normalizeRecord(version.formulaManifest);
+  const formulaId = resolveFormulaId(formulaManifest);
+  const fallbackInputSchema =
+    version.inputSchema.length > 0
+      ? version.inputSchema
+      : buildDefaultInputSchemaForFormula(formulaId);
+  const fallbackParamSchema = normalizeRecord(version.paramSchema);
+  const fallbackMetricSchema = normalizeRecord(version.metricSchema);
+  const embeddedSpec = formulaManifest.specV2;
+  const normalizedSpec = normalizeValuationMethodSpecV2(
+    version.spec ?? embeddedSpec,
+    {
+      methodKey: method.methodKey,
+      version: version.version,
+      assetScope: method.assetScope,
+      formulaManifest,
+      inputSchema: fallbackInputSchema,
+      paramSchema: fallbackParamSchema,
+      metricSchema: fallbackMetricSchema
+    }
+  );
+
+  const compiledFormulaManifest: Record<string, unknown> = {
+    ...stripSpecFromFormulaManifest(formulaManifest),
+    formulaId: normalizedSpec.formula.formulaId,
+    locked: normalizedSpec.formula.locked,
+    specV2: normalizedSpec
+  };
+  if (normalizedSpec.formula.executorRef) {
+    compiledFormulaManifest.executorRef = normalizedSpec.formula.executorRef;
+  }
+
+  return {
+    formulaId: normalizedSpec.formula.formulaId,
+    formulaManifest: compiledFormulaManifest,
+    inputSchema: normalizedSpec.inputs.fields,
+    paramSchema: normalizeRecord(normalizedSpec.parameters),
+    metricSchema: {
+      ...fallbackMetricSchema,
+      required: normalizedSpec.outputs.required,
+      outputs: normalizedSpec.outputs.outputs,
+      primaryValueKeys: normalizedSpec.outputs.primaryValueKeys
+    },
+    spec: normalizedSpec
+  };
+}
+
+function inferGraphLayerFromKeyAndKind(
+  key: string,
+  kind?: ValuationMethodInputField["kind"]
+): ValuationMetricNode["layer"] {
+  const normalizedKey = key.toLowerCase();
+  if (
+    normalizedKey.startsWith("output.") ||
+    normalizedKey.endsWith(".fair_value") ||
+    normalizedKey.endsWith(".return_gap")
+  ) {
+    return "output";
+  }
+  if (normalizedKey.startsWith("risk.")) {
+    return "risk";
+  }
+  if (kind === "objective") return "top";
+  if (kind === "subjective") return "first_order";
+  if (kind === "derived") return "second_order";
+  if (normalizedKey.startsWith("market.")) return "top";
+  if (normalizedKey.startsWith("factor.")) return "first_order";
+  if (normalizedKey.startsWith("valuation.") || normalizedKey.startsWith("liquidity.")) {
+    return "second_order";
+  }
+  return "top";
+}
+
+function inferGraphUnitFromKey(key: string): ValuationMetricNode["unit"] {
+  const normalizedKey = key.toLowerCase();
+  if (
+    normalizedKey.endsWith(".price") ||
+    normalizedKey.includes("fair_value")
+  ) {
+    return "currency";
+  }
+  if (
+    normalizedKey.includes("return_gap") ||
+    normalizedKey.includes("volatility") ||
+    normalizedKey.includes("momentum") ||
+    normalizedKey.includes("yield") ||
+    normalizedKey.includes("rate") ||
+    normalizedKey.includes("carry") ||
+    normalizedKey.includes("basis") ||
+    normalizedKey.includes("spread") ||
+    normalizedKey.includes("gap") ||
+    normalizedKey.includes("pct")
+  ) {
+    return "pct";
+  }
+  if (normalizedKey.includes("score")) return "score";
+  return "number";
+}
+
+function buildGraphLabelFromKey(key: string): string {
+  switch (key) {
+    case "market.price":
+      return "市场价格";
+    case "output.fair_value":
+      return "公允价值";
+    case "output.return_gap":
+      return "收益偏离";
+    default:
+      return key;
+  }
+}
+
+function buildMetricGraphFromSpec(spec: ValuationMethodSpecV2): ValuationMetricNode[] {
+  const formulaId = normalizeOptionalString(spec.formula.formulaId) ?? "generic_factor_v1";
+  const normalizedFields = normalizeInputSchema(spec.inputs.fields).sort((a, b) => {
+    if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
+    return a.key.localeCompare(b.key);
+  });
+  const inputKeys = normalizedFields.map((field) => field.key);
+  const sourceKeys = normalizedFields
+    .filter((field) => field.kind !== "derived")
+    .map((field) => field.key);
+  const derivedKeys = normalizedFields
+    .filter((field) => field.kind === "derived")
+    .map((field) => field.key);
+  const nodes: ValuationMetricNode[] = normalizedFields.map((field) => ({
+    key: field.key,
+    label: field.label,
+    layer: inferGraphLayerFromKeyAndKind(field.key, field.kind),
+    unit: field.unit,
+    dependsOn: field.kind === "derived" ? sourceKeys : [],
+    formulaId,
+    editable: field.kind !== "derived" && Boolean(field.editable)
+  }));
+
+  const completionKeys = Array.from(
+    new Set([
+      ...normalizeStringArray(spec.outputs.required),
+      ...normalizeStringArray(spec.outputs.outputs),
+      ...normalizeStringArray(spec.outputs.primaryValueKeys)
+    ])
+  );
+  for (const key of completionKeys) {
+    if (!key || inputKeys.includes(key) || nodes.some((node) => node.key === key)) continue;
+    nodes.push({
+      key,
+      label: buildGraphLabelFromKey(key),
+      layer: inferGraphLayerFromKeyAndKind(key, undefined),
+      unit: inferGraphUnitFromKey(key),
+      dependsOn: derivedKeys.length > 0 ? derivedKeys : sourceKeys,
+      formulaId,
+      editable: false
+    });
+  }
+
+  const layerOrder: Record<ValuationMetricNode["layer"], number> = {
+    top: 0,
+    first_order: 1,
+    second_order: 2,
+    output: 3,
+    risk: 4
+  };
+  return normalizeMetricGraph(
+    nodes
+      .map((node) => ({
+        ...node,
+        dependsOn: Array.from(new Set(node.dependsOn)).filter((key) => key !== node.key)
+      }))
+      .sort((a, b) => {
+        const byLayer = layerOrder[a.layer] - layerOrder[b.layer];
+        if (byLayer !== 0) return byLayer;
+        return a.key.localeCompare(b.key);
+      })
+  );
+}
+
+function canonicalizeGraphForCompare(
+  graph: ValuationMetricNode[]
+): Array<{
+  key: string;
+  layer: ValuationMetricNode["layer"];
+  unit: ValuationMetricNode["unit"];
+  formulaId: string;
+  editable: boolean;
+  dependsOn: string[];
+}> {
+  return graph
+    .map((node) => ({
+      key: node.key,
+      layer: node.layer,
+      unit: node.unit,
+      formulaId: normalizeOptionalString(node.formulaId) ?? "",
+      editable: Boolean(node.editable),
+      dependsOn: Array.from(new Set(node.dependsOn)).sort()
+    }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function assertGraphConsistentWithSpec(
+  providedGraph: ValuationMetricNode[],
+  derivedGraph: ValuationMetricNode[]
+): void {
+  if (providedGraph.length === 0) return;
+  const provided = canonicalizeGraphForCompare(providedGraph);
+  const derived = canonicalizeGraphForCompare(derivedGraph);
+  if (JSON.stringify(provided) !== JSON.stringify(derived)) {
+    throw new Error("指标层级图与输入定义不一致，请先同步后再发布。");
+  }
 }
 
 function buildDefaultMetricGraph(formulaId: string): ValuationMetricNode[] {

@@ -41,3 +41,24 @@
   - `InsightsView` 预览切换到新计算接口。
 - 增强验证：
   - `verify-insights-e2e` 增加估值 V2 场景（刷新状态、objective 快照、主观默认/覆盖优先级、旧 API 兼容）。
+
+## 2026-02-28
+- 引入 `ValuationMethodSpecV2`（shared 契约）作为“计算真源”对象的首版定义：
+  - 新增 `meta/formula/inputs/parameters/outputs/quality/confidence/degradation` 结构。
+  - `ValuationMethodVersion` 新增 `spec` 字段；发布入参支持可选 `spec`。
+- 后端新增 spec 归一化与编译桥接：
+  - `normalizeValuationMethodSpecV2`：将输入 spec 规范化，并在缺失字段时回落 legacy 字段。
+  - `buildValuationMethodSpecFromLegacy`：将 `formulaManifest + inputSchema + paramSchema + metricSchema` 编译为 spec。
+  - `compileValuationRuntimeSource`：计算前统一从 spec 编译 `formulaId/inputSchema/paramSchema/metricSchema`。
+- 计算链路切换到 runtime source（由 spec 编译）：
+  - `preview/computeValuationBySymbol` 不再直接读取版本散落字段作为主入口。
+  - 主观兜底策略接入 `spec.quality.allowSubjectiveFallback`。
+  - 缺价与不可用 reason 接入 `spec.degradation`；主值提取接入 `spec.outputs.primaryValueKeys`。
+- 版本持久化同步策略：
+  - 新建/发布版本时将 `specV2` 写入 `formula_manifest_json`（兼容无新列阶段）。
+  - `upsertValuationMethodInputSchema` 同步更新 `formula_manifest_json.specV2.inputs`，避免输入定义漂移。
+- 指标层级图与 spec 对齐策略（Phase 2）：
+  - 新增 `buildMetricGraphFromSpec`，图结构由 spec 自动派生，不再作为独立真源。
+  - `toValuationMethodVersion` 返回派生图，避免前端拿到陈旧 `graph_json`。
+  - 发布版本新增一致性阻断：若请求携带的 graph 与 spec 派生结果不一致，直接拒绝发布。
+  - 更新输入定义时同步重建并落库 `graph_json`，保证存储层与派生结果一致。

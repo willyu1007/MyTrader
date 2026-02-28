@@ -1419,6 +1419,53 @@ export interface ValuationMethodInputField {
   description: string | null;
 }
 
+export interface ValuationMethodSpecMeta {
+  methodKey: string;
+  version: number;
+  assetScope: ValuationMethodAssetScope;
+}
+
+export interface ValuationMethodSpecFormula {
+  formulaId: string;
+  executorRef: string | null;
+  locked: boolean;
+}
+
+export interface ValuationMethodSpecInputs {
+  fields: ValuationMethodInputField[];
+}
+
+export interface ValuationMethodSpecOutputs {
+  required: string[];
+  outputs: string[];
+  primaryValueKeys: string[];
+}
+
+export interface ValuationMethodSpecQuality {
+  allowSubjectiveFallback: boolean;
+}
+
+export interface ValuationMethodSpecConfidence {
+  minFreshRatio: number;
+}
+
+export interface ValuationMethodSpecDegradation {
+  missingInputReason: string;
+  missingPriceReason: string;
+}
+
+export interface ValuationMethodSpecV2 {
+  schemaVersion: 2;
+  meta: ValuationMethodSpecMeta;
+  formula: ValuationMethodSpecFormula;
+  inputs: ValuationMethodSpecInputs;
+  parameters: Record<string, unknown>;
+  outputs: ValuationMethodSpecOutputs;
+  quality: ValuationMethodSpecQuality;
+  confidence: ValuationMethodSpecConfidence;
+  degradation: ValuationMethodSpecDegradation;
+}
+
 export interface ValuationMethod {
   id: string;
   methodKey: string;
@@ -1443,6 +1490,7 @@ export interface ValuationMethodVersion {
   metricSchema: Record<string, unknown>;
   formulaManifest: Record<string, unknown>;
   inputSchema: ValuationMethodInputField[];
+  spec: ValuationMethodSpecV2 | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -1503,6 +1551,7 @@ export interface PublishValuationMethodVersionInput {
   paramSchema: Record<string, unknown>;
   metricSchema: Record<string, unknown>;
   inputSchema?: ValuationMethodInputField[] | null;
+  spec?: ValuationMethodSpecV2 | null;
 }
 
 export interface SetActiveValuationMethodVersionInput {

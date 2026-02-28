@@ -4,6 +4,11 @@
 - `pnpm -C packages/shared build` -> pass
 - `pnpm -C apps/frontend typecheck` -> pass
 - `pnpm -C apps/backend typecheck` -> pass
+- `pnpm -C packages/shared typecheck` -> pass
+- `pnpm -C apps/frontend typecheck` -> pass（spec 契约变更后复验）
+- `pnpm -C apps/backend typecheck` -> pass（spec 归一化/编译接入后复验）
+- `pnpm -C apps/backend verify:insights-e2e` -> pass（spec 编译接入后复验）
+- `pnpm -C apps/backend verify:insights-e2e` -> pass（graph 自动派生 + 发布一致性阻断接入后复验）
 - `pnpm typecheck` -> pass
 - `pnpm build` -> pass
 - `pnpm -C apps/backend verify:insights-e2e` -> pass
