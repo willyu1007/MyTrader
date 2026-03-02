@@ -14,13 +14,18 @@ import type {
   CorporateActionCategory,
   CorporateActionMeta,
   CreateAccountInput,
+  CreateOpportunityRuleInput,
   CreateInsightFactInput,
   CreateManualTagInput,
   CreateCustomValuationMethodInput,
   CreateInsightInput,
+  DeleteFreeCompareSnapshotInput,
+  DeleteOpportunityRuleInput,
   GetDailyBarsInput,
+  DismissOpportunitySignalInput,
   GetIngestRunDetailInput,
   GetInsightInput,
+  GetLatestOpportunityRankingInput,
   GetValuationMethodInput,
   InjectMarketTestDataInput,
   InsightTargetExcludeInput,
@@ -38,8 +43,14 @@ import type {
   ListInsightFactsInput,
   ListInsightsInput,
   ListInstrumentRegistryInput,
+  ListOpportunityRankingProfilesInput,
+  ListOpportunityRulesInput,
+  ListOpportunityRuleRunsInput,
+  ListOpportunitySignalsInput,
   ListValuationMethodsInput,
   ListTargetTaskStatusInput,
+  LoadFreeCompareSnapshotInput,
+  PinOpportunitySignalInput,
   CreateLedgerEntryInput,
   CreatePortfolioInput,
   CreatePositionInput,
@@ -63,14 +74,23 @@ import type {
   PreviewCompletenessCoverageInput,
   PortfolioPerformanceRangeInput,
   RunCompletenessMaterializationInput,
+  RunMultiCompareInput,
+  RunOpportunityRankingInput,
+  RunOpportunityRulesNowInput,
   SearchInstrumentsInput,
   SetMarketCompletenessConfigInput,
   SetMarketDomainTokenInput,
   SetMarketMainTokenInput,
   SetInstrumentAutoIngestInput,
+  RestoreOpportunitySignalInput,
+  SaveFreeCompareSnapshotInput,
+  SaveFreeCompareWorkspaceDraftInput,
   TestMarketDomainConnectivityInput,
   TestMarketModuleConnectivityInput,
+  ToggleOpportunityRuleInput,
   TushareIngestInput,
+  UpdateOpportunityRuleInput,
+  UpsertOpportunityRankingProfileInput,
   UpdateCustomValuationMethodInput,
   UpdateInsightInput,
   UpdateManualTagInput,
@@ -111,6 +131,10 @@ import {
   startValuationMetricScheduler,
   stopValuationMetricScheduler
 } from "../market/valuationMetricScheduler";
+import {
+  startOpportunityScheduler,
+  stopOpportunityScheduler
+} from "../market/opportunityScheduler";
 import {
   createPortfolio,
   deletePortfolio,
@@ -225,6 +249,31 @@ import {
   upsertValuationSubjectiveOverride,
   deleteValuationSubjectiveOverride
 } from "../services/insightService";
+import {
+  createOpportunityRule,
+  deleteFreeCompareSnapshot,
+  deleteOpportunityRule,
+  dismissOpportunitySignal,
+  getFreeCompareWorkspaceDraft,
+  getLatestOpportunityRanking,
+  listFreeCompareSnapshots,
+  listOpportunityRankingProfiles,
+  listOpportunityRuleRuns,
+  listOpportunityRules,
+  listOpportunitySignals,
+  loadFreeCompareSnapshot,
+  pinOpportunitySignal,
+  restoreOpportunitySignal,
+  runOpportunityMultiCompare,
+  runOpportunityRanking,
+  runOpportunityRulesNow,
+  saveFreeCompareSnapshot,
+  saveFreeCompareWorkspaceDraft,
+  toggleOpportunityRule,
+  triggerOpportunityRulesOnDataUpdate,
+  updateOpportunityRule,
+  upsertOpportunityRankingProfile
+} from "../services/opportunityService";
 import { config } from "../config";
 import {
   convergeMarketIngestSchedulerStartupDisabled,
@@ -315,11 +364,23 @@ function requireAnalysisDbPath(): string {
   return path.join(activeAccount.dataDir, "analysis.duckdb");
 }
 
+function queueOpportunityDataUpdateTrigger(
+  businessDb: SqliteDatabase,
+  marketDb: SqliteDatabase,
+  source: string
+): void {
+  void triggerOpportunityRulesOnDataUpdate({ businessDb, marketDb }).catch((error) => {
+    console.error(`[mytrader] opportunity data-update trigger failed (${source})`);
+    console.error(error);
+  });
+}
+
 async function stopAndCloseActiveBusinessDb(): Promise<void> {
   stopIngestOrchestrator();
   stopAutoIngest();
   stopMarketIngestScheduler();
   stopValuationMetricScheduler();
+  stopOpportunityScheduler();
 
   if (!activeBusinessDb) return;
   const db = activeBusinessDb;
@@ -600,6 +661,7 @@ export async function registerIpcHandlers() {
       startAutoIngest(activeBusinessDb, marketDb);
       startMarketIngestScheduler(activeBusinessDb, marketDb, layout.analysisDbPath);
       startValuationMetricScheduler(activeBusinessDb, marketDb);
+      startOpportunityScheduler(activeBusinessDb, marketDb);
       return unlocked;
     }
   );
@@ -901,9 +963,14 @@ export async function registerIpcHandlers() {
   ipcMain.handle(
     IPC_CHANNELS.MARKET_IMPORT_PRICES_CSV,
     async (_event, input: ImportPricesCsvInput) => {
+      const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
       if (!input.filePath) throw new Error("CSV 文件路径不能为空。");
-      return await importPricesCsv(marketDb, input);
+      const result = await importPricesCsv(marketDb, input);
+      if (result.inserted + result.updated > 0) {
+        queueOpportunityDataUpdateTrigger(businessDb, marketDb, "market_import_prices_csv");
+      }
+      return result;
     }
   );
 
@@ -916,7 +983,11 @@ export async function registerIpcHandlers() {
         throw new Error("至少需要一个代码才能拉取。");
       }
       const resolved = await getResolvedTushareToken(businessDb);
-      return await ingestTushare(marketDb, input, resolved.token);
+      const result = await ingestTushare(marketDb, input, resolved.token);
+      if (result.inserted + result.updated > 0) {
+        queueOpportunityDataUpdateTrigger(businessDb, marketDb, "market_ingest_tushare");
+      }
+      return result;
     }
   );
 
@@ -1182,7 +1253,15 @@ export async function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.MARKET_SEED_DEMO_DATA, async (_event, input) => {
     const businessDb = requireActiveBusinessDb();
     const marketDb = requireMarketCacheDb();
-    return await seedMarketDemoData(businessDb, marketDb, input ?? null);
+    const result = await seedMarketDemoData(businessDb, marketDb, input ?? null);
+    const seededDataRows =
+      result.pricesInserted +
+      result.dailyBasicsInserted +
+      result.dailyMoneyflowsInserted;
+    if (seededDataRows > 0) {
+      queueOpportunityDataUpdateTrigger(businessDb, marketDb, "market_seed_demo_data");
+    }
+    return result;
   });
 
   ipcMain.handle(IPC_CHANNELS.MARKET_TEST_DATA_SCENARIOS_LIST, async () => {
@@ -1200,7 +1279,11 @@ export async function registerIpcHandlers() {
     async (_event, input: InjectMarketTestDataInput) => {
       const businessDb = requireActiveBusinessDb();
       const marketDb = requireMarketCacheDb();
-      return await injectMarketTestData(businessDb, marketDb, input);
+      const result = await injectMarketTestData(businessDb, marketDb, input);
+      if (result.inserted + result.updated > 0) {
+        queueOpportunityDataUpdateTrigger(businessDb, marketDb, "market_test_data_inject");
+      }
+      return result;
     }
   );
 
@@ -1704,6 +1787,240 @@ export async function registerIpcHandlers() {
     void triggerAutoIngest("positions");
     return await getMarketTargetsConfig(businessDb);
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_SIGNAL_LIST,
+    async (_event, input: ListOpportunitySignalsInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listOpportunitySignals({
+        businessDb,
+        query: input ?? undefined
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_SIGNAL_PIN,
+    async (_event, input: PinOpportunitySignalInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await pinOpportunitySignal({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_SIGNAL_DISMISS,
+    async (_event, input: DismissOpportunitySignalInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await dismissOpportunitySignal({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_SIGNAL_RESTORE,
+    async (_event, input: RestoreOpportunitySignalInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await restoreOpportunitySignal({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RULE_LIST,
+    async (_event, input: ListOpportunityRulesInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listOpportunityRules({
+        businessDb,
+        query: input ?? undefined
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RULE_CREATE,
+    async (_event, input: CreateOpportunityRuleInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await createOpportunityRule({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RULE_UPDATE,
+    async (_event, input: UpdateOpportunityRuleInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await updateOpportunityRule({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RULE_TOGGLE,
+    async (_event, input: ToggleOpportunityRuleInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await toggleOpportunityRule({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RULE_DELETE,
+    async (_event, input: DeleteOpportunityRuleInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await deleteOpportunityRule({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RULE_RUN_NOW,
+    async (_event, input: RunOpportunityRulesNowInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await runOpportunityRulesNow({
+        businessDb,
+        marketDb,
+        payload: input ?? undefined
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RULE_RUN_LIST,
+    async (_event, input: ListOpportunityRuleRunsInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listOpportunityRuleRuns({
+        businessDb,
+        query: input ?? undefined
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RANK_PROFILE_LIST,
+    async (_event, input: ListOpportunityRankingProfilesInput | null | undefined) => {
+      const businessDb = requireActiveBusinessDb();
+      return await listOpportunityRankingProfiles({
+        businessDb,
+        query: input ?? undefined
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RANK_PROFILE_UPSERT,
+    async (_event, input: UpsertOpportunityRankingProfileInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await upsertOpportunityRankingProfile({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RANK_RUN,
+    async (_event, input: RunOpportunityRankingInput) => {
+      const businessDb = requireActiveBusinessDb();
+      const marketDb = requireMarketCacheDb();
+      return await runOpportunityRanking({
+        businessDb,
+        marketDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_RANK_GET_LATEST,
+    async (_event, input: GetLatestOpportunityRankingInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await getLatestOpportunityRanking({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_COMPARE_MULTI_RUN,
+    async (_event, input: RunMultiCompareInput) => {
+      const marketDb = requireMarketCacheDb();
+      return await runOpportunityMultiCompare({
+        marketDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.OPPORTUNITIES_COMPARE_DRAFT_GET, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await getFreeCompareWorkspaceDraft({ businessDb });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_COMPARE_DRAFT_SAVE,
+    async (_event, input: SaveFreeCompareWorkspaceDraftInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await saveFreeCompareWorkspaceDraft({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_LIST, async () => {
+    const businessDb = requireActiveBusinessDb();
+    return await listFreeCompareSnapshots({ businessDb });
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_SAVE,
+    async (_event, input: SaveFreeCompareSnapshotInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await saveFreeCompareSnapshot({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_DELETE,
+    async (_event, input: DeleteFreeCompareSnapshotInput) => {
+      const businessDb = requireActiveBusinessDb();
+      await deleteFreeCompareSnapshot({
+        businessDb,
+        payload: input
+      });
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_LOAD,
+    async (_event, input: LoadFreeCompareSnapshotInput) => {
+      const businessDb = requireActiveBusinessDb();
+      return await loadFreeCompareSnapshot({
+        businessDb,
+        payload: input
+      });
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.INSIGHTS_FACT_LIST,

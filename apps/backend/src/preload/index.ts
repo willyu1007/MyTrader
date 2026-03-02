@@ -219,6 +219,61 @@ const api: MyTraderApi = {
         input
       )
   },
+  opportunities: {
+    listSignals: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_SIGNAL_LIST, input ?? null),
+    pinSignal: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_SIGNAL_PIN, input),
+    dismissSignal: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_SIGNAL_DISMISS, input),
+    restoreSignal: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_SIGNAL_RESTORE, input),
+    listRules: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RULE_LIST, input ?? null),
+    createRule: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RULE_CREATE, input),
+    updateRule: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RULE_UPDATE, input),
+    toggleRule: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RULE_TOGGLE, input),
+    deleteRule: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RULE_DELETE, input),
+    runRulesNow: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RULE_RUN_NOW, input ?? null),
+    listRuleRuns: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RULE_RUN_LIST, input ?? null),
+    listRankingProfiles: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.OPPORTUNITIES_RANK_PROFILE_LIST,
+        input ?? null
+      ),
+    upsertRankingProfile: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.OPPORTUNITIES_RANK_PROFILE_UPSERT,
+        input
+      ),
+    runRanking: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RANK_RUN, input),
+    getLatestRanking: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_RANK_GET_LATEST, input),
+    runMultiCompare: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_COMPARE_MULTI_RUN, input),
+    getCompareDraft: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_COMPARE_DRAFT_GET),
+    saveCompareDraft: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_COMPARE_DRAFT_SAVE, input),
+    listCompareSnapshots: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_LIST),
+    saveCompareSnapshot: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_SAVE, input),
+    deleteCompareSnapshot: (input) =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_DELETE,
+        input
+      ),
+    loadCompareSnapshot: (input) =>
+      ipcRenderer.invoke(IPC_CHANNELS.OPPORTUNITIES_COMPARE_SNAPSHOT_LOAD, input)
+  },
   insights: {
     listFacts: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_FACT_LIST, input ?? null),
     createFact: (input) => ipcRenderer.invoke(IPC_CHANNELS.INSIGHTS_FACT_CREATE, input),

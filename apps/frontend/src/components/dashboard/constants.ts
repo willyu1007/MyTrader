@@ -7,6 +7,7 @@ import type {
 import type {
   AnalysisTab,
   InsightsTab,
+  OpportunitiesTab,
   MarketCategoryPreset,
   MarketCategoryTab,
   PositionFormState,
@@ -155,6 +156,44 @@ export const insightsTabs: {
 }[] = [
   { key: "generate", label: "生成", icon: "auto_awesome", description: "记录事实并生成观点草稿。" },
   { key: "manage", label: "管理", icon: "view_list", description: "查看观点列表并维护作用参数。" }
+];
+
+export const opportunitiesTabs: {
+  key: OpportunitiesTab;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  {
+    key: "signals",
+    label: "机会列表",
+    icon: "list_alt",
+    description: "统一查看机会与风险信号，支持置顶、忽略与恢复。"
+  },
+  {
+    key: "rules",
+    label: "自动识别",
+    icon: "auto_fix_high",
+    description: "维护规则模板、参数与运行日志。"
+  },
+  {
+    key: "ranking",
+    label: "标的排序",
+    icon: "leaderboard",
+    description: "按配置模板输出总分与因子拆解排名。"
+  },
+  {
+    key: "multi-compare",
+    label: "多标的比对",
+    icon: "compare_arrows",
+    description: "最多 5+1 的结构化对比，快速发现相对机会。"
+  },
+  {
+    key: "free-compare",
+    label: "自由比对",
+    icon: "dashboard_customize",
+    description: "6+1 研究工作台，支持草稿自动保存与命名快照。"
+  }
 ];
 
 export const marketCategoryTabs: {

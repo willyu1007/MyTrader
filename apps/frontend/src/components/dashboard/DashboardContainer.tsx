@@ -93,6 +93,8 @@ export function Dashboard({
     setAnalysisTab,
     insightsTab,
     setInsightsTab,
+    opportunitiesTab,
+    setOpportunitiesTab,
     isNavCollapsed
   } = useDashboardUi({
     navCollapsed,
@@ -524,6 +526,8 @@ export function Dashboard({
       setAnalysisTab={setAnalysisTab}
       insightsTab={insightsTab}
       setInsightsTab={setInsightsTab}
+      opportunitiesTab={opportunitiesTab}
+      setOpportunitiesTab={setOpportunitiesTab}
       portfolioTab={portfolioTab}
       setPortfolioTab={setPortfolioTab}
       snapshot={snapshot}

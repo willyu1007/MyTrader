@@ -38,7 +38,7 @@ export async function previewTargets(input: {
 }): Promise<PreviewTargetsResult> {
   const { businessDb, marketDb } = input;
   const config = await getMarketTargetsConfig(businessDb);
-  return await previewTargetsByConfig({
+  return await resolveTargetsByConfig({
     businessDb,
     marketDb,
     config
@@ -52,12 +52,12 @@ export async function previewTargetsDraft(input: {
 }): Promise<PreviewTargetsDiffResult> {
   const { businessDb, marketDb, draftInput } = input;
   const baselineConfig = await getMarketTargetsConfig(businessDb);
-  const baseline = await previewTargetsByConfig({
+  const baseline = await resolveTargetsByConfig({
     businessDb,
     marketDb,
     config: baselineConfig
   });
-  const draft = await previewTargetsByConfig({
+  const draft = await resolveTargetsByConfig({
     businessDb,
     marketDb,
     config: draftInput.config
@@ -87,7 +87,7 @@ export async function previewTargetsDraft(input: {
   };
 }
 
-async function previewTargetsByConfig(input: {
+export async function resolveTargetsByConfig(input: {
   businessDb: SqliteDatabase;
   marketDb: SqliteDatabase;
   config: MarketTargetsConfig;

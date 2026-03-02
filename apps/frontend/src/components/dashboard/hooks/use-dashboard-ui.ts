@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-import type { AnalysisTab, InsightsTab, OtherTab, WorkspaceView } from "../types";
+import type {
+  AnalysisTab,
+  InsightsTab,
+  OpportunitiesTab,
+  OtherTab,
+  WorkspaceView
+} from "../types";
 
 export interface UseDashboardUiResult {
   error: string | null;
@@ -16,6 +22,8 @@ export interface UseDashboardUiResult {
   setAnalysisTab: Dispatch<SetStateAction<AnalysisTab>>;
   insightsTab: InsightsTab;
   setInsightsTab: Dispatch<SetStateAction<InsightsTab>>;
+  opportunitiesTab: OpportunitiesTab;
+  setOpportunitiesTab: Dispatch<SetStateAction<OpportunitiesTab>>;
   isNavCollapsed: boolean;
   setIsNavCollapsed: Dispatch<SetStateAction<boolean>>;
 }
@@ -42,6 +50,7 @@ export function useDashboardUi(options?: UseDashboardUiOptions): UseDashboardUiR
   const [otherTab, setOtherTab] = useState<OtherTab>("data-management");
   const [analysisTab, setAnalysisTab] = useState<AnalysisTab>("portfolio");
   const [insightsTab, setInsightsTab] = useState<InsightsTab>("generate");
+  const [opportunitiesTab, setOpportunitiesTab] = useState<OpportunitiesTab>("signals");
   const [isNavCollapsedState, setIsNavCollapsedState] = useState(false);
   const isNavCollapsedControlled = typeof options?.navCollapsed === "boolean";
   const isNavCollapsed = isNavCollapsedControlled
@@ -97,6 +106,8 @@ export function useDashboardUi(options?: UseDashboardUiOptions): UseDashboardUiR
     setAnalysisTab,
     insightsTab,
     setInsightsTab,
+    opportunitiesTab,
+    setOpportunitiesTab,
     isNavCollapsed,
     setIsNavCollapsed
   };

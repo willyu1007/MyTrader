@@ -16,6 +16,7 @@ import {
   analysisTabs,
   assetClassLabels,
   insightsTabs,
+  opportunitiesTabs,
   ledgerEventTypeOptions,
   marketCategoryTabs,
   marketChartRanges,
@@ -84,6 +85,7 @@ import {
 import type {
   AnalysisTab,
   InsightsTab,
+  OpportunitiesTab,
   DashboardProps,
   LedgerFilter,
   LedgerFormState,
@@ -106,6 +108,7 @@ import { DashboardOverlays } from "./DashboardOverlays";
 import { InsightsView } from "./InsightsView";
 import { MarketView } from "./MarketView";
 import { OtherView } from "./OtherView";
+import { OpportunitiesView } from "./OpportunitiesView";
 import { PortfolioView } from "./PortfolioView";
 import { RiskView } from "./RiskView";
 import { SidebarNav } from "./SidebarNav";
@@ -159,6 +162,8 @@ interface DashboardContainerLayoutProps {
   setAnalysisTab: Dispatch<SetStateAction<AnalysisTab>>;
   insightsTab: InsightsTab;
   setInsightsTab: Dispatch<SetStateAction<InsightsTab>>;
+  opportunitiesTab: OpportunitiesTab;
+  setOpportunitiesTab: Dispatch<SetStateAction<OpportunitiesTab>>;
   portfolioTab: PortfolioTab;
   setPortfolioTab: Dispatch<SetStateAction<PortfolioTab>>;
   snapshot: PortfolioSnapshot | null;
@@ -225,6 +230,8 @@ export function DashboardContainerLayout({
   setAnalysisTab,
   insightsTab,
   setInsightsTab,
+  opportunitiesTab,
+  setOpportunitiesTab,
   portfolioTab,
   setPortfolioTab,
   snapshot,
@@ -324,6 +331,14 @@ export function DashboardContainerLayout({
                 onSelect: () => setInsightsTab(tab.key),
                 title: tab.description
               }))
+            : activeView === "opportunities"
+              ? opportunitiesTabs.map((tab) => ({
+                  key: tab.key,
+                  label: tab.label,
+                  active: opportunitiesTab === tab.key,
+                  onSelect: () => setOpportunitiesTab(tab.key),
+                  title: tab.description
+                }))
           : null;
   const resolvedTopTabs:
     | {
@@ -809,7 +824,16 @@ export function DashboardContainerLayout({
             />
           )}
 
-          {["opportunities", "backtest", "alerts", "index-tracking"].includes(
+          {activeView === "opportunities" && (
+            <OpportunitiesView
+              Button={Button}
+              Panel={Panel}
+              opportunitiesTab={opportunitiesTab}
+              formatDateTime={formatDateTime}
+            />
+          )}
+
+          {["backtest", "alerts", "index-tracking"].includes(
             activeView
           ) && (
             <PlaceholderPanel

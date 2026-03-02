@@ -12,7 +12,11 @@ import { getMarketDataSourceConfig } from "../storage/marketDataSourceRepository
 import { getResolvedTushareToken } from "../storage/marketTokenRepository";
 import type { SqliteDatabase } from "../storage/sqlite";
 import type { IngestExecutionControl } from "./marketIngestRunner";
-import { convergeStaleRunningIngestRuns } from "./ingestRunsRepository";
+import { triggerOpportunityRulesOnDataUpdate } from "../services/opportunityService";
+import {
+  convergeStaleRunningIngestRuns,
+  getIngestRunById
+} from "./ingestRunsRepository";
 import { runTargetsIngest, runUniverseIngest } from "./marketIngestRunner";
 import { resolveMarketExecutionPlan } from "./executionPlanResolver";
 
@@ -258,7 +262,10 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
     return;
   }
 
-  const control = buildControl(sessionId);
+  let runId: string | null = null;
+  const control = buildControl(sessionId, (createdRunId) => {
+    runId = createdRunId;
+  });
   if (job.scope === "targets") {
     await runTargetsIngest({
       businessDb,
@@ -268,6 +275,13 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
       meta: { ...(job.meta ?? {}), source: job.source },
       control,
       executionPlan
+    });
+    await maybeTriggerOpportunityOnIngestCompletion({
+      sessionId,
+      businessDb,
+      marketDb,
+      runId,
+      source: `managed:${job.scope}:${job.source}`
     });
     return;
   }
@@ -289,13 +303,24 @@ async function runJob(sessionId: number, job: QueueJob): Promise<void> {
     control,
     executionPlan
   });
+  await maybeTriggerOpportunityOnIngestCompletion({
+    sessionId,
+    businessDb,
+    marketDb,
+    runId,
+    source: `managed:${job.scope}:${job.source}`
+  });
 }
 
-function buildControl(sessionId: number): IngestExecutionControl {
+function buildControl(
+  sessionId: number,
+  onRunCreated?: (runId: string) => void
+): IngestExecutionControl {
   return {
     onRunCreated: (runId) => {
       if (sessionId !== state.sessionId) return;
       state.currentRunId = runId;
+      onRunCreated?.(runId);
       touchState();
     },
     checkpoint: async () => {
@@ -308,6 +333,40 @@ function buildControl(sessionId: number): IngestExecutionControl {
       return "continue";
     }
   };
+}
+
+async function maybeTriggerOpportunityOnIngestCompletion(input: {
+  sessionId: number;
+  businessDb: SqliteDatabase;
+  marketDb: SqliteDatabase;
+  runId: string | null;
+  source: string;
+}): Promise<void> {
+  if (input.sessionId !== state.sessionId) return;
+  if (!input.runId) return;
+
+  const runRow = await getIngestRunById(input.marketDb, input.runId);
+  if (!runRow) return;
+
+  if (runRow.status !== "success" && runRow.status !== "partial") return;
+  if (!runRow.as_of_trade_date) return;
+
+  const inserted = Number(runRow.inserted ?? 0);
+  const updated = Number(runRow.updated ?? 0);
+  if (!Number.isFinite(inserted + updated) || inserted + updated <= 0) return;
+
+  try {
+    await triggerOpportunityRulesOnDataUpdate({
+      businessDb: input.businessDb,
+      marketDb: input.marketDb,
+      asOfDate: runRow.as_of_trade_date
+    });
+  } catch (error) {
+    console.error(
+      `[mytrader] opportunity data-update trigger failed after ingest run (${input.source})`
+    );
+    console.error(error);
+  }
 }
 
 function hasScopeInFlight(scope: JobScope): boolean {

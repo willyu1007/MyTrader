@@ -1221,6 +1221,284 @@ export interface RemoveTempTargetSymbolInput {
   symbol: string;
 }
 
+export type OpportunityDirection = "long" | "short_risk";
+export type OpportunitySignalType = "opportunity" | "risk";
+export type OpportunitySignalStatus = "active" | "expired" | "dismissed";
+export type OpportunityRuleTemplate =
+  | "valuation_gap"
+  | "momentum_breakout"
+  | "reversal_risk"
+  | "liquidity_anomaly";
+export type OpportunityRuleDirectionStrategy =
+  | "long"
+  | "short_risk"
+  | "both";
+export type OpportunityRunTrigger = "data_update" | "schedule" | "manual";
+export type OpportunityRunScopeMode = "full" | "degraded";
+
+export interface OpportunityScopeConfig {
+  includeHoldings: boolean;
+  includeRegistryAutoIngest: boolean;
+  includeWatchlist: boolean;
+  portfolioIds: PortfolioId[] | null;
+  explicitSymbols: string[];
+  tagFilters: string[];
+}
+
+export interface OpportunityRule {
+  id: string;
+  name: string;
+  template: OpportunityRuleTemplate;
+  directionStrategy: OpportunityRuleDirectionStrategy;
+  params: Record<string, unknown>;
+  scoreFormula: string | null;
+  enabled: boolean;
+  priority: number;
+  scopeConfig: OpportunityScopeConfig;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface OpportunityRuleRun {
+  id: string;
+  ruleId: string;
+  asOfDate: string;
+  trigger: OpportunityRunTrigger;
+  scopeMode: OpportunityRunScopeMode;
+  scopeSummary: string;
+  scannedCount: number;
+  generatedCount: number;
+  degradedReason: string | null;
+  errorSummary: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface OpportunitySignal {
+  id: string;
+  asOfDate: string;
+  ruleId: string;
+  ruleName: string;
+  symbol: string;
+  signalType: OpportunitySignalType;
+  direction: OpportunityDirection;
+  score: number;
+  confidence: number | null;
+  reasons: string[];
+  scopeSummary: string | null;
+  status: OpportunitySignalStatus;
+  pinned: boolean;
+  stale: boolean;
+  expiresAt: number;
+  dismissedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListOpportunitySignalsInput {
+  signalType?: OpportunitySignalType | "all" | null;
+  direction?: OpportunityDirection | "all" | null;
+  status?: OpportunitySignalStatus | "all" | null;
+  ruleIds?: string[] | null;
+  query?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListOpportunitySignalsResult {
+  items: OpportunitySignal[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PinOpportunitySignalInput {
+  signalId: string;
+  pinned: boolean;
+}
+
+export interface DismissOpportunitySignalInput {
+  signalId: string;
+}
+
+export interface RestoreOpportunitySignalInput {
+  signalId: string;
+}
+
+export interface ListOpportunityRulesInput {
+  includeDisabled?: boolean | null;
+}
+
+export interface CreateOpportunityRuleInput {
+  name: string;
+  template: OpportunityRuleTemplate;
+  directionStrategy?: OpportunityRuleDirectionStrategy | null;
+  params?: Record<string, unknown> | null;
+  scoreFormula?: string | null;
+  enabled?: boolean | null;
+  priority?: number | null;
+  scopeConfig?: Partial<OpportunityScopeConfig> | null;
+}
+
+export interface UpdateOpportunityRuleInput extends CreateOpportunityRuleInput {
+  id: string;
+}
+
+export interface ToggleOpportunityRuleInput {
+  id: string;
+  enabled: boolean;
+}
+
+export interface DeleteOpportunityRuleInput {
+  id: string;
+}
+
+export interface RunOpportunityRulesNowInput {
+  asOfDate?: string | null;
+  ruleIds?: string[] | null;
+  trigger?: OpportunityRunTrigger | null;
+}
+
+export interface ListOpportunityRuleRunsInput {
+  ruleId?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListOpportunityRuleRunsResult {
+  items: OpportunityRuleRun[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface OpportunityRankingProfile {
+  id: string;
+  name: string;
+  description: string | null;
+  weights: Record<string, number>;
+  hardFilters: Record<string, unknown>;
+  rangeDays: number;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ListOpportunityRankingProfilesInput {
+  includeDisabled?: boolean | null;
+}
+
+export interface UpsertOpportunityRankingProfileInput {
+  id?: string | null;
+  name: string;
+  description?: string | null;
+  weights?: Record<string, number> | null;
+  hardFilters?: Record<string, unknown> | null;
+  rangeDays?: number | null;
+  enabled?: boolean | null;
+}
+
+export interface RunOpportunityRankingInput {
+  profileId: string;
+  asOfDate?: string | null;
+}
+
+export interface OpportunityRankingItem {
+  symbol: string;
+  totalScore: number;
+  factorScores: Record<string, number>;
+  riskFlags: string[];
+  previousRank: number | null;
+  currentRank: number;
+}
+
+export interface OpportunityRankingResult {
+  runId: string;
+  profile: OpportunityRankingProfile;
+  asOfDate: string;
+  items: OpportunityRankingItem[];
+  generatedAt: number;
+}
+
+export interface GetLatestOpportunityRankingInput {
+  profileId: string;
+}
+
+export interface RunMultiCompareInput {
+  symbols: string[];
+  baselineSymbol?: string | null;
+  asOfDate?: string | null;
+}
+
+export interface MultiCompareItem {
+  symbol: string;
+  close: number | null;
+  peTtm: number | null;
+  turnoverRate: number | null;
+  return20d: number | null;
+  netMfAmount: number | null;
+  relative: {
+    return20dVsBaseline: number | null;
+    peTtmVsBaseline: number | null;
+    turnoverRateVsBaseline: number | null;
+    netMfAmountVsBaseline: number | null;
+  };
+}
+
+export interface MultiCompareResult {
+  asOfDate: string;
+  baselineSymbol: string;
+  baselineAutoSelected: boolean;
+  items: MultiCompareItem[];
+}
+
+export interface FreeCompareWindowConfig {
+  id: string;
+  title: string;
+  theme: string | null;
+  symbols: string[];
+  baselineSymbol: string | null;
+  ruleIds: string[];
+  asOfDate: string | null;
+}
+
+export interface FreeCompareWorkspaceDraft {
+  windows: FreeCompareWindowConfig[];
+  activeWindowId: string | null;
+  detailSymbol: string | null;
+  updatedAt: number;
+}
+
+export interface SaveFreeCompareWorkspaceDraftInput {
+  draft: FreeCompareWorkspaceDraft;
+}
+
+export interface FreeCompareSnapshot {
+  id: string;
+  name: string;
+  description: string | null;
+  draft: FreeCompareWorkspaceDraft;
+  createdAt: number;
+  updatedAt: number;
+  lastUsedAt: number;
+}
+
+export interface SaveFreeCompareSnapshotInput {
+  name: string;
+  description?: string | null;
+  draft: FreeCompareWorkspaceDraft;
+}
+
+export interface DeleteFreeCompareSnapshotInput {
+  id: string;
+}
+
+export interface LoadFreeCompareSnapshotInput {
+  id: string;
+}
+
 export type InsightStatus = "draft" | "active" | "archived" | "deleted";
 export type InsightScopeType =
   | "symbol"
@@ -1980,6 +2258,46 @@ export interface MyTraderApi {
       input: BatchSetInstrumentAutoIngestInput
     ): Promise<void>;
   };
+  opportunities: {
+    listSignals(
+      input?: ListOpportunitySignalsInput
+    ): Promise<ListOpportunitySignalsResult>;
+    pinSignal(input: PinOpportunitySignalInput): Promise<void>;
+    dismissSignal(input: DismissOpportunitySignalInput): Promise<void>;
+    restoreSignal(input: RestoreOpportunitySignalInput): Promise<void>;
+    listRules(input?: ListOpportunityRulesInput): Promise<OpportunityRule[]>;
+    createRule(input: CreateOpportunityRuleInput): Promise<OpportunityRule>;
+    updateRule(input: UpdateOpportunityRuleInput): Promise<OpportunityRule>;
+    toggleRule(input: ToggleOpportunityRuleInput): Promise<OpportunityRule>;
+    deleteRule(input: DeleteOpportunityRuleInput): Promise<void>;
+    runRulesNow(input?: RunOpportunityRulesNowInput): Promise<OpportunityRuleRun[]>;
+    listRuleRuns(
+      input?: ListOpportunityRuleRunsInput
+    ): Promise<ListOpportunityRuleRunsResult>;
+    listRankingProfiles(
+      input?: ListOpportunityRankingProfilesInput
+    ): Promise<OpportunityRankingProfile[]>;
+    upsertRankingProfile(
+      input: UpsertOpportunityRankingProfileInput
+    ): Promise<OpportunityRankingProfile>;
+    runRanking(input: RunOpportunityRankingInput): Promise<OpportunityRankingResult>;
+    getLatestRanking(
+      input: GetLatestOpportunityRankingInput
+    ): Promise<OpportunityRankingResult | null>;
+    runMultiCompare(input: RunMultiCompareInput): Promise<MultiCompareResult>;
+    getCompareDraft(): Promise<FreeCompareWorkspaceDraft>;
+    saveCompareDraft(
+      input: SaveFreeCompareWorkspaceDraftInput
+    ): Promise<FreeCompareWorkspaceDraft>;
+    listCompareSnapshots(): Promise<FreeCompareSnapshot[]>;
+    saveCompareSnapshot(
+      input: SaveFreeCompareSnapshotInput
+    ): Promise<FreeCompareSnapshot>;
+    deleteCompareSnapshot(input: DeleteFreeCompareSnapshotInput): Promise<void>;
+    loadCompareSnapshot(
+      input: LoadFreeCompareSnapshotInput
+    ): Promise<FreeCompareSnapshot>;
+  };
   insights: {
     listFacts(input?: ListInsightFactsInput): Promise<ListInsightFactsResult>;
     createFact(input: CreateInsightFactInput): Promise<InsightFact>;
@@ -2170,6 +2488,28 @@ export const IPC_CHANNELS = {
     "market:instrumentRegistry:setAutoIngest",
   MARKET_INSTRUMENT_REGISTRY_BATCH_SET_AUTO_INGEST:
     "market:instrumentRegistry:batchSetAutoIngest",
+  OPPORTUNITIES_SIGNAL_LIST: "opportunities:signal:list",
+  OPPORTUNITIES_SIGNAL_PIN: "opportunities:signal:pin",
+  OPPORTUNITIES_SIGNAL_DISMISS: "opportunities:signal:dismiss",
+  OPPORTUNITIES_SIGNAL_RESTORE: "opportunities:signal:restore",
+  OPPORTUNITIES_RULE_LIST: "opportunities:rule:list",
+  OPPORTUNITIES_RULE_CREATE: "opportunities:rule:create",
+  OPPORTUNITIES_RULE_UPDATE: "opportunities:rule:update",
+  OPPORTUNITIES_RULE_TOGGLE: "opportunities:rule:toggle",
+  OPPORTUNITIES_RULE_DELETE: "opportunities:rule:delete",
+  OPPORTUNITIES_RULE_RUN_NOW: "opportunities:rule:runNow",
+  OPPORTUNITIES_RULE_RUN_LIST: "opportunities:ruleRun:list",
+  OPPORTUNITIES_RANK_PROFILE_LIST: "opportunities:rankProfile:list",
+  OPPORTUNITIES_RANK_PROFILE_UPSERT: "opportunities:rankProfile:upsert",
+  OPPORTUNITIES_RANK_RUN: "opportunities:rank:run",
+  OPPORTUNITIES_RANK_GET_LATEST: "opportunities:rank:getLatest",
+  OPPORTUNITIES_COMPARE_MULTI_RUN: "opportunities:compare:multiRun",
+  OPPORTUNITIES_COMPARE_DRAFT_GET: "opportunities:compare:draft:get",
+  OPPORTUNITIES_COMPARE_DRAFT_SAVE: "opportunities:compare:draft:save",
+  OPPORTUNITIES_COMPARE_SNAPSHOT_LIST: "opportunities:compareSnapshot:list",
+  OPPORTUNITIES_COMPARE_SNAPSHOT_SAVE: "opportunities:compareSnapshot:save",
+  OPPORTUNITIES_COMPARE_SNAPSHOT_DELETE: "opportunities:compareSnapshot:delete",
+  OPPORTUNITIES_COMPARE_SNAPSHOT_LOAD: "opportunities:compareSnapshot:load",
   INSIGHTS_FACT_LIST: "insights:fact:list",
   INSIGHTS_FACT_CREATE: "insights:fact:create",
   INSIGHTS_FACT_DELETE: "insights:fact:delete",

@@ -63,6 +63,12 @@ export type OtherTab =
 
 export type AnalysisTab = "portfolio" | "instrument" | "index" | "sector";
 export type InsightsTab = "generate" | "manage";
+export type OpportunitiesTab =
+  | "signals"
+  | "rules"
+  | "ranking"
+  | "multi-compare"
+  | "free-compare";
 
 export interface DashboardUiState {
   activeView: WorkspaceView;
@@ -70,6 +76,7 @@ export interface DashboardUiState {
   otherTab: OtherTab;
   analysisTab: AnalysisTab;
   insightsTab: InsightsTab;
+  opportunitiesTab: OpportunitiesTab;
   isNavCollapsed: boolean;
   error: string | null;
   notice: string | null;

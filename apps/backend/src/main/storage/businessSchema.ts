@@ -2,7 +2,7 @@ import { all, exec, execVolatile, get, run, transaction } from "./sqlite";
 import type { SqliteDatabase } from "./sqlite";
 import { backfillBaselineLedgerFromPositions } from "./ledgerBaseline";
 
-const CURRENT_SCHEMA_VERSION = 13;
+const CURRENT_SCHEMA_VERSION = 14;
 
 export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
   await execVolatile(db, "pragma foreign_keys = on;");
@@ -990,6 +990,236 @@ export async function ensureBusinessSchema(db: SqliteDatabase): Promise<void> {
     if (currentVersion < 13) {
       currentVersion = 13;
       await seedBuiltinValuationMethods(db);
+      await run(
+        db,
+        `insert or replace into app_meta (key, value) values (?, ?)`,
+        ["schema_version", String(currentVersion)]
+      );
+    }
+
+    if (currentVersion < 14) {
+      currentVersion = 14;
+
+      await exec(
+        db,
+        `
+          create table if not exists opportunity_rules (
+            id text primary key not null,
+            name text not null,
+            template text not null,
+            direction_strategy text not null,
+            params_json text not null,
+            score_formula text,
+            enabled integer not null default 1,
+            priority integer not null default 100,
+            scope_config_json text not null,
+            created_at integer not null,
+            updated_at integer not null,
+            check (template in ('valuation_gap', 'momentum_breakout', 'reversal_risk', 'liquidity_anomaly')),
+            check (direction_strategy in ('long', 'short_risk', 'both')),
+            check (enabled in (0, 1))
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_rules_priority
+          on opportunity_rules (enabled, priority, created_at);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists opportunity_rule_runs (
+            id text primary key not null,
+            rule_id text not null,
+            as_of_date text not null,
+            trigger text not null,
+            scope_mode text not null,
+            scope_summary text not null,
+            scanned_count integer not null default 0,
+            generated_count integer not null default 0,
+            degraded_reason text,
+            error_summary text,
+            started_at integer not null,
+            finished_at integer,
+            created_at integer not null,
+            updated_at integer not null,
+            foreign key (rule_id) references opportunity_rules(id) on delete cascade,
+            check (trigger in ('data_update', 'schedule', 'manual')),
+            check (scope_mode in ('full', 'degraded'))
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_rule_runs_rule_started
+          on opportunity_rule_runs (rule_id, started_at desc);
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_rule_runs_asof_trigger
+          on opportunity_rule_runs (as_of_date, trigger, started_at desc);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists opportunity_signals (
+            id text primary key not null,
+            as_of_date text not null,
+            rule_id text not null,
+            symbol text not null,
+            signal_type text not null,
+            direction text not null,
+            score real not null,
+            confidence real,
+            reasons_json text not null default '[]',
+            scope_summary text,
+            status text not null default 'active',
+            pinned integer not null default 0,
+            stale integer not null default 0,
+            expires_at integer not null,
+            dismissed_at integer,
+            created_at integer not null,
+            updated_at integer not null,
+            foreign key (rule_id) references opportunity_rules(id) on delete cascade,
+            check (signal_type in ('opportunity', 'risk')),
+            check (direction in ('long', 'short_risk')),
+            check (status in ('active', 'expired', 'dismissed')),
+            check (pinned in (0, 1)),
+            check (stale in (0, 1))
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create unique index if not exists opportunity_signals_asof_rule_symbol_direction
+          on opportunity_signals (as_of_date, rule_id, symbol, direction);
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_signals_status_rank
+          on opportunity_signals (status, pinned desc, score desc, as_of_date desc, updated_at desc);
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_signals_rule_status
+          on opportunity_signals (rule_id, status, updated_at desc);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists opportunity_rank_profiles (
+            id text primary key not null,
+            name text not null,
+            description text,
+            weights_json text not null,
+            hard_filters_json text not null,
+            range_days integer not null,
+            enabled integer not null default 1,
+            created_at integer not null,
+            updated_at integer not null,
+            check (enabled in (0, 1))
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_rank_profiles_enabled_updated
+          on opportunity_rank_profiles (enabled, updated_at desc);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists opportunity_rank_runs (
+            id text primary key not null,
+            profile_id text not null,
+            as_of_date text not null,
+            created_at integer not null,
+            foreign key (profile_id) references opportunity_rank_profiles(id) on delete cascade
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_rank_runs_profile_created
+          on opportunity_rank_runs (profile_id, created_at desc);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists opportunity_rank_items (
+            id text primary key not null,
+            run_id text not null,
+            symbol text not null,
+            total_score real not null,
+            factor_scores_json text not null,
+            risk_flags_json text not null,
+            previous_rank integer,
+            current_rank integer not null,
+            created_at integer not null,
+            updated_at integer not null,
+            foreign key (run_id) references opportunity_rank_runs(id) on delete cascade
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create unique index if not exists opportunity_rank_items_run_symbol
+          on opportunity_rank_items (run_id, symbol);
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_rank_items_run_rank
+          on opportunity_rank_items (run_id, current_rank asc);
+        `
+      );
+
+      await exec(
+        db,
+        `
+          create table if not exists opportunity_compare_snapshots (
+            id text primary key not null,
+            name text not null,
+            description text,
+            draft_json text not null,
+            created_at integer not null,
+            updated_at integer not null,
+            last_used_at integer not null
+          );
+        `
+      );
+      await exec(
+        db,
+        `
+          create index if not exists opportunity_compare_snapshots_updated
+          on opportunity_compare_snapshots (updated_at desc, created_at desc);
+        `
+      );
+
       await run(
         db,
         `insert or replace into app_meta (key, value) values (?, ?)`,
